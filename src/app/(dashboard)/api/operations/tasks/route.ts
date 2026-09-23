@@ -15,6 +15,10 @@ import {
 } from "@/lib/operations/create-task";
 
 import {
+  listTasks,
+} from "@/lib/operations/list-tasks";
+
+import {
   AssignmentOperationError,
 } from "@/lib/operations/assignment-transaction";
 
@@ -23,7 +27,112 @@ import {
   type TaskPriority,
 } from "@/types/task";
 
+
+
 export const runtime = "nodejs";
+
+
+/**
+ * Authoritative task retrieval API.
+ *
+ * GET /api/operations/tasks
+ *
+ * Read-only.
+ *
+ * Permanent revocation remains disabled.
+ */
+export async function GET() {
+  try {
+    /*
+     * PHASE 1:
+     * Authenticate the request.
+     */
+
+    const user =
+      await getCurrentUser();
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Authentication is required.",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    if (user.mustChangePassword) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "You must change your password before accessing tasks.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /*
+     * PHASE 2:
+     * Retrieve authoritative task data.
+     */
+
+    const result =
+      await listTasks(user);
+
+    /*
+     * PHASE 3:
+     * Return the authorized results.
+     */
+
+    return NextResponse.json(
+      {
+        success: true,
+        tasks: result.tasks,
+        total: result.total,
+      },
+      {
+        status: 200,
+      }
+    );
+  } catch (error) {
+    if (
+      error instanceof
+      AssignmentOperationError
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.message,
+        },
+        {
+          status: error.status,
+        }
+      );
+    }
+
+    console.error(
+      "Task retrieval failed:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Tasks could not be retrieved.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
 
 function isTaskPriority(
   value: unknown

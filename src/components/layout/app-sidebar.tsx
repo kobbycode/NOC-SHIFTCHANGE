@@ -26,6 +26,7 @@ const AVAILABLE_ROUTES = new Set([
   "/admin",
   "/admin/users",
   "/supervisor",
+  "/supervisor/tasks",
   "/technician",
 ]);
 export function AppSidebar({
