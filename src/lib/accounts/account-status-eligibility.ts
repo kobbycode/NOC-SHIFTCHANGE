@@ -1,0 +1,578 @@
+
+import "server-only";
+
+import type {
+  Transaction,
+} from "firebase-admin/firestore";
+
+import {
+  getOperationalCollections,
+} from "@/lib/operations/collections";
+
+import {
+  SHIFT_STATUSES,
+} from "@/types/shift";
+
+import {
+  TASK_STATUSES,
+  TASK_RESPONSIBILITY_STATUSES,
+  TASK_ACCEPTANCE_STATUSES,
+  type TaskStatus,
+} from "@/types/task";
+
+import {
+  isShiftStatus,
+} from "@/lib/operations/shift-transition";
+
+export class AccountOperationalError extends Error {
+  constructor(
+    message: string,
+    public readonly status = 409
+  ) {
+    super(message);
+
+    this.name = "AccountOperationalError";
+  }
+}
+
+function invalidData(): never {
+  throw new AccountOperationalError(
+    "The technician's operational records require administrator review."
+  );
+}
+
+const UNFINISHED_TASK_STATUSES =
+  new Set<TaskStatus>([
+    TASK_STATUSES.OPEN,
+    TASK_STATUSES.IN_PROGRESS,
+    TASK_STATUSES.PENDING_VERIFICATION,
+  ]);
+
+function isValidTaskStatus(
+  value: unknown
+): value is TaskStatus {
+  return (
+    typeof value === "string" &&
+    Object.values(TASK_STATUSES).some(
+      (status) => status === value
+    )
+  );
+}
+
+function validIdentifier(
+  value: unknown,
+  maxLength: number
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= maxLength &&
+    !value.includes("/")
+  );
+}
+
+/*
+ * Validate authoritative responsibility.
+ *
+ * Legacy assignments without an explicit
+ * responsibilityStatus remain active.
+ *
+ * Invalid responsibility metadata must
+ * never make account blocking eligible.
+ */
+
+function getAssignmentResponsibilityStatus(
+  assignment: Record<string, unknown>
+): "active" | "released" {
+  const status =
+    assignment.responsibilityStatus;
+
+  if (
+    status === undefined ||
+    status ===
+      TASK_RESPONSIBILITY_STATUSES.ACTIVE
+  ) {
+    if (
+      assignment.releasedAt != null ||
+      assignment.releasedBy != null ||
+      assignment.transferredTo != null
+    ) {
+      invalidData();
+    }
+
+    return TASK_RESPONSIBILITY_STATUSES.ACTIVE;
+  }
+
+  if (
+    status ===
+    TASK_RESPONSIBILITY_STATUSES.RELEASED
+  ) {
+    if (
+      typeof assignment.releasedAt !==
+        "string" ||
+      !assignment.releasedAt.trim() ||
+      !validIdentifier(
+        assignment.releasedBy,
+        128
+      ) ||
+      !validIdentifier(
+        assignment.transferredTo,
+        128
+      )
+    ) {
+      invalidData();
+    }
+
+    if (
+      assignment.transferredTo ===
+      assignment.technicianId
+    ) {
+      invalidData();
+    }
+
+    return TASK_RESPONSIBILITY_STATUSES.RELEASED;
+  }
+
+  invalidData();
+}
+
+export async function requireSafeAccountBlocking(
+  transaction: Transaction,
+  technicianUid: string
+): Promise<void> {
+  const {
+    shifts,
+    shiftMembers,
+    technicianSchedules,
+    tasks,
+    taskAssignments,
+  } = getOperationalCollections();
+
+  if (
+    !validIdentifier(
+      technicianUid,
+      128
+    )
+  ) {
+    throw new AccountOperationalError(
+      "Please select a valid technician.",
+      400
+    );
+  }
+
+  /*
+   * PHASE 1:
+   * Read authoritative operational
+   * references before any writes.
+   */
+
+  const scheduleRef =
+    technicianSchedules.doc(
+      technicianUid
+    );
+
+  const scheduleSnapshot =
+    await transaction.get(
+      scheduleRef
+    );
+
+  const membershipSnapshot =
+    await transaction.get(
+      shiftMembers.where(
+        "technicianId",
+        "==",
+        technicianUid
+      )
+    );
+
+  const primaryShiftSnapshot =
+    await transaction.get(
+      shifts.where(
+        "primaryTechnicianIds",
+        "array-contains",
+        technicianUid
+      )
+    );
+
+  const assignmentSnapshot =
+    await transaction.get(
+      taskAssignments.where(
+        "technicianId",
+        "==",
+        technicianUid
+      )
+    );
+
+  /*
+   * PHASE 2:
+   * Validate scheduling information.
+   */
+
+  const schedule =
+    scheduleSnapshot.data();
+
+  if (
+    scheduleSnapshot.exists &&
+    (
+      !schedule ||
+      schedule.technicianUid !==
+        technicianUid ||
+      !Array.isArray(
+        schedule.entries
+      )
+    )
+  ) {
+    invalidData();
+  }
+
+  const entries: unknown[] =
+    scheduleSnapshot.exists
+      ? schedule!.entries
+      : [];
+
+  const shiftIds =
+    new Set<string>();
+
+  for (const entry of entries) {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      Array.isArray(entry)
+    ) {
+      invalidData();
+    }
+
+    const record =
+      entry as Record<
+        string,
+        unknown
+      >;
+
+    if (
+      !validIdentifier(
+        record.shiftId,
+        512
+      ) ||
+      typeof record.scheduledStart !==
+        "string" ||
+      typeof record.scheduledEnd !==
+        "string" ||
+      typeof record.status !==
+        "string"
+    ) {
+      invalidData();
+    }
+
+    if (
+      record.status !==
+        SHIFT_STATUSES.SCHEDULED &&
+      record.status !==
+        SHIFT_STATUSES.ACTIVE &&
+      record.status !==
+        SHIFT_STATUSES.HANDOVER_PENDING
+    ) {
+      invalidData();
+    }
+
+    if (
+      shiftIds.has(
+        record.shiftId
+      )
+    ) {
+      invalidData();
+    }
+
+    shiftIds.add(
+      record.shiftId
+    );
+  }
+
+  /*
+   * PHASE 3:
+   * Include authoritative memberships.
+   */
+
+  for (
+    const document of
+    membershipSnapshot.docs
+  ) {
+    const member =
+      document.data();
+
+    if (
+      !validIdentifier(
+        member.shiftId,
+        512
+      )
+    ) {
+      invalidData();
+    }
+
+    if (
+      member.leftAt === null
+    ) {
+      shiftIds.add(
+        member.shiftId
+      );
+    } else if (
+      member.leftAt === undefined
+    ) {
+      invalidData();
+    }
+  }
+
+  /*
+   * Include shifts that directly
+   * reference this technician as
+   * a primary member.
+   */
+
+  for (
+    const document of
+    primaryShiftSnapshot.docs
+  ) {
+    shiftIds.add(
+      document.id
+    );
+  }
+
+  /*
+   * PHASE 4:
+   * Validate authoritative shifts.
+   */
+
+  const shiftSnapshots =
+    await Promise.all(
+      [...shiftIds].map(
+        (shiftId) =>
+          transaction.get(
+            shifts.doc(shiftId)
+          )
+      )
+    );
+
+  const shiftById =
+    new Map<
+      string,
+      Record<string, unknown>
+    >();
+
+  for (
+    const snapshot of
+    shiftSnapshots
+  ) {
+    if (
+      !snapshot.exists
+    ) {
+      invalidData();
+    }
+
+    const shift =
+      snapshot.data();
+
+    if (
+      !shift ||
+      !isShiftStatus(
+        shift.status
+      )
+    ) {
+      invalidData();
+    }
+
+    shiftById.set(
+      snapshot.id,
+      shift
+    );
+
+    /*
+     * Preserve the existing protection
+     * against blocking technicians
+     * with unfinished shift duties.
+     */
+
+    if (
+      shift.status !==
+      SHIFT_STATUSES.COMPLETED
+    ) {
+      throw new AccountOperationalError(
+        "This technician has a scheduled or active shift, or an unfinished handover. Complete or reassign these duties before blocking the account."
+      );
+    }
+  }
+
+  /*
+   * Completed shifts must not remain
+   * in active scheduling entries.
+   */
+
+  for (
+    const entry of
+    entries
+  ) {
+    const record =
+      entry as {
+        shiftId: string;
+      };
+
+    const shift =
+      shiftById.get(
+        record.shiftId
+      );
+
+    if (
+      !shift ||
+      shift.status ===
+        SHIFT_STATUSES.COMPLETED
+    ) {
+      invalidData();
+    }
+  }
+
+  /*
+   * PHASE 5:
+   * Validate authoritative assignments.
+   *
+   * Released assignments remain in
+   * history but no longer represent
+   * active operational responsibility.
+   */
+
+  const assignedTaskIds =
+    new Set<string>();
+
+  const activeTaskIds =
+    new Set<string>();
+
+  for (
+    const document of
+    assignmentSnapshot.docs
+  ) {
+    const assignment =
+      document.data();
+
+    if (
+      assignment.id !==
+        document.id ||
+      assignment.technicianId !==
+        technicianUid ||
+      !validIdentifier(
+        assignment.taskId,
+        512
+      ) ||
+      ![
+        "lead",
+        "support",
+      ].includes(
+        assignment.responsibility
+      ) ||
+      !Object.values(
+        TASK_ACCEPTANCE_STATUSES
+      ).includes(
+        assignment.acceptanceStatus
+      )
+    ) {
+      invalidData();
+    }
+
+    /*
+     * Multiple records for the same
+     * technician and task require
+     * administrator review.
+     */
+
+    if (
+      assignedTaskIds.has(
+        assignment.taskId
+      )
+    ) {
+      invalidData();
+    }
+
+    assignedTaskIds.add(
+      assignment.taskId
+    );
+
+    const responsibilityStatus =
+      getAssignmentResponsibilityStatus(
+        assignment
+      );
+
+    if (
+      responsibilityStatus ===
+      TASK_RESPONSIBILITY_STATUSES.ACTIVE
+    ) {
+      activeTaskIds.add(
+        assignment.taskId
+      );
+    }
+  }
+
+  /*
+   * PHASE 6:
+   * Read every assigned task.
+   *
+   * Even released assignments must
+   * reference existing, valid tasks.
+   */
+
+  const taskSnapshots =
+    await Promise.all(
+      [...assignedTaskIds].map(
+        (taskId) =>
+          transaction.get(
+            tasks.doc(taskId)
+          )
+      )
+    );
+
+  for (
+    const snapshot of
+    taskSnapshots
+  ) {
+    if (
+      !snapshot.exists
+    ) {
+      invalidData();
+    }
+
+    const task =
+      snapshot.data();
+
+    if (
+      !task ||
+      !isValidTaskStatus(
+        task.status
+      )
+    ) {
+      invalidData();
+    }
+
+    /*
+     * Only active responsibility for
+     * an unfinished task prevents
+     * account blocking.
+     */
+
+    if (
+      activeTaskIds.has(
+        snapshot.id
+      ) &&
+      UNFINISHED_TASK_STATUSES.has(
+        task.status
+      )
+    ) {
+      throw new AccountOperationalError(
+        "This technician has unfinished task assignments. Complete or reassign these tasks before blocking the account."
+      );
+    }
+  }
+
+  /*
+   * All authoritative scheduling,
+   * shift and responsibility checks
+   * have passed.
+   *
+   * The calling account-status
+   * transaction may continue.
+   */
+}

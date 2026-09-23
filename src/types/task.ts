@@ -8,7 +8,8 @@ export const TASK_STATUSES = {
 } as const;
 
 export type TaskStatus =
-  (typeof TASK_STATUSES)[keyof typeof TASK_STATUSES];
+  (typeof TASK_STATUSES)[keyof
+    typeof TASK_STATUSES];
 
 export const TASK_ACCEPTANCE_STATUSES = {
   PENDING: "pending",
@@ -17,7 +18,8 @@ export const TASK_ACCEPTANCE_STATUSES = {
 } as const;
 
 export type TaskAcceptanceStatus =
-  (typeof TASK_ACCEPTANCE_STATUSES)[keyof typeof TASK_ACCEPTANCE_STATUSES];
+  (typeof TASK_ACCEPTANCE_STATUSES)[keyof
+    typeof TASK_ACCEPTANCE_STATUSES];
 
 export const TASK_PRIORITIES = {
   LOW: "low",
@@ -27,7 +29,17 @@ export const TASK_PRIORITIES = {
 } as const;
 
 export type TaskPriority =
-  (typeof TASK_PRIORITIES)[keyof typeof TASK_PRIORITIES];
+  (typeof TASK_PRIORITIES)[keyof
+    typeof TASK_PRIORITIES];
+
+export const TASK_RESPONSIBILITY_STATUSES = {
+  ACTIVE: "active",
+  RELEASED: "released",
+} as const;
+
+export type TaskResponsibilityStatus =
+  (typeof TASK_RESPONSIBILITY_STATUSES)[keyof
+    typeof TASK_RESPONSIBILITY_STATUSES];
 
 export interface Task {
   id: string;
@@ -62,4 +74,19 @@ export interface TaskAssignment {
   rejectionReason: string | null;
 
   assignedAt: string;
+
+  /*
+   * Optional for legacy assignments.
+   * Missing responsibilityStatus
+   * represents active responsibility.
+   */
+
+  responsibilityStatus?:
+    TaskResponsibilityStatus;
+
+  releasedAt?: string | null;
+
+  releasedBy?: string | null;
+
+  transferredTo?: string | null;
 }

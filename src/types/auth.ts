@@ -1,32 +1,35 @@
 
-export const USER_ROLES = {
-  ADMIN: "admin",
-  SUPERVISOR: "supervisor",
-  TECHNICIAN: "technician",
-} as const;
-
 export type UserRole =
-  (typeof USER_ROLES)[keyof typeof USER_ROLES];
+  | "admin"
+  | "supervisor"
+  | "technician";
 
-export const ACCOUNT_STATUSES = {
-  ACTIVE: "active",
-  BLOCKED: "blocked",
-  REVOKED: "revoked",
-  DELETED: "deleted",
-} as const;
-
-export type AccountStatus =
-  (typeof ACCOUNT_STATUSES)[keyof typeof ACCOUNT_STATUSES];
+export type UserStatus =
+  | "active"
+  | "blocked"
+  | "revoked";
 
 export interface AppUser {
-  id: string;
+  uid: string;
   fullName: string;
   email: string;
   role: UserRole;
-  status: AccountStatus;
-
+  status: UserStatus;
   mustChangePassword: boolean;
+}
 
-  createdAt: string;
-  updatedAt: string;
+export const ROLE_HOME: Record<UserRole, string> = {
+  admin: "/admin",
+  supervisor: "/supervisor",
+  technician: "/technician",
+};
+
+export function isUserRole(
+  value: unknown
+): value is UserRole {
+  return (
+    value === "admin" ||
+    value === "supervisor" ||
+    value === "technician"
+  );
 }

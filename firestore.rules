@@ -1,0 +1,15 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // All direct client database access is denied.
+    // Trusted server-side Firebase Admin SDK operations
+    // are authorized through Google Cloud IAM instead.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

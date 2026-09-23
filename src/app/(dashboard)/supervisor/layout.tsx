@@ -1,18 +1,12 @@
 
-import type { ReactNode } from "react";
+import { requireUser } from "@/lib/auth/session";
 
-import {
-  DashboardShell,
-} from "@/components/layout/dashboard-shell";
-
-export default function SupervisorLayout({
+export default async function SupervisorLayout({
   children,
 }: {
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
-  return (
-    <DashboardShell role="supervisor">
-      {children}
-    </DashboardShell>
-  );
+  await requireUser(["supervisor"]);
+
+  return <>{children}</>;
 }

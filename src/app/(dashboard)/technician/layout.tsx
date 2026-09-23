@@ -1,18 +1,12 @@
 
-import type { ReactNode } from "react";
+import { requireUser } from "@/lib/auth/session";
 
-import {
-  DashboardShell,
-} from "@/components/layout/dashboard-shell";
-
-export default function TechnicianLayout({
+export default async function TechnicianLayout({
   children,
 }: {
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
-  return (
-    <DashboardShell role="technician">
-      {children}
-    </DashboardShell>
-  );
+  await requireUser(["technician"]);
+
+  return <>{children}</>;
 }

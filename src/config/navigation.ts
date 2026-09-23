@@ -59,6 +59,8 @@ export const ADMIN_NAVIGATION: NavigationItem[] = [
     href: "/admin/settings",
     icon: Settings,
   },
+
+  
 ];
 
 export const SUPERVISOR_NAVIGATION: NavigationItem[] = [

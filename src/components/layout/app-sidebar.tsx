@@ -24,10 +24,10 @@ interface AppSidebarProps {
 
 const AVAILABLE_ROUTES = new Set([
   "/admin",
+  "/admin/users",
   "/supervisor",
   "/technician",
 ]);
-
 export function AppSidebar({
   role,
   open,
