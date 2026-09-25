@@ -24,7 +24,6 @@ import {
 
 export const runtime = "nodejs";
 
-type AccountAction = "block" | "unblock";
 
 type RouteContext = {
   params: Promise<{

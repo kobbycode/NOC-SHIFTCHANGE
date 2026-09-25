@@ -1,9 +1,6 @@
 
 import "server-only";
 import {
-  assertShiftActivationWindow,
-} from "./shift-activation-window";
-import {
   FieldValue,
 } from "firebase-admin/firestore";
 

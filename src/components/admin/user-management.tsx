@@ -112,9 +112,54 @@ export function UserManagement() {
     }
   }, []);
 
-  useEffect(() => { 
-    void loadUsers();
-  }, [loadUsers]);
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadInitialUsers() {
+      try {
+        const response = await fetch("/api/admin/users", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        const result = await response.json();
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Unable to load user accounts.",
+          );
+        }
+
+        setUsers(result.users);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load user accounts.",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadInitialUsers();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
