@@ -195,56 +195,17 @@ export function SupervisorTaskWorkspace() {
 
   /*
    * Initial authoritative retrieval.
+   *
+   * Use the shared retrieval function instead of maintaining a
+   * second retrieval implementation here.
+   *
+   * This is safe when React re-runs effects during development:
+   * loadTasks() owns the retrieval lock and always releases the
+   * loading state in its finally block.
    */
-
   useEffect(() => {
-    let active = true;
-
-    async function loadInitialTasks() {
-      if (retrievalInProgress.current) {
-        return;
-      }
-
-      retrievalInProgress.current = true;
-
-      try {
-        const result = await getTasks();
-
-        if (!active) {
-          return;
-        }
-
-        setTasks(result.tasks);
-      } catch (caughtError) {
-        if (!active) {
-          return;
-        }
-
-        setTasks([]);
-
-        if (caughtError instanceof TaskApiError) {
-          setError(caughtError.message);
-        } else {
-          setError(
-            "Unable to retrieve operational tasks.",
-          );
-        }
-      } finally {
-        retrievalInProgress.current = false;
-
-        if (active) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      }
-    }
-
-    void loadInitialTasks();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    void loadTasks();
+  }, [loadTasks]);
 
   /*
    * Complete a task after verification.
