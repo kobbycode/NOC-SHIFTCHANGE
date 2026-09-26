@@ -1,13 +1,20 @@
-
 "use client";
 
+import { useState } from "react";
+
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 
 import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
+
+import {
+  LoaderCircle,
+  LockKeyhole,
+  LogOut,
   RadioTower,
   X,
-  LockKeyhole,
 } from "lucide-react";
 
 import type { UserRole } from "@/types/auth";
@@ -30,12 +37,20 @@ const AVAILABLE_ROUTES = new Set([
   "/technician",
   "/technician/tasks",
 ]);
+
 export function AppSidebar({
   role,
   open,
   onClose,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const [loggingOut, setLoggingOut] =
+    useState(false);
+
+  const [logoutError, setLogoutError] =
+    useState<string | null>(null);
 
   const navigation = ROLE_NAVIGATION[role];
 
@@ -44,6 +59,43 @@ export function AppSidebar({
     supervisor: "Supervisor",
     technician: "Technician",
   }[role];
+
+  async function handleLogout() {
+    if (loggingOut) {
+      return;
+    }
+
+    setLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      const response = await fetch(
+        "/api/auth/logout",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Unable to end the current session."
+        );
+      }
+
+      onClose();
+
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setLogoutError(
+        "Unable to log out. Please try again."
+      );
+
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <>
@@ -218,7 +270,55 @@ export function AppSidebar({
             p-5 dark:border-slate-800
           "
         >
-          <p className="text-xs text-slate-500">
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="
+              flex w-full items-center
+              justify-center gap-2
+              rounded-xl border
+              border-slate-200 px-4 py-2.5
+              text-sm font-medium
+              text-slate-700
+              transition-colors
+              hover:bg-slate-100
+              disabled:cursor-not-allowed
+              disabled:opacity-60
+              dark:border-slate-700
+              dark:text-slate-200
+              dark:hover:bg-slate-800
+            "
+          >
+            {loggingOut ? (
+              <>
+                <LoaderCircle
+                  size={17}
+                  className="animate-spin"
+                />
+                Logging out...
+              </>
+            ) : (
+              <>
+                <LogOut size={17} />
+                Log out
+              </>
+            )}
+          </button>
+
+          {logoutError && (
+            <p
+              role="alert"
+              className="
+                mt-2 text-xs text-red-600
+                dark:text-red-400
+              "
+            >
+              {logoutError}
+            </p>
+          )}
+
+          <p className="mt-4 text-xs text-slate-500">
             ShiftChange 2.0
           </p>
 
