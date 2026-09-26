@@ -21,6 +21,7 @@ import {
   getTasks,
   completeOperationalTask,
   returnOperationalTask,
+  cancelOperationalTask,
   TaskApiError,
 } from "@/lib/tasks/task-api";
 
@@ -110,6 +111,35 @@ export function SupervisorTaskWorkspace() {
   const [
     returnError,
     setReturnError,
+  ] = useState<string | null>(null);
+
+  /*
+   * Supervisor cancellation state.
+   */
+
+  const [
+    cancellingTaskId,
+    setCancellingTaskId,
+  ] = useState<string | null>(null);
+
+  const [
+    cancellationFormTaskId,
+    setCancellationFormTaskId,
+  ] = useState<string | null>(null);
+
+  const [
+    cancellationReason,
+    setCancellationReason,
+  ] = useState("");
+
+  const [
+    cancellationMessage,
+    setCancellationMessage,
+  ] = useState<string | null>(null);
+
+  const [
+    cancellationError,
+    setCancellationError,
   ] = useState<string | null>(null);
 
   /*
@@ -536,6 +566,175 @@ export function SupervisorTaskWorkspace() {
     );
 
   /*
+   * Open the Cancel Task form.
+   *
+   * Opening the form does not perform
+   * a lifecycle transition.
+   */
+
+  const handleOpenCancellationForm =
+    useCallback(
+      (
+        taskId: string,
+      ) => {
+        if (
+          lifecycleInProgress.current ||
+          retrievalInProgress.current
+        ) {
+          return;
+        }
+
+        setCancellationFormTaskId(taskId);
+
+        setCancellationReason("");
+
+        setCancellationError(null);
+        setCancellationMessage(null);
+      },
+      [],
+    );
+
+  /*
+   * Close the Cancel Task form.
+   */
+
+  const handleCloseCancellationForm =
+    useCallback(() => {
+      if (
+        lifecycleInProgress.current ||
+        retrievalInProgress.current
+      ) {
+        return;
+      }
+
+      setCancellationFormTaskId(null);
+
+      setCancellationReason("");
+
+      setCancellationError(null);
+    }, []);
+
+  /*
+   * Cancel an operational task.
+   *
+   * The backend remains authoritative
+   * for role, account, assignment,
+   * responsibility, shift, and lifecycle
+   * validation.
+   */
+
+  const handleCancelTask =
+    useCallback(
+      async (
+        taskId: string,
+      ) => {
+        if (
+          lifecycleInProgress.current ||
+          retrievalInProgress.current
+        ) {
+          return;
+        }
+
+        if (
+          cancellationFormTaskId !== taskId
+        ) {
+          return;
+        }
+
+        const cleanReason =
+          cancellationReason.trim();
+
+        if (cleanReason.length < 10) {
+          setCancellationError(
+            "Please provide a cancellation reason of at least 10 characters.",
+          );
+
+          return;
+        }
+
+        if (cleanReason.length > 1000) {
+          setCancellationError(
+            "The cancellation reason cannot exceed 1000 characters.",
+          );
+
+          return;
+        }
+
+        const confirmed =
+          window.confirm(
+            "Cancel this task?\n\n" +
+              "This is a terminal task lifecycle action. The task will be marked as cancelled and cannot continue through the normal work or verification lifecycle.\n\n" +
+              "Cancellation reason:\n" +
+              cleanReason,
+          );
+
+        if (!confirmed) {
+          return;
+        }
+
+        lifecycleInProgress.current =
+          true;
+
+        setCancellingTaskId(taskId);
+
+        setCancellationError(null);
+        setCancellationMessage(null);
+
+        setCompletionError(null);
+        setCompletionMessage(null);
+
+        setReturnError(null);
+        setReturnMessage(null);
+
+        try {
+          await cancelOperationalTask(
+            taskId,
+            cleanReason,
+          );
+
+          setCancellationFormTaskId(null);
+
+          setCancellationReason("");
+
+          const refreshed =
+            await loadTasks(true);
+
+          if (refreshed) {
+            setCancellationMessage(
+              "Task cancelled successfully.",
+            );
+          } else {
+            setCancellationMessage(
+              "The cancellation request succeeded. Refresh the task list to verify its updated state.",
+            );
+          }
+        } catch (caughtError) {
+          setCancellationError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : "The task could not be cancelled.",
+          );
+
+          setCancellationFormTaskId(null);
+
+          setCancellationReason("");
+
+          await loadTasks(true);
+        } finally {
+          lifecycleInProgress.current =
+            false;
+
+          setCancellingTaskId(null);
+        }
+      },
+      [
+        cancellationFormTaskId,
+        cancellationReason,
+        loadTasks,
+      ],
+    );
+
+  /*
    * Refresh the workspace.
    */
 
@@ -558,6 +757,13 @@ export function SupervisorTaskWorkspace() {
 
       setReturnReason("");
 
+      setCancellationMessage(null);
+      setCancellationError(null);
+
+      setCancellationFormTaskId(null);
+
+      setCancellationReason("");
+
       void loadTasks(true);
     }, [loadTasks]);
 
@@ -568,6 +774,7 @@ export function SupervisorTaskWorkspace() {
   const actionBusy =
     completingTaskId !== null ||
     returningTaskId !== null ||
+    cancellingTaskId !== null ||
     refreshing ||
     loading;
 
@@ -922,6 +1129,62 @@ export function SupervisorTaskWorkspace() {
         </div>
       )}
 
+      {/* Cancellation success */}
+
+      {cancellationMessage && (
+        <div
+          role="status"
+          className="
+            flex items-start gap-3
+            rounded-xl
+            border border-green-200
+            bg-green-50 p-4
+            text-sm text-green-700
+            dark:border-green-900
+            dark:bg-green-950
+            dark:text-green-300
+          "
+        >
+          <CheckCircle2
+            size={20}
+            className="shrink-0"
+            aria-hidden="true"
+          />
+
+          <p>
+            {cancellationMessage}
+          </p>
+        </div>
+      )}
+
+      {/* Cancellation errors */}
+
+      {cancellationError && (
+        <div
+          role="alert"
+          className="
+            flex items-start gap-3
+            rounded-xl
+            border border-red-200
+            bg-red-50 p-4
+            text-sm text-red-700
+            dark:border-red-900
+            dark:bg-red-950
+            dark:text-red-300
+          "
+        >
+          <AlertCircle
+            size={20}
+            className="shrink-0"
+            aria-hidden="true"
+          />
+
+          <p>
+            {cancellationError}
+          </p>
+        </div>
+      )}
+
       {/* Task summary */}
 
       {!error && (
@@ -1051,6 +1314,17 @@ export function SupervisorTaskWorkspace() {
 
               const returnFormOpen =
                 returnFormTaskId ===
+                task.id;
+
+              const canCancel =
+                task.status === "open" ||
+                task.status ===
+                  "in_progress" ||
+                task.status ===
+                  "pending_verification";
+
+              const cancellationFormOpen =
+                cancellationFormTaskId ===
                 task.id;
 
               return (
@@ -1418,6 +1692,255 @@ export function SupervisorTaskWorkspace() {
 
                                     Confirm Return
                                   </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Supervisor cancellation */}
+
+                    {canCancel && (
+                      <div
+                        className="
+                          space-y-4
+                          border-t
+                          border-slate-200
+                          pt-4
+                          dark:border-slate-800
+                        "
+                      >
+                        {!cancellationFormOpen && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleOpenCancellationForm(
+                                task.id,
+                              )
+                            }
+                            disabled={
+                              actionBusy ||
+                              returnFormTaskId !==
+                                null ||
+                              cancellationFormTaskId !==
+                                null
+                            }
+                            className="
+                              inline-flex w-full
+                              items-center
+                              justify-center
+                              gap-2
+                              rounded-xl
+                              border border-red-300
+                              bg-red-50
+                              px-4 py-3
+                              text-sm
+                              font-semibold
+                              text-red-700
+                              transition-colors
+                              hover:bg-red-100
+                              disabled:cursor-not-allowed
+                              disabled:opacity-50
+                              dark:border-red-900
+                              dark:bg-red-950
+                              dark:text-red-300
+                            "
+                          >
+                            Cancel Task
+                          </button>
+                        )}
+
+                        {cancellationFormOpen && (
+                          <div
+                            className="
+                              space-y-4
+                              rounded-xl
+                              border border-red-200
+                              bg-red-50
+                              p-4
+                              dark:border-red-900
+                              dark:bg-red-950
+                            "
+                          >
+                            <div>
+                              <p
+                                className="
+                                  text-sm
+                                  font-semibold
+                                  text-red-900
+                                  dark:text-red-200
+                                "
+                              >
+                                Cancel Task
+                              </p>
+
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  text-red-800
+                                  dark:text-red-300
+                                "
+                              >
+                                Provide the operational
+                                reason for cancelling this
+                                task. Cancellation is a
+                                terminal lifecycle action.
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label
+                                htmlFor={`cancellation-reason-${task.id}`}
+                                className="
+                                  block
+                                  text-sm
+                                  font-medium
+                                  text-slate-900
+                                  dark:text-white
+                                "
+                              >
+                                Cancellation Reason
+                              </label>
+
+                              <textarea
+                                id={`cancellation-reason-${task.id}`}
+                                value={
+                                  cancellationReason
+                                }
+                                onChange={(
+                                  event,
+                                ) => {
+                                  setCancellationReason(
+                                    event.target.value,
+                                  );
+
+                                  setCancellationError(
+                                    null,
+                                  );
+                                }}
+                                maxLength={1000}
+                                rows={4}
+                                disabled={actionBusy}
+                                placeholder="Explain why this task is being cancelled..."
+                                className="
+                                  w-full
+                                  rounded-xl
+                                  border
+                                  border-slate-300
+                                  bg-white
+                                  px-4 py-3
+                                  text-sm
+                                  text-slate-900
+                                  outline-none
+                                  focus:border-red-500
+                                  focus:ring-2
+                                  focus:ring-red-500/20
+                                  disabled:cursor-not-allowed
+                                  disabled:opacity-50
+                                  dark:border-slate-700
+                                  dark:bg-slate-900
+                                  dark:text-white
+                                "
+                              />
+
+                              <p
+                                className="
+                                  text-xs
+                                  text-slate-500
+                                  dark:text-slate-400
+                                "
+                              >
+                                Minimum 10 characters.
+                                Maximum 1,000
+                                characters.{" "}
+                                {
+                                  cancellationReason.trim()
+                                    .length
+                                }
+                                /1000
+                              </p>
+                            </div>
+
+                            <div
+                              className="
+                                flex flex-wrap
+                                gap-3
+                              "
+                            >
+                              <button
+                                type="button"
+                                onClick={
+                                  handleCloseCancellationForm
+                                }
+                                disabled={actionBusy}
+                                className="
+                                  flex-1
+                                  rounded-xl
+                                  border
+                                  border-slate-300
+                                  bg-white
+                                  px-4 py-3
+                                  text-sm
+                                  font-semibold
+                                  text-slate-700
+                                  hover:bg-slate-100
+                                  disabled:cursor-not-allowed
+                                  disabled:opacity-50
+                                  dark:border-slate-700
+                                  dark:bg-slate-900
+                                  dark:text-slate-200
+                                "
+                              >
+                                Keep Task
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleCancelTask(
+                                    task.id,
+                                  )
+                                }
+                                disabled={
+                                  actionBusy ||
+                                  cancellationReason.trim()
+                                    .length < 10 ||
+                                  cancellationReason.trim()
+                                    .length > 1000
+                                }
+                                className="
+                                  inline-flex
+                                  flex-1
+                                  items-center
+                                  justify-center
+                                  gap-2
+                                  rounded-xl
+                                  bg-red-600
+                                  px-4 py-3
+                                  text-sm
+                                  font-semibold
+                                  text-white
+                                  hover:bg-red-700
+                                  disabled:cursor-not-allowed
+                                  disabled:opacity-50
+                                "
+                              >
+                                {cancellingTaskId ===
+                                task.id ? (
+                                  <>
+                                    <Loader2
+                                      size={18}
+                                      className="animate-spin"
+                                      aria-hidden="true"
+                                    />
+
+                                    Cancelling...
+                                  </>
+                                ) : (
+                                  "Confirm Cancellation"
                                 )}
                               </button>
                             </div>

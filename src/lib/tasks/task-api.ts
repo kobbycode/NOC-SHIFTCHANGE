@@ -731,3 +731,158 @@ export async function returnOperationalTask(
 
   return;
 }
+/*
+ * Cancel an operational task.
+ *
+ * Cancellation is an authoritative manager action.
+ * The server independently validates:
+ *
+ * - Authenticated administrator or supervisor
+ * - Account eligibility
+ * - Current task status
+ * - Assignment and responsibility integrity
+ * - Shift-linked task restrictions
+ * - Required cancellation reason
+ *
+ * Account-blocking safeguards remain active.
+ *
+ * Permanent account revocation remains disabled.
+ */
+
+export async function cancelOperationalTask(
+  taskId: string,
+  reason: string,
+): Promise<void> {
+  /*
+   * PHASE 1:
+   * Validate the task identifier.
+   */
+
+  if (
+    !taskId ||
+    taskId.trim().length === 0 ||
+    taskId.length > 512 ||
+    taskId.includes("/")
+  ) {
+    throw new TaskApiError(
+      "Please select a valid task.",
+      400,
+    );
+  }
+
+  /*
+   * PHASE 2:
+   * Validate the cancellation reason.
+   */
+
+  if (typeof reason !== "string") {
+    throw new TaskApiError(
+      "Please provide a valid cancellation reason.",
+      400,
+    );
+  }
+
+  const cleanReason = reason.trim();
+
+  if (cleanReason.length < 10) {
+    throw new TaskApiError(
+      "Please provide a cancellation reason of at least 10 characters.",
+      400,
+    );
+  }
+
+  if (cleanReason.length > 1000) {
+    throw new TaskApiError(
+      "The cancellation reason cannot exceed 1000 characters.",
+      400,
+    );
+  }
+
+  /*
+   * PHASE 3:
+   * Request the authoritative cancellation.
+   *
+   * The authenticated actor is determined
+   * by the server-side session.
+   *
+   * No actor UID, role, or account status
+   * is supplied by the client.
+   */
+
+  const response = await fetch(
+    `/api/operations/tasks/${encodeURIComponent(taskId)}/lifecycle`,
+    {
+      method: "POST",
+
+      credentials: "same-origin",
+
+      cache: "no-store",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify({
+        action: "cancel",
+        reason: cleanReason,
+      }),
+    },
+  );
+
+  /*
+   * PHASE 4:
+   * Read and validate the authoritative response.
+   */
+
+  const data = await readApiResponse(response);
+
+  const result = requireSuccessfulResponse<{
+    success: boolean;
+
+    message?: string;
+
+    result?: {
+      taskId: string;
+
+      previousStatus: string;
+
+      status: string;
+
+      performedBy: string;
+
+      updatedAt: string;
+    };
+  }>(response, data);
+
+  /*
+   * Cancellation may authoritatively originate
+   * from open, in_progress, or
+   * pending_verification.
+   */
+
+  const validPreviousStatuses = [
+    "open",
+    "in_progress",
+    "pending_verification",
+  ];
+
+  if (
+    result.success !== true ||
+    result.result?.taskId !== taskId ||
+    !validPreviousStatuses.includes(
+      result.result?.previousStatus ?? "",
+    ) ||
+    result.result?.status !== "cancelled" ||
+    typeof result.result.performedBy !== "string" ||
+    result.result.performedBy.trim().length === 0 ||
+    typeof result.result.updatedAt !== "string" ||
+    Number.isNaN(
+      Date.parse(result.result.updatedAt),
+    )
+  ) {
+    throw new TaskApiError(
+      "The task-cancellation response is invalid. Refresh the task list to verify its current state.",
+      response.status,
+    );
+  }
+}
