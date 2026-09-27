@@ -13,6 +13,10 @@ import {
 } from "@/lib/operations/create-shift-member";
 
 import {
+  listShiftMembers,
+} from "@/lib/operations/list-shift-members";
+
+import {
   AssignmentOperationError,
 } from "@/lib/operations/assignment-transaction";
 
@@ -59,6 +63,103 @@ function isValidId(
     value !== ".." &&
     !value.includes("/")
   );
+}
+
+/**
+ * Authoritative shift-membership retrieval.
+ *
+ * GET /api/operations/shifts/[shiftId]/members
+ *
+ * Read-only.
+ *
+ * Permanent revocation remains disabled.
+ */
+export async function GET(
+  _request: NextRequest,
+  context: RouteContext
+) {
+  try {
+    /*
+     * PHASE 1:
+     * Authenticate the current user.
+     */
+    const actor = await getCurrentUser();
+
+    if (!actor) {
+      return errorResponse(
+        "Authentication is required.",
+        401
+      );
+    }
+
+    if (actor.mustChangePassword) {
+      return errorResponse(
+        "You must change your password before accessing shift memberships.",
+        403
+      );
+    }
+
+    /*
+     * PHASE 2:
+     * Validate the route identifier.
+     */
+    const { shiftId } =
+      await context.params;
+
+    if (!isValidId(shiftId, 512)) {
+      return errorResponse(
+        "Please provide a valid shift identifier.",
+        400
+      );
+    }
+
+    /*
+     * PHASE 3:
+     * Retrieve authoritative membership
+     * data. Account state and role are
+     * independently revalidated by the
+     * service.
+     */
+    const result =
+      await listShiftMembers(
+        actor,
+        shiftId
+      );
+
+    return NextResponse.json(
+      {
+        success: true,
+        members: result.members,
+        total: result.total,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  } catch (error) {
+    if (
+      error instanceof
+      AssignmentOperationError
+    ) {
+      return errorResponse(
+        error.message,
+        error.status
+      );
+    }
+
+    console.error(
+      "Shift membership retrieval failed:",
+      error
+    );
+
+    return errorResponse(
+      "Shift memberships could not be retrieved.",
+      500
+    );
+  }
 }
 
 export async function POST(

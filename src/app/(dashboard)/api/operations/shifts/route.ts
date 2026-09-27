@@ -13,6 +13,10 @@ import {
 } from "@/lib/operations/create-shift";
 
 import {
+  listShifts,
+} from "@/lib/operations/list-shifts";
+
+import {
   AssignmentOperationError,
 } from "@/lib/operations/assignment-transaction";
 
@@ -38,6 +42,87 @@ function errorResponse(
       },
     }
   );
+}
+
+/**
+ * Authoritative shift retrieval API.
+ *
+ * GET /api/operations/shifts
+ *
+ * Read-only.
+ *
+ * Permanent revocation remains disabled.
+ */
+export async function GET() {
+  try {
+    /*
+     * PHASE 1:
+     * Authenticate the current user.
+     */
+    const actor = await getCurrentUser();
+
+    if (!actor) {
+      return errorResponse(
+        "Authentication is required.",
+        401
+      );
+    }
+
+    if (actor.mustChangePassword) {
+      return errorResponse(
+        "You must change your password before accessing shifts.",
+        403
+      );
+    }
+
+    /*
+     * PHASE 2:
+     * Retrieve authoritative shift data.
+     *
+     * Account state and role are
+     * revalidated by listShifts().
+     */
+    const result =
+      await listShifts(actor);
+
+    /*
+     * PHASE 3:
+     * Return authorized results.
+     */
+    return NextResponse.json(
+      {
+        success: true,
+        shifts: result.shifts,
+        total: result.total,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  } catch (error) {
+    if (
+      error instanceof
+      AssignmentOperationError
+    ) {
+      return errorResponse(
+        error.message,
+        error.status
+      );
+    }
+
+    console.error(
+      "Shift retrieval failed:",
+      error
+    );
+
+    return errorResponse(
+      "Shifts could not be retrieved.",
+      500
+    );
+  }
 }
 
 export async function POST(
