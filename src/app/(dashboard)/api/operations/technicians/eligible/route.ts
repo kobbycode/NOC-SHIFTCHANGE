@@ -1,4 +1,3 @@
-
 import "server-only";
 
 import { NextResponse } from "next/server";
@@ -14,6 +13,10 @@ import {
 import {
   evaluateAssignmentEligibility,
 } from "@/lib/operations/assignment-eligibility";
+
+import {
+  getOperationalCollections,
+} from "@/lib/operations/collections";
 
 export const runtime = "nodejs";
 
@@ -32,6 +35,14 @@ interface EligibleTechnician {
  * GET /api/operations/technicians/eligible
  *
  * Read-only.
+ *
+ * Permanent-pair selection additionally excludes
+ * technicians that already have an authoritative
+ * technician_pair_memberships reservation.
+ *
+ * Pair creation still revalidates the reservation
+ * transactionally, so this read path is not relied
+ * upon as the concurrency boundary.
  *
  * Permanent account revocation remains disabled.
  */
@@ -117,21 +128,47 @@ export async function GET() {
 
     /*
      * PHASE 4:
-     * Retrieve technician accounts.
+     * Retrieve technician accounts and current
+     * permanent-pair reservations.
      *
-     * The query restricts the result set
-     * to technician profiles.
+     * The reservation document ID is the technician UID.
+     * Pair membership is organizational configuration,
+     * not attendance or shift participation.
      */
 
-    const snapshot = await db
-      .collection("users")
-      .where("role", "==", "technician")
-      .get();
+    const {
+      technicianPairMemberships,
+    } = getOperationalCollections();
+
+    const [
+      snapshot,
+      pairMembershipSnapshot,
+    ] = await Promise.all([
+      db
+        .collection("users")
+        .where("role", "==", "technician")
+        .get(),
+
+      technicianPairMemberships.get(),
+    ]);
+
+    const reservedTechnicianUids =
+      new Set(
+        pairMembershipSnapshot.docs.map(
+          (document) => document.id
+        )
+      );
 
     /*
      * PHASE 5:
-     * Apply the existing authoritative
-     * assignment eligibility rules.
+     * Apply the existing authoritative account /
+     * assignment eligibility rules, then exclude
+     * technicians already reserved to a permanent pair.
+     *
+     * Do not move pair membership into
+     * evaluateAssignmentEligibility(): permanent-pair
+     * membership must not make a technician generally
+     * ineligible for operational task assignments.
      */
 
     const technicians: EligibleTechnician[] =
@@ -146,6 +183,14 @@ export async function GET() {
         );
 
       if (!eligibility.eligible) {
+        continue;
+      }
+
+      if (
+        reservedTechnicianUids.has(
+          document.id
+        )
+      ) {
         continue;
       }
 
