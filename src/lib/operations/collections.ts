@@ -1,4 +1,4 @@
-
+﻿
 import "server-only";
 
 import {
@@ -19,6 +19,9 @@ export const OPERATIONAL_COLLECTIONS = {
 
   TECHNICIAN_SCHEDULES:
     "technician_schedules",
+
+  TECHNICIAN_PAIRS:
+    "technician_pairs",
 } as const;
 
 export function getOperationalCollections() {
@@ -49,6 +52,10 @@ export function getOperationalCollections() {
 
     technicianSchedules: db.collection(
       OPERATIONAL_COLLECTIONS.TECHNICIAN_SCHEDULES
+    ),
+
+    technicianPairs: db.collection(
+      OPERATIONAL_COLLECTIONS.TECHNICIAN_PAIRS
     ),
   };
 }
