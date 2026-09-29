@@ -113,6 +113,10 @@ export async function createTechnicianPair(
   const pairRef =
     technicianPairs.doc();
 
+  const auditRef = db
+    .collection("audit_logs")
+    .doc();
+
   const actorRef = db
     .collection("users")
     .doc(actor.uid.trim());
@@ -238,11 +242,6 @@ export async function createTechnicianPair(
 
           deactivatedAt: null,
           deactivatedBy: null,
-
-          createdAtServer:
-            FieldValue.serverTimestamp(),
-          updatedAtServer:
-            FieldValue.serverTimestamp(),
         }
       );
 
@@ -256,11 +255,6 @@ export async function createTechnicianPair(
 
           createdAt: now,
           updatedAt: now,
-
-          createdAtServer:
-            FieldValue.serverTimestamp(),
-          updatedAtServer:
-            FieldValue.serverTimestamp(),
         }
       );
 
@@ -274,10 +268,38 @@ export async function createTechnicianPair(
 
           createdAt: now,
           updatedAt: now,
+        }
+      );
 
-          createdAtServer:
-            FieldValue.serverTimestamp(),
-          updatedAtServer:
+      /*
+       * Record permanent pair creation in the same
+       * transaction as the pair and both active-pair
+       * reservations.
+       *
+       * Pair membership is organizational configuration.
+       * This audit event does not create attendance,
+       * assignment responsibility, or account status.
+       */
+      transaction.create(
+        auditRef,
+        {
+          id: auditRef.id,
+
+          action: "TECHNICIAN_PAIR_CREATED",
+
+          actorUid: actor.uid.trim(),
+
+          targetTechnicianPairId: pairId,
+
+          technicianIds: [
+            firstTechnicianUid,
+            secondTechnicianUid,
+          ],
+
+          details:
+            "An authorized user created a permanent technician pair.",
+
+          createdAt:
             FieldValue.serverTimestamp(),
         }
       );
@@ -290,9 +312,10 @@ export async function createTechnicianPair(
   /*
    * Return the public pair shape.
    *
-   * The persisted server timestamps are internal
-   * transaction metadata and are intentionally not
-   * exposed through the domain interface.
+   * Pair and membership timestamps use the same
+   * public ISO timestamp established before the
+   * transaction. The audit event independently uses
+   * a server-generated Firestore timestamp.
    */
   return {
     id: pairId,
