@@ -1,4 +1,8 @@
 import type {
+  CreateTechnicianPairInput,
+  TechnicianPairCreateResult,
+} from "@/lib/technician-pairs/technician-pair-api-types";
+import type {
   TechnicianPairListApiResponse,
   TechnicianPairListResult,
 } from "./technician-pair-api-types";
@@ -44,12 +48,12 @@ async function readApiResponse(
   }
 }
 
-function requireSuccessfulResponse(
+function requireSuccessfulResponse<
+  T extends { success: boolean }
+>(
   response: Response,
   data: unknown
-): TechnicianPairListApiResponse & {
-  success: true;
-} {
+): T {
   if (
     !data ||
     typeof data !== "object" ||
@@ -80,9 +84,7 @@ function requireSuccessfulResponse(
     );
   }
 
-  return data as TechnicianPairListApiResponse & {
-    success: true;
-  };
+  return data as T;
 }
 
 /**
@@ -111,12 +113,13 @@ export async function getTechnicianPairs():
     );
 
   const result =
-    requireSuccessfulResponse(
+    requireSuccessfulResponse<TechnicianPairListApiResponse>(
       response,
       data
     );
 
   if (
+    result.success !== true ||
     !Array.isArray(result.pairs) ||
     typeof result.total !== "number" ||
     result.total !== result.pairs.length
@@ -131,4 +134,56 @@ export async function getTechnicianPairs():
     pairs: result.pairs,
     total: result.total,
   };
+}
+
+/**
+ * Request creation of one permanent technician pair.
+ *
+ * This client sends only technicianIds. All authoritative
+ * actor, technician eligibility, reservation, pair status,
+ * timestamp, audit, and account-state decisions remain on
+ * the server.
+ */
+export async function createTechnicianPair(
+  input: CreateTechnicianPairInput
+) {
+  const response =
+    await fetch(
+      "/api/operations/technician-pairs",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          technicianIds:
+            input.technicianIds,
+        }),
+      }
+    );
+
+  const data =
+    await readApiResponse(
+      response
+    );
+
+  const result =
+    requireSuccessfulResponse<TechnicianPairCreateResult>(
+      response,
+      data
+    );
+
+  if (
+    result.success !== true ||
+    !result.pair
+  ) {
+    throw new TechnicianPairApiError(
+      "The technician pair could not be created.",
+      response.status
+    );
+  }
+
+  return result;
 }
