@@ -1,6 +1,7 @@
 import type {
   CreateTechnicianPairInput,
   TechnicianPairCreateResult,
+  TechnicianPairDeactivateResult,
 } from "@/lib/technician-pairs/technician-pair-api-types";
 import type {
   TechnicianPairListApiResponse,
@@ -181,6 +182,55 @@ export async function createTechnicianPair(
   ) {
     throw new TechnicianPairApiError(
       "The technician pair could not be created.",
+      response.status
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Request deactivation of one permanent technician pair.
+ *
+ * The pair identifier is carried only in the route path.
+ * No mutation body, actor identity, lifecycle state,
+ * reservation data, timestamps, audit data, attendance,
+ * or account-state data are supplied by the client.
+ *
+ * The server-side transactional service remains authoritative.
+ */
+export async function deactivateTechnicianPair(
+  pairId: string
+): Promise<TechnicianPairDeactivateResult> {
+  const response =
+    await fetch(
+      `/api/operations/technician-pairs/${encodeURIComponent(
+        pairId
+      )}/deactivate`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      }
+    );
+
+  const data =
+    await readApiResponse(
+      response
+    );
+
+  const result =
+    requireSuccessfulResponse<TechnicianPairDeactivateResult>(
+      response,
+      data
+    );
+
+  if (
+    result.success !== true ||
+    !result.pair
+  ) {
+    throw new TechnicianPairApiError(
+      "The technician pair could not be deactivated.",
       response.status
     );
   }

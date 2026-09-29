@@ -47,3 +47,18 @@ export interface TechnicianPairCreateError {
 export type TechnicianPairCreateResult =
   | TechnicianPairCreateSuccess
   | TechnicianPairCreateError;
+
+export interface TechnicianPairDeactivateSuccess {
+  success: true;
+  message: string;
+  pair: TechnicianPair;
+}
+
+export interface TechnicianPairDeactivateError {
+  success: false;
+  error: string;
+}
+
+export type TechnicianPairDeactivateResult =
+  | TechnicianPairDeactivateSuccess
+  | TechnicianPairDeactivateError;
