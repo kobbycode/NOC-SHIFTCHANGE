@@ -22,6 +22,9 @@ export const OPERATIONAL_COLLECTIONS = {
 
   TECHNICIAN_PAIRS:
     "technician_pairs",
+
+  TECHNICIAN_PAIR_MEMBERSHIPS:
+    "technician_pair_memberships",
 } as const;
 
 export function getOperationalCollections() {
@@ -56,6 +59,10 @@ export function getOperationalCollections() {
 
     technicianPairs: db.collection(
       OPERATIONAL_COLLECTIONS.TECHNICIAN_PAIRS
+    ),
+
+    technicianPairMemberships: db.collection(
+      OPERATIONAL_COLLECTIONS.TECHNICIAN_PAIR_MEMBERSHIPS
     ),
   };
 }
