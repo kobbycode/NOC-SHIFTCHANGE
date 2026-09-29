@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -16,6 +17,7 @@ import {
 } from "@/types/technician-pair";
 
 import {
+  createTechnicianPair,
   getTechnicianPairs,
   TechnicianPairApiError,
 } from "@/lib/technician-pairs/technician-pair-api";
@@ -77,6 +79,31 @@ export function SupervisorTechnicianPairWorkspace() {
     setError,
   ] = useState<string | null>(null);
 
+  const [
+    firstTechnicianUid,
+    setFirstTechnicianUid,
+  ] = useState("");
+
+  const [
+    secondTechnicianUid,
+    setSecondTechnicianUid,
+  ] = useState("");
+
+  const [
+    creating,
+    setCreating,
+  ] = useState(false);
+
+  const [
+    creationError,
+    setCreationError,
+  ] = useState<string | null>(null);
+
+  const [
+    creationMessage,
+    setCreationMessage,
+  ] = useState<string | null>(null);
+
   const loadWorkspace =
     useCallback(
       async (
@@ -106,6 +133,26 @@ export function SupervisorTechnicianPairWorkspace() {
 
           setTechnicians(
             technicianResult.technicians
+          );
+
+          setFirstTechnicianUid(
+            (current) =>
+              technicianResult.technicians.some(
+                (technician) =>
+                  technician.uid === current
+              )
+                ? current
+                : ""
+          );
+
+          setSecondTechnicianUid(
+            (current) =>
+              technicianResult.technicians.some(
+                (technician) =>
+                  technician.uid === current
+              )
+                ? current
+                : ""
           );
         } catch (loadError) {
           if (
@@ -152,6 +199,49 @@ export function SupervisorTechnicianPairWorkspace() {
       [technicians]
     );
 
+  const availableFirstTechnicians =
+    useMemo(
+      () =>
+        technicians.filter(
+          (technician) =>
+            technician.uid !==
+            secondTechnicianUid
+        ),
+      [
+        technicians,
+        secondTechnicianUid,
+      ]
+    );
+
+  const availableSecondTechnicians =
+    useMemo(
+      () =>
+        technicians.filter(
+          (technician) =>
+            technician.uid !==
+            firstTechnicianUid
+        ),
+      [
+        technicians,
+        firstTechnicianUid,
+      ]
+    );
+
+  const hasTwoEligibleTechnicians =
+    technicians.length >= 2;
+
+  const selectionIsValid =
+    firstTechnicianUid.length > 0 &&
+    secondTechnicianUid.length > 0 &&
+    firstTechnicianUid !==
+      secondTechnicianUid;
+
+  const creationDisabled =
+    creating ||
+    refreshing ||
+    !hasTwoEligibleTechnicians ||
+    !selectionIsValid;
+
   function technicianLabel(
     uid: string
   ): string {
@@ -159,6 +249,64 @@ export function SupervisorTechnicianPairWorkspace() {
       technicianNames.get(uid) ??
       `Technician ${uid}`
     );
+  }
+
+  async function handleCreatePair(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    setCreationError(null);
+    setCreationMessage(null);
+
+    if (!selectionIsValid) {
+      setCreationError(
+        "Choose two different eligible technicians."
+      );
+      return;
+    }
+
+    setCreating(true);
+
+    try {
+      const result =
+        await createTechnicianPair({
+          technicianIds: [
+            firstTechnicianUid,
+            secondTechnicianUid,
+          ],
+        });
+
+      setFirstTechnicianUid("");
+      setSecondTechnicianUid("");
+
+      await loadWorkspace(true);
+
+      setCreationMessage(
+        result.message
+      );
+    } catch (createError) {
+      if (
+        createError instanceof
+        TechnicianPairApiError
+      ) {
+        setCreationError(
+          createError.message
+        );
+      } else if (
+        createError instanceof Error
+      ) {
+        setCreationError(
+          createError.message
+        );
+      } else {
+        setCreationError(
+          "Unable to create the technician pair."
+        );
+      }
+    } finally {
+      setCreating(false);
+    }
   }
 
   if (loading) {
@@ -191,15 +339,158 @@ export function SupervisorTechnicianPairWorkspace() {
         <button
           type="button"
           onClick={() => {
+            setCreationError(null);
+            setCreationMessage(null);
             void loadWorkspace(true);
           }}
-          disabled={refreshing}
+          disabled={
+            refreshing ||
+            creating
+          }
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {refreshing
             ? "Refreshing..."
             : "Refresh"}
         </button>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div>
+          <h3 className="font-semibold text-slate-950">
+            Create Permanent Pair
+          </h3>
+
+          <p className="mt-1 text-sm text-slate-600">
+            Select two eligible technicians. Pair membership
+            records their permanent working relationship; it
+            does not mark either technician present or create
+            shift attendance.
+          </p>
+        </div>
+
+        {!hasTwoEligibleTechnicians ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            At least two eligible technicians are required to
+            create a permanent pair.
+          </div>
+        ) : (
+          <form
+            className="mt-5 space-y-4"
+            onSubmit={handleCreatePair}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">
+                  Technician A
+                </span>
+
+                <select
+                  value={firstTechnicianUid}
+                  onChange={(event) => {
+                    setFirstTechnicianUid(
+                      event.target.value
+                    );
+                    setCreationError(null);
+                    setCreationMessage(null);
+                  }}
+                  disabled={
+                    creating ||
+                    refreshing
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  <option value="">
+                    Select technician A
+                  </option>
+
+                  {availableFirstTechnicians.map(
+                    (technician) => (
+                      <option
+                        key={technician.uid}
+                        value={technician.uid}
+                      >
+                        {technician.fullName}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">
+                  Technician B
+                </span>
+
+                <select
+                  value={secondTechnicianUid}
+                  onChange={(event) => {
+                    setSecondTechnicianUid(
+                      event.target.value
+                    );
+                    setCreationError(null);
+                    setCreationMessage(null);
+                  }}
+                  disabled={
+                    creating ||
+                    refreshing
+                  }
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  <option value="">
+                    Select technician B
+                  </option>
+
+                  {availableSecondTechnicians.map(
+                    (technician) => (
+                      <option
+                        key={technician.uid}
+                        value={technician.uid}
+                      >
+                        {technician.fullName}
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
+            </div>
+
+            {creationError ? (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+              >
+                {creationError}
+              </div>
+            ) : null}
+
+            {creationMessage ? (
+              <div
+                role="status"
+                className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
+              >
+                {creationMessage}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                disabled={creationDisabled}
+                className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {creating
+                  ? "Creating pair..."
+                  : "Create pair"}
+              </button>
+
+              <p className="text-xs text-slate-500">
+                The server revalidates both technicians before
+                reserving the permanent pair.
+              </p>
+            </div>
+          </form>
+        )}
       </div>
 
       {error ? (
