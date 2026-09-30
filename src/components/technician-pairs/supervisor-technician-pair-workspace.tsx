@@ -18,6 +18,7 @@ import {
 
 import {
   createTechnicianPair,
+  deactivateTechnicianPair,
   getTechnicianPairs,
   TechnicianPairApiError,
 } from "@/lib/technician-pairs/technician-pair-api";
@@ -102,6 +103,21 @@ export function SupervisorTechnicianPairWorkspace() {
   const [
     creationMessage,
     setCreationMessage,
+  ] = useState<string | null>(null);
+
+  const [
+    deactivatingPairId,
+    setDeactivatingPairId,
+  ] = useState<string | null>(null);
+
+  const [
+    deactivationError,
+    setDeactivationError,
+  ] = useState<string | null>(null);
+
+  const [
+    deactivationMessage,
+    setDeactivationMessage,
   ] = useState<string | null>(null);
 
   const loadWorkspace =
@@ -239,6 +255,7 @@ export function SupervisorTechnicianPairWorkspace() {
   const creationDisabled =
     creating ||
     refreshing ||
+    deactivatingPairId !== null ||
     !hasTwoEligibleTechnicians ||
     !selectionIsValid;
 
@@ -258,6 +275,8 @@ export function SupervisorTechnicianPairWorkspace() {
 
     setCreationError(null);
     setCreationMessage(null);
+    setDeactivationError(null);
+    setDeactivationMessage(null);
 
     if (!selectionIsValid) {
       setCreationError(
@@ -309,6 +328,78 @@ export function SupervisorTechnicianPairWorkspace() {
     }
   }
 
+  async function handleDeactivatePair(
+    pair: TechnicianPair
+  ) {
+    if (
+      pair.status !==
+      TECHNICIAN_PAIR_STATUSES.ACTIVE
+    ) {
+      setDeactivationMessage(null);
+      setDeactivationError(
+        "Only an active technician pair can be deactivated."
+      );
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Deactivate permanent pair ${pair.id}? This releases both pair reservations. It does not block either technician, delete the historical pair record, or mark shift attendance.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setCreationError(null);
+    setCreationMessage(null);
+    setDeactivationError(null);
+    setDeactivationMessage(null);
+    setDeactivatingPairId(
+      pair.id
+    );
+
+    try {
+      const result =
+        await deactivateTechnicianPair(
+          pair.id
+        );
+
+      if (result.success !== true) {
+        throw new Error(
+          result.error
+        );
+      }
+
+      await loadWorkspace(true);
+
+      setDeactivationMessage(
+        result.message
+      );
+    } catch (deactivateError) {
+      if (
+        deactivateError instanceof
+        TechnicianPairApiError
+      ) {
+        setDeactivationError(
+          deactivateError.message
+        );
+      } else if (
+        deactivateError instanceof Error
+      ) {
+        setDeactivationError(
+          deactivateError.message
+        );
+      } else {
+        setDeactivationError(
+          "Unable to deactivate the technician pair."
+        );
+      }
+    } finally {
+      setDeactivatingPairId(null);
+    }
+  }
+
   if (loading) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -341,11 +432,14 @@ export function SupervisorTechnicianPairWorkspace() {
           onClick={() => {
             setCreationError(null);
             setCreationMessage(null);
+            setDeactivationError(null);
+            setDeactivationMessage(null);
             void loadWorkspace(true);
           }}
           disabled={
             refreshing ||
-            creating
+            creating ||
+            deactivatingPairId !== null
           }
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -396,7 +490,8 @@ export function SupervisorTechnicianPairWorkspace() {
                   }}
                   disabled={
                     creating ||
-                    refreshing
+                    refreshing ||
+                    deactivatingPairId !== null
                   }
                   className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 >
@@ -433,7 +528,8 @@ export function SupervisorTechnicianPairWorkspace() {
                   }}
                   disabled={
                     creating ||
-                    refreshing
+                    refreshing ||
+                    deactivatingPairId !== null
                   }
                   className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 >
@@ -499,6 +595,24 @@ export function SupervisorTechnicianPairWorkspace() {
           className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
         >
           {error}
+        </div>
+      ) : null}
+
+      {deactivationError ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+        >
+          {deactivationError}
+        </div>
+      ) : null}
+
+      {deactivationMessage ? (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"
+        >
+          {deactivationMessage}
         </div>
       ) : null}
 
@@ -627,6 +741,37 @@ export function SupervisorTechnicianPairWorkspace() {
                   </div>
                 ) : null}
               </dl>
+
+              {pair.status ===
+              TECHNICIAN_PAIR_STATUSES.ACTIVE ? (
+                <div className="mt-5 border-t border-slate-200 pt-4">
+                  <p className="text-xs leading-5 text-slate-500">
+                    Deactivation preserves this historical pair
+                    record and does not mark either technician
+                    absent, present, blocked, or revoked.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleDeactivatePair(
+                        pair
+                      );
+                    }}
+                    disabled={
+                      refreshing ||
+                      creating ||
+                      deactivatingPairId !== null
+                    }
+                    className="mt-3 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {deactivatingPairId ===
+                    pair.id
+                      ? "Deactivating pair..."
+                      : "Deactivate pair"}
+                  </button>
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
