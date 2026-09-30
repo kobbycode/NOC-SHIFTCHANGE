@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:technician-pairs": "node --experimental-strip-types --test tests/technician-pair-display.test.mjs"
   },
   "dependencies": {
     "firebase": "^12.19.0",

@@ -2,14 +2,18 @@ import type {
   TechnicianPair,
 } from "@/types/technician-pair";
 
+import type {
+  TechnicianPairWithTechnicians,
+} from "./technician-pair-display";
+
 export interface TechnicianPairListResult {
-  pairs: TechnicianPair[];
+  pairs: TechnicianPairWithTechnicians[];
   total: number;
 }
 
 export interface TechnicianPairListSuccessResponse {
   success: true;
-  pairs: TechnicianPair[];
+  pairs: TechnicianPairWithTechnicians[];
   total: number;
 }
 

@@ -12,6 +12,10 @@ import type {
   TechnicianPair,
 } from "@/types/technician-pair";
 
+import type {
+  TechnicianPairWithTechnicians,
+} from "@/lib/technician-pairs/technician-pair-display";
+
 import {
   TECHNICIAN_PAIR_STATUSES,
 } from "@/types/technician-pair";
@@ -58,7 +62,7 @@ export function SupervisorTechnicianPairWorkspace() {
   const [
     pairs,
     setPairs,
-  ] = useState<TechnicianPair[]>([]);
+  ] = useState<TechnicianPairWithTechnicians[]>([]);
 
   const [
     technicians,
@@ -201,20 +205,6 @@ export function SupervisorTechnicianPairWorkspace() {
     void loadWorkspace();
   }, [loadWorkspace]);
 
-  const technicianNames =
-    useMemo(
-      () =>
-        new Map(
-          technicians.map(
-            (technician) => [
-              technician.uid,
-              technician.fullName,
-            ]
-          )
-        ),
-      [technicians]
-    );
-
   const availableFirstTechnicians =
     useMemo(
       () =>
@@ -260,11 +250,12 @@ export function SupervisorTechnicianPairWorkspace() {
     !selectionIsValid;
 
   function technicianLabel(
-    uid: string
+    pair: TechnicianPairWithTechnicians,
+    index: 0 | 1
   ): string {
     return (
-      technicianNames.get(uid) ??
-      `Technician ${uid}`
+      pair.technicians[index]?.fullName ||
+      `Technician ${pair.technicianIds[index]}`
     );
   }
 
@@ -642,11 +633,13 @@ export function SupervisorTechnicianPairWorkspace() {
                 <div>
                   <h3 className="font-semibold text-slate-950">
                     {technicianLabel(
-                      pair.technicianIds[0]
+                      pair,
+                      0
                     )}
                     {" + "}
                     {technicianLabel(
-                      pair.technicianIds[1]
+                      pair,
+                      1
                     )}
                   </h3>
 
@@ -668,7 +661,8 @@ export function SupervisorTechnicianPairWorkspace() {
 
                   <p className="mt-1 font-medium text-slate-900">
                     {technicianLabel(
-                      pair.technicianIds[0]
+                      pair,
+                      0
                     )}
                   </p>
 
@@ -684,7 +678,8 @@ export function SupervisorTechnicianPairWorkspace() {
 
                   <p className="mt-1 font-medium text-slate-900">
                     {technicianLabel(
-                      pair.technicianIds[1]
+                      pair,
+                      1
                     )}
                   </p>
 

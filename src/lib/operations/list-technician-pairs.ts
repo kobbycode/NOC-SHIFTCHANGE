@@ -17,6 +17,11 @@ import {
   AssignmentOperationError,
 } from "./assignment-transaction";
 
+import {
+  addTechnicianPairMembers,
+  type TechnicianPairWithTechnicians,
+} from "@/lib/technician-pairs/technician-pair-display";
+
 export interface ListTechnicianPairsActor {
   uid: string;
   role: string;
@@ -93,7 +98,7 @@ function readNullableString(
  */
 export async function listTechnicianPairs(
   actor: ListTechnicianPairsActor
-): Promise<TechnicianPair[]> {
+): Promise<TechnicianPairWithTechnicians[]> {
   const actorUid =
     normalizeActorUid(actor.uid);
 
@@ -315,5 +320,47 @@ export async function listTechnicianPairs(
     }
   );
 
-  return pairs;
+  const technicianUids = Array.from(
+    new Set(
+      pairs.flatMap(
+        (pair) => pair.technicianIds
+      )
+    )
+  );
+
+  const technicianSnapshots =
+    technicianUids.length > 0
+      ? await db.getAll(
+          ...technicianUids.map(
+            (uid) =>
+              db
+                .collection("users")
+                .doc(uid)
+          )
+        )
+      : [];
+
+  const technicianProfiles = new Map<
+    string,
+    { fullName?: unknown }
+  >();
+
+  for (const snapshot of technicianSnapshots) {
+    const profile = snapshot.data();
+
+    if (
+      snapshot.exists &&
+      profile?.role === "technician"
+    ) {
+      technicianProfiles.set(
+        snapshot.id,
+        profile
+      );
+    }
+  }
+
+  return addTechnicianPairMembers(
+    pairs,
+    technicianProfiles
+  );
 }
