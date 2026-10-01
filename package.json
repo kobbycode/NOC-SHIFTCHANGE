@@ -7,7 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:technician-pairs": "node --experimental-strip-types --test tests/technician-pair-display.test.mjs"
+    "test:technician-pairs": "node --experimental-strip-types --test tests/technician-pair-display.test.mjs",
+    "test:operational-shift-control": "node --experimental-strip-types --test tests/operational-shift-control.test.mjs",
+    "test:shift-activation-window": "node --experimental-strip-types --test tests/shift-activation-window.test.mjs",
+    "test:next-shift-authorizations": "node --experimental-strip-types --test tests/next-shift-authorizations.test.mjs",
+    "test:temporary-technician-start": "node --experimental-strip-types --test tests/temporary-technician-start.test.mjs",
+    "test:shift-roster-provisioning": "node --experimental-strip-types --test tests/shift-roster-provisioning.test.mjs",
+    "test:shift-join": "node --experimental-strip-types --test tests/shift-join.test.mjs",
+    "test:shift-join:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-shift-join-emulator.ps1"
   },
   "dependencies": {
     "firebase": "^12.19.0",
@@ -27,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

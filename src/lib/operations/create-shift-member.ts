@@ -12,11 +12,6 @@ import {
   type ShiftMemberRole,
 } from "@/types/shift";
 
-import type {
-  TechnicianSchedule,
-  TechnicianScheduleEntry,
-} from "@/types/technician-schedule";
-
 import {
   getOperationalCollections,
 } from "./collections";
@@ -28,9 +23,12 @@ import {
 } from "./assignment-transaction";
 
 import {
-  assertNoScheduleConflict,
   parseShiftTimeRange,
 } from "./shift-overlap";
+
+import {
+  prepareTechnicianSchedule,
+} from "./prepare-technician-schedule";
 
 export interface CreateShiftMemberInput {
   shiftId: string;
@@ -259,72 +257,6 @@ export async function createShiftMember(
        * Validate the technician scheduling document.
        */
 
-      const scheduleData =
-        scheduleSnapshot.data();
-
-      if (
-        scheduleSnapshot.exists &&
-        (
-          !scheduleData ||
-          scheduleData.technicianUid !==
-            technicianUid ||
-          !Array.isArray(scheduleData.entries)
-        )
-      ) {
-        throw new AssignmentOperationError(
-          "The technician has an invalid scheduling record.",
-          409
-        );
-      }
-
-      const existingEntries:
-        TechnicianScheduleEntry[] =
-          scheduleSnapshot.exists
-            ? (
-                scheduleData!.entries as
-                  TechnicianScheduleEntry[]
-              )
-            : [];
-
-      if (
-        existingEntries.some(
-          (entry) =>
-            !entry ||
-            typeof entry.shiftId !== "string" ||
-            typeof entry.scheduledStart !==
-              "string" ||
-            typeof entry.scheduledEnd !==
-              "string"
-        )
-      ) {
-        throw new AssignmentOperationError(
-          "The technician has invalid shift scheduling information.",
-          409
-        );
-      }
-
-      if (
-        existingEntries.some(
-          (entry) =>
-            entry.shiftId === shiftId
-        )
-      ) {
-        throw new AssignmentOperationError(
-          "This technician already has a scheduling record for the selected shift.",
-          409
-        );
-      }
-
-      /*
-       * Reject overlapping shifts.
-       */
-
-      assertNoScheduleConflict(
-        shift.scheduledStart,
-        shift.scheduledEnd,
-        existingEntries
-      );
-
       /*
        * PHASE 7:
        * Prepare the primary technician list.
@@ -377,30 +309,20 @@ export async function createShiftMember(
        * Prepare the updated scheduling document.
        */
 
-      const newScheduleEntry:
-        TechnicianScheduleEntry = {
+      const updatedSchedule =
+        prepareTechnicianSchedule({
           shiftId,
-
+          technicianUid,
           scheduledStart:
             shift.scheduledStart,
-
           scheduledEnd:
             shift.scheduledEnd,
-
-          status: "scheduled",
-        };
-
-      const updatedSchedule:
-        TechnicianSchedule = {
-          technicianUid,
-
-          entries: [
-            ...existingEntries,
-            newScheduleEntry,
-          ],
-
           updatedAt: now,
-        };
+          scheduleExists:
+            scheduleSnapshot.exists,
+          scheduleData:
+            scheduleSnapshot.data(),
+        });
 
       /*
        * PHASE 9:

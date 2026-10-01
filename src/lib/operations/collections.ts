@@ -10,6 +10,8 @@ export const OPERATIONAL_COLLECTIONS = {
 
   SHIFT_MEMBERS: "shift_members",
 
+  SHIFT_ATTENDANCE: "shift_attendance",
+
   TASKS: "tasks",
 
   TASK_ASSIGNMENTS: "task_assignments",
@@ -25,7 +27,16 @@ export const OPERATIONAL_COLLECTIONS = {
 
   TECHNICIAN_PAIR_MEMBERSHIPS:
     "technician_pair_memberships",
+
+  OPERATIONAL_SHIFT_CONTROL:
+    "operational_shift_control",
+
+  NEXT_SHIFT_AUTHORIZATIONS:
+    "next_shift_authorizations",
 } as const;
+
+export const GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID =
+  "global";
 
 export function getOperationalCollections() {
   const db = getAdminFirestore();
@@ -39,6 +50,10 @@ export function getOperationalCollections() {
 
     shiftMembers: db.collection(
       OPERATIONAL_COLLECTIONS.SHIFT_MEMBERS
+    ),
+
+    shiftAttendance: db.collection(
+      OPERATIONAL_COLLECTIONS.SHIFT_ATTENDANCE
     ),
 
     tasks: db.collection(
@@ -63,6 +78,14 @@ export function getOperationalCollections() {
 
     technicianPairMemberships: db.collection(
       OPERATIONAL_COLLECTIONS.TECHNICIAN_PAIR_MEMBERSHIPS
+    ),
+
+    operationalShiftControl: db.collection(
+      OPERATIONAL_COLLECTIONS.OPERATIONAL_SHIFT_CONTROL
+    ),
+
+    nextShiftAuthorizations: db.collection(
+      OPERATIONAL_COLLECTIONS.NEXT_SHIFT_AUTHORIZATIONS
     ),
   };
 }

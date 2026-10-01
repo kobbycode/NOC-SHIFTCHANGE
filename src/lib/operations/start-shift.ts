@@ -19,6 +19,7 @@ import type {
 } from "@/types/technician-schedule";
 
 import {
+  GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID,
   getOperationalCollections,
 } from "./collections";
 
@@ -29,6 +30,10 @@ import {
 } from "./assignment-transaction";
 
 import {
+  evaluateAssignmentEligibility,
+} from "./assignment-eligibility";
+
+import {
   assertValidShiftTransition,
   assertShiftReadyToStart,
 } from "./shift-transition";
@@ -37,6 +42,26 @@ import {
   parseShiftTimeRange,
   assertNoScheduleConflict,
 } from "./shift-overlap";
+
+import {
+  assertShiftActivationWindow,
+} from "./shift-activation-window";
+
+import {
+  assertShiftOwnsOperationalSlot,
+  transitionOperationalShiftControl,
+} from "./operational-shift-control-state";
+
+import {
+  loadOrBootstrapOperationalShiftControl,
+} from "./operational-shift-control";
+
+import {
+  assertTemporaryTechnicianCanStartShift,
+  createNextShiftAuthorizationDocumentId,
+  NextShiftAuthorizationDomainError,
+  readActivePermanentPairTechnicianIds,
+} from "./next-shift-authorization-domain";
 
 export interface StartShiftInput {
   shiftId: string;
@@ -74,9 +99,18 @@ export async function startShift(
     shifts,
     shiftMembers,
     technicianSchedules,
+    operationalShiftControl,
+    technicianPairs,
+    technicianPairMemberships,
+    nextShiftAuthorizations,
   } = getOperationalCollections();
 
   const shiftRef = shifts.doc(shiftId);
+
+  const operationalShiftControlRef =
+    operationalShiftControl.doc(
+      GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID
+    );
 
   const actorRef = db
     .collection("users")
@@ -104,8 +138,19 @@ export async function startShift(
       const actorSnapshot =
         await transaction.get(actorRef);
 
+      const controlSnapshot =
+        await transaction.get(
+          operationalShiftControlRef
+        );
+
       const shift = shiftSnapshot.data();
       const actor = actorSnapshot.data();
+
+      const actorIsManager =
+        actor?.role === "admin" ||
+        actor?.role === "supervisor";
+      const actorIsTechnician =
+        actor?.role === "technician";
 
       if (!shiftSnapshot.exists || !shift) {
         throw new AssignmentOperationError(
@@ -120,13 +165,70 @@ export async function startShift(
         actor.status !== "active" ||
         actor.statusOperation != null ||
         actor.mustChangePassword === true ||
-        !["admin", "supervisor"].includes(
-          actor.role
-        )
+        (!actorIsManager && !actorIsTechnician)
       ) {
         throw new AssignmentOperationError(
           "Your account is not authorized to start this shift.",
           403
+        );
+      }
+
+      const technicianEligibility =
+        actorIsTechnician
+          ? evaluateAssignmentEligibility(actor)
+          : null;
+
+      if (
+        technicianEligibility &&
+        !technicianEligibility.eligible
+      ) {
+        throw new AssignmentOperationError(
+          technicianEligibility.message ??
+            "The technician is not eligible to start this shift.",
+          403
+        );
+      }
+
+      if (
+        actorIsTechnician &&
+        !controlSnapshot.exists
+      ) {
+        throw new AssignmentOperationError(
+          "The global operational shift control is unavailable.",
+          409
+        );
+      }
+
+      assertShiftActivationWindow(
+        shift.scheduledStart,
+        shift.scheduledEnd
+      );
+
+      const loadedControl =
+        await loadOrBootstrapOperationalShiftControl(
+          transaction,
+          operationalShiftControlRef,
+          controlSnapshot,
+          shifts,
+          new Date().toISOString()
+        );
+      const control = loadedControl.control;
+      const shiftSlotToken =
+        loadedControl.adoptedExistingShift
+          ? control.slotToken
+          : shift.operationalSlotToken;
+
+      try {
+        assertShiftOwnsOperationalSlot(
+          control,
+          shiftId,
+          shiftSlotToken,
+          shift.status
+        );
+      } catch {
+        throw new AssignmentOperationError(
+          "The selected shift does not occupy the current global operational slot.",
+          409
         );
       }
 
@@ -162,6 +264,159 @@ export async function startShift(
 
       const primaryIds: string[] =
         shift.primaryTechnicianIds;
+
+      let temporaryAuthorizationId:
+        string | null = null;
+
+      if (actorIsTechnician) {
+        if (
+          typeof shift.permanentPairId !== "string" ||
+          !shift.permanentPairId.trim() ||
+          shift.permanentPairId.includes("/") ||
+          typeof shift.operationalSlotToken !== "string"
+        ) {
+          throw new AssignmentOperationError(
+            "The shift does not contain a valid permanent-pair and slot identity.",
+            409
+          );
+        }
+
+        const pairRef = technicianPairs.doc(
+          shift.permanentPairId
+        );
+        const pairSnapshot =
+          await transaction.get(pairRef);
+
+        if (!pairSnapshot.exists) {
+          throw new AssignmentOperationError(
+            "The shift's permanent technician pair was not found.",
+            409
+          );
+        }
+
+        const pair = pairSnapshot.data();
+        let pairTechnicianIds: [string, string];
+
+        try {
+          pairTechnicianIds =
+            readActivePermanentPairTechnicianIds(
+              pair,
+              shift.permanentPairId
+            );
+        } catch (error) {
+          if (
+            error instanceof NextShiftAuthorizationDomainError
+          ) {
+            throw new AssignmentOperationError(
+              error.message,
+              error.status
+            );
+          }
+
+          throw error;
+        }
+
+        if (
+          pairTechnicianIds[0] !== primaryIds[0] ||
+          pairTechnicianIds[1] !== primaryIds[1]
+        ) {
+          throw new AssignmentOperationError(
+            "The shift's primary technicians do not match its permanent pair.",
+            409
+          );
+        }
+
+        const firstMembershipRef =
+          technicianPairMemberships.doc(
+            pairTechnicianIds[0]
+          );
+        const secondMembershipRef =
+          technicianPairMemberships.doc(
+            pairTechnicianIds[1]
+          );
+
+        let authorizationDocumentId: string;
+
+        try {
+          authorizationDocumentId =
+            createNextShiftAuthorizationDocumentId(
+              shift.permanentPairId,
+              control.generation,
+              shift.operationalSlotToken
+            );
+        } catch (error) {
+          if (
+            error instanceof NextShiftAuthorizationDomainError
+          ) {
+            throw new AssignmentOperationError(
+              error.message,
+              error.status
+            );
+          }
+
+          throw error;
+        }
+
+        const authorizationRef =
+          nextShiftAuthorizations.doc(
+            authorizationDocumentId
+          );
+
+        const [
+          firstMembershipSnapshot,
+          secondMembershipSnapshot,
+          authorizationSnapshot,
+        ] = await Promise.all([
+          transaction.get(firstMembershipRef),
+          transaction.get(secondMembershipRef),
+          transaction.get(authorizationRef),
+        ]);
+
+        if (!authorizationSnapshot.exists) {
+          throw new AssignmentOperationError(
+            "This technician is not authorized to start the selected shift.",
+            403
+          );
+        }
+
+        try {
+          const authorization =
+            assertTemporaryTechnicianCanStartShift({
+              actorUid,
+              actorProfile: actor,
+              technicianEligibility:
+                technicianEligibility!,
+              shift,
+              control,
+              permanentPair: pair,
+              pairMemberships: [
+                firstMembershipSnapshot.exists
+                  ? firstMembershipSnapshot.data()
+                  : null,
+                secondMembershipSnapshot.exists
+                  ? secondMembershipSnapshot.data()
+                  : null,
+              ],
+              authorizationDocumentId,
+              authorization:
+                authorizationSnapshot.data(),
+            });
+
+          temporaryAuthorizationId =
+            authorization.id;
+        } catch (error) {
+          if (
+            error instanceof NextShiftAuthorizationDomainError
+          ) {
+            throw new AssignmentOperationError(
+              error.message,
+              error.status
+            );
+          }
+
+          throw error;
+        }
+      }
 
       /*
        * PHASE 3:
@@ -385,6 +640,24 @@ export async function startShift(
       const now =
         new Date().toISOString();
 
+      let activeControl;
+
+      try {
+        activeControl =
+          transitionOperationalShiftControl(
+            control,
+            shiftId,
+            SHIFT_STATUSES.SCHEDULED,
+            SHIFT_STATUSES.ACTIVE,
+            now
+          );
+      } catch {
+        throw new AssignmentOperationError(
+          "The global operational slot cannot transition to active.",
+          409
+        );
+      }
+
       transaction.update(
         shiftRef,
         {
@@ -400,6 +673,11 @@ export async function startShift(
           startedAt:
             FieldValue.serverTimestamp(),
         }
+      );
+
+      transaction.update(
+        operationalShiftControlRef,
+        activeControl
       );
 
       for (const record of scheduleRecords) {
@@ -427,6 +705,15 @@ export async function startShift(
           action: "SHIFT_STARTED",
 
           actorUid,
+
+          actorRole: actor.role,
+
+          startAuthority:
+            actorIsTechnician
+              ? "temporary_authorization"
+              : "manager",
+
+          temporaryAuthorizationId,
 
           shiftId,
 

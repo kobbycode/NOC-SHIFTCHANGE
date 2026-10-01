@@ -22,16 +22,52 @@ import {
 
 import {
   AssignmentOperationError,
+  markAssignmentActivity,
+  requireEligibleTechnician,
 } from "./assignment-transaction";
+
+import {
+  evaluateAssignmentEligibility,
+} from "./assignment-eligibility";
 
 import {
   parseShiftTimeRange,
 } from "./shift-overlap";
 
+import {
+  consumeOperationalShiftSlot,
+} from "./operational-shift-control-state";
+
+import {
+  loadOrBootstrapOperationalShiftControl,
+} from "./operational-shift-control";
+
+import {
+  buildShiftCreationPairBinding,
+  buildNextShiftAuthorizationConsumedAuditData,
+  NextShiftAuthorizationDomainError,
+  readActivePermanentPairTechnicianIds,
+  selectPendingAuthorizationForShift,
+  type ShiftCreationPairBinding,
+} from "./next-shift-authorization-domain";
+
+import {
+  preparePrimaryShiftRoster,
+} from "./prepare-technician-schedule";
+
+import type {
+  NextShiftAuthorization,
+} from "@/types/next-shift-authorization";
+
+import {
+  GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID,
+} from "./collections";
+
 export interface CreateShiftInput {
   shiftType: ShiftType;
   scheduledStart: string;
   scheduledEnd: string;
+  permanentPairId: string;
   createdBy: string;
 }
 
@@ -72,6 +108,7 @@ export async function createShift(
     shiftType,
     scheduledStart,
     scheduledEnd,
+    permanentPairId,
     createdBy,
   } = input;
 
@@ -83,6 +120,21 @@ export async function createShift(
   if (!isValidUid(createdBy)) {
     throw new AssignmentOperationError(
       "Please sign in with a valid account.",
+      400
+    );
+  }
+
+  if (
+    typeof permanentPairId !== "string" ||
+    !permanentPairId.trim() ||
+    permanentPairId !== permanentPairId.trim() ||
+    permanentPairId.length > 512 ||
+    permanentPairId.includes("/") ||
+    permanentPairId === "." ||
+    permanentPairId === ".."
+  ) {
+    throw new AssignmentOperationError(
+      "Please select a valid permanent technician pair.",
       400
     );
   }
@@ -154,11 +206,26 @@ export async function createShift(
 
   const {
     shifts,
+    shiftMembers,
+    technicianSchedules,
+    operationalShiftControl,
+    technicianPairs,
+    technicianPairMemberships,
+    nextShiftAuthorizations,
   } = getOperationalCollections();
+
+  const operationalShiftControlRef =
+    operationalShiftControl.doc(
+      GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID
+    );
 
   const actorRef = db
     .collection("users")
     .doc(createdBy);
+
+  const pairRef = technicianPairs.doc(
+    permanentPairId
+  );
 
   const shiftRef = shifts.doc();
 
@@ -170,6 +237,10 @@ export async function createShift(
 
   const shift: Shift = {
     id: shiftRef.id,
+
+    operationalSlotToken: null,
+
+    permanentPairId,
 
     shiftType,
 
@@ -189,16 +260,25 @@ export async function createShift(
     updatedAt: now,
   };
 
+  let createdShiftResult = shift;
+
   /*
    * PHASE 3:
    * Verify the actor and create the shift
    * inside the same Firestore transaction.
    */
 
-  await db.runTransaction(
+  const created = await db.runTransaction(
     async (transaction) => {
-      const actorSnapshot =
-        await transaction.get(actorRef);
+      const [
+        actorSnapshot,
+        controlSnapshot,
+        pairSnapshot,
+      ] = await Promise.all([
+        transaction.get(actorRef),
+        transaction.get(operationalShiftControlRef),
+        transaction.get(pairRef),
+      ]);
 
       const actor = actorSnapshot.data();
 
@@ -218,6 +298,249 @@ export async function createShift(
         );
       }
 
+      const loadedControl =
+        await loadOrBootstrapOperationalShiftControl(
+          transaction,
+          operationalShiftControlRef,
+          controlSnapshot,
+          shifts,
+          now
+        );
+
+      if (loadedControl.adoptedExistingShift) {
+        return false;
+      }
+
+      const control = loadedControl.control;
+
+      if (!pairSnapshot.exists) {
+        throw new AssignmentOperationError(
+          "The selected permanent technician pair was not found.",
+          404
+        );
+      }
+
+      const pair = pairSnapshot.data();
+      let permanentTechnicianIds: [string, string];
+
+      try {
+        permanentTechnicianIds =
+          readActivePermanentPairTechnicianIds(
+            pair,
+            permanentPairId
+          );
+      } catch (error) {
+        if (
+          error instanceof NextShiftAuthorizationDomainError
+        ) {
+          throw new AssignmentOperationError(
+            error.message,
+            error.status
+          );
+        }
+
+        throw error;
+      }
+
+      const firstMembershipRef =
+        technicianPairMemberships.doc(
+          permanentTechnicianIds[0]
+        );
+      const secondMembershipRef =
+        technicianPairMemberships.doc(
+          permanentTechnicianIds[1]
+        );
+
+      const primaryMemberRefs =
+        permanentTechnicianIds.map(
+          (technicianUid) =>
+            shiftMembers.doc(
+              `${shiftRef.id}_${technicianUid}`
+            )
+        );
+      const primaryScheduleRefs =
+        permanentTechnicianIds.map(
+          (technicianUid) =>
+            technicianSchedules.doc(
+              technicianUid
+            )
+        );
+
+      const [
+        firstMembershipSnapshot,
+        secondMembershipSnapshot,
+        slotAuthorizationSnapshot,
+        firstPrimaryMemberSnapshot,
+        secondPrimaryMemberSnapshot,
+        firstScheduleSnapshot,
+        secondScheduleSnapshot,
+      ] = await Promise.all([
+        transaction.get(firstMembershipRef),
+        transaction.get(secondMembershipRef),
+        transaction.get(
+          nextShiftAuthorizations.where(
+            "slotToken",
+            "==",
+            control.slotToken
+          )
+        ),
+        transaction.get(primaryMemberRefs[0]),
+        transaction.get(primaryMemberRefs[1]),
+        transaction.get(primaryScheduleRefs[0]),
+        transaction.get(primaryScheduleRefs[1]),
+      ]);
+
+      for (const technicianUid of permanentTechnicianIds) {
+        await requireEligibleTechnician(
+          transaction,
+          technicianUid
+        );
+      }
+
+      if (
+        firstPrimaryMemberSnapshot.exists ||
+        secondPrimaryMemberSnapshot.exists
+      ) {
+        throw new AssignmentOperationError(
+          "A primary membership already exists for the new shift.",
+          409
+        );
+      }
+
+      let authorization: NextShiftAuthorization | null;
+
+      try {
+        authorization =
+          selectPendingAuthorizationForShift(
+            control,
+            permanentPairId,
+            slotAuthorizationSnapshot.docs.map(
+              (document) => ({
+                id: document.id,
+                data: document.data(),
+              })
+            )
+          );
+      } catch (error) {
+        if (
+          error instanceof NextShiftAuthorizationDomainError
+        ) {
+          throw new AssignmentOperationError(
+            error.message,
+            error.status
+          );
+        }
+
+        throw error;
+      }
+
+      let temporaryTechnicianProfile:
+        Record<string, unknown> | undefined;
+
+      if (authorization) {
+        const temporaryTechnicianSnapshot =
+          await transaction.get(
+            db
+              .collection("users")
+              .doc(
+                authorization.authorizedTechnicianUid
+              )
+          );
+
+        temporaryTechnicianProfile =
+          temporaryTechnicianSnapshot.exists
+            ? temporaryTechnicianSnapshot.data()
+            : undefined;
+      }
+
+      let binding: ShiftCreationPairBinding;
+
+      try {
+        binding =
+          buildShiftCreationPairBinding({
+            control,
+            permanentPairId,
+            pair,
+            pairMemberships: [
+              firstMembershipSnapshot.exists
+                ? firstMembershipSnapshot.data()
+                : null,
+              secondMembershipSnapshot.exists
+                ? secondMembershipSnapshot.data()
+                : null,
+            ],
+            authorization,
+            temporaryTechnicianEligibility:
+              authorization
+                ? evaluateAssignmentEligibility(
+                    temporaryTechnicianProfile
+                  )
+                : undefined,
+            shiftId: shiftRef.id,
+            createdAt: now,
+          });
+      } catch (error) {
+        if (
+          error instanceof NextShiftAuthorizationDomainError
+        ) {
+          throw new AssignmentOperationError(
+            error.message,
+            error.status
+          );
+        }
+
+        throw error;
+      }
+
+      const primaryRoster =
+        preparePrimaryShiftRoster({
+          shiftId: shiftRef.id,
+          technicianIds:
+            binding.primaryTechnicianIds,
+          scheduledStart,
+          scheduledEnd,
+          joinedAt: now,
+          updatedAt: now,
+          scheduleSnapshots: [
+            {
+              exists: firstScheduleSnapshot.exists,
+              data: firstScheduleSnapshot.data(),
+            },
+            {
+              exists: secondScheduleSnapshot.exists,
+              data: secondScheduleSnapshot.data(),
+            },
+          ],
+        });
+      const primaryMembers = primaryRoster.members;
+      const primarySchedules = primaryRoster.schedules;
+
+      let consumedControl;
+
+      try {
+        consumedControl =
+          consumeOperationalShiftSlot(
+            control,
+            shiftRef.id,
+            now
+          );
+      } catch {
+        throw new AssignmentOperationError(
+          "The current global shift slot is already occupied. Complete the current shift before creating another.",
+          409
+        );
+      }
+
+      const createdShift: Shift = {
+        ...shift,
+        operationalSlotToken:
+          control.slotToken,
+        permanentPairId:
+          binding.permanentPairId,
+        primaryTechnicianIds:
+          binding.primaryTechnicianIds,
+      };
+
       /*
        * All transaction reads are complete.
        *
@@ -233,8 +556,46 @@ export async function createShift(
 
       transaction.create(
         shiftRef,
-        shift
+        createdShift
       );
+
+      for (let index = 0; index < 2; index += 1) {
+        transaction.create(
+          primaryMemberRefs[index],
+          primaryMembers[index]
+        );
+
+        transaction.set(
+          primaryScheduleRefs[index],
+          primarySchedules[index]
+        );
+
+        markAssignmentActivity(
+          transaction,
+          permanentTechnicianIds[index]
+        );
+      }
+
+      if (loadedControl.persisted) {
+        transaction.update(
+          operationalShiftControlRef,
+          consumedControl
+        );
+      } else {
+        transaction.create(
+          operationalShiftControlRef,
+          consumedControl
+        );
+      }
+
+      if (binding.consumedAuthorization) {
+        transaction.update(
+          nextShiftAuthorizations.doc(
+            binding.consumedAuthorization.id
+          ),
+          binding.consumedAuthorization
+        );
+      }
 
       transaction.create(
         auditRef,
@@ -244,6 +605,15 @@ export async function createShift(
           actorUid: createdBy,
 
           targetShiftId: shiftRef.id,
+
+          operationalSlotToken:
+            control.slotToken,
+
+          permanentPairId:
+            binding.permanentPairId,
+
+          primaryTechnicianIds:
+            binding.primaryTechnicianIds,
 
           details:
             "An authorized user created a scheduled shift.",
@@ -257,8 +627,37 @@ export async function createShift(
             FieldValue.serverTimestamp(),
         }
       );
+
+      if (binding.consumedAuthorization) {
+        const consumptionAuditRef = db
+          .collection("audit_logs")
+          .doc();
+
+        transaction.create(
+          consumptionAuditRef,
+          buildNextShiftAuthorizationConsumedAuditData(
+            binding.consumedAuthorization,
+            createdBy,
+            shiftRef.id,
+            control.slotToken,
+            control.generation,
+            consumptionAuditRef.id,
+            FieldValue.serverTimestamp()
+          )
+        );
+      }
+
+      createdShiftResult = createdShift;
+      return true;
     }
   );
 
-  return shift;
+  if (!created) {
+    throw new AssignmentOperationError(
+      "The existing global shift must complete before another shift can be created.",
+      409
+    );
+  }
+
+  return createdShiftResult;
 }

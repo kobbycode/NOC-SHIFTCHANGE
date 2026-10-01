@@ -227,7 +227,22 @@ export async function POST(
     shiftType,
     scheduledStart,
     scheduledEnd,
+    permanentPairId,
   } = input;
+
+  if (
+    Object.keys(input).length !== 4 ||
+    typeof permanentPairId !== "string" ||
+    !permanentPairId.trim() ||
+    permanentPairId !== permanentPairId.trim() ||
+    permanentPairId.length > 512 ||
+    permanentPairId.includes("/")
+  ) {
+    return errorResponse(
+      "Please select a valid permanent technician pair.",
+      400
+    );
+  }
 
   if (
     shiftType !== SHIFT_TYPES.MORNING &&
@@ -260,6 +275,7 @@ export async function POST(
       shiftType,
       scheduledStart,
       scheduledEnd,
+      permanentPairId,
       createdBy: actor.uid,
     });
 

@@ -59,3 +59,62 @@ export interface ShiftMemberListSuccessResponse {
 export type ShiftMemberListApiResponse =
   | ShiftMemberListSuccessResponse
   | ShiftApiErrorResponse;
+
+
+  /*
+ * Authoritative begin-handover result.
+ */
+export interface ShiftHandoverResult {
+  shiftId: string;
+  status: "handover_pending";
+  handoverStartedAt: string;
+}
+
+/*
+ * Successful begin-handover response.
+ */
+export interface ShiftHandoverSuccessResponse {
+  success: true;
+  message: string;
+  shift: {
+    id: string;
+    status: "handover_pending";
+    handoverStartedAt: string;
+  };
+}
+
+/*
+ * Begin-handover API response.
+ */
+export type ShiftHandoverApiResponse =
+  | ShiftHandoverSuccessResponse
+  | ShiftApiErrorResponse;
+
+/*
+ * Authoritative shift-completion result.
+ */
+export interface ShiftCompletionResult {
+  shiftId: string;
+  status: "completed";
+  actualEnd: string;
+}
+
+/*
+ * Successful shift-completion response.
+ */
+export interface ShiftCompletionSuccessResponse {
+  success: true;
+  message: string;
+  shift: {
+    id: string;
+    status: "completed";
+    actualEnd: string;
+  };
+}
+
+/*
+ * Shift-completion API response.
+ */
+export type ShiftCompletionApiResponse =
+  | ShiftCompletionSuccessResponse
+  | ShiftApiErrorResponse;

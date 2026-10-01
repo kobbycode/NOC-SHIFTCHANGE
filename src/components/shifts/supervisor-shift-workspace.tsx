@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import {
+  beginShiftHandover,
+  completeShift,
   getShiftMembers,
   getShifts,
   ShiftApiError,
@@ -121,12 +123,32 @@ export function SupervisorShiftWorkspace() {
   const [error, setError] =
     useState<string | null>(null);
 
-  const [
+    const [
     membersError,
     setMembersError,
   ] = useState<string | null>(null);
 
+  const [
+    lifecycleAction,
+    setLifecycleAction,
+  ] = useState<
+    "handover" | "complete" | null
+  >(null);
+
+  const [
+    lifecycleError,
+    setLifecycleError,
+  ] = useState<string | null>(null);
+
+  const [
+    lifecycleSuccess,
+    setLifecycleSuccess,
+  ] = useState<string | null>(null);
+
   const retrievalInProgress =
+    useRef(false);
+
+  const lifecycleActionInProgress =
     useRef(false);
 
   const memberRequestId =
@@ -293,8 +315,125 @@ export function SupervisorShiftWorkspace() {
     loadMembers,
   ]);
 
-  async function handleRefresh() {
+    async function handleRefresh() {
     await loadShifts(true);
+  }
+
+  async function handleBeginHandover() {
+    if (
+      !selectedShift ||
+      selectedShift.status !== "active" ||
+      lifecycleActionInProgress.current
+    ) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Begin handover for this active shift? The shift will move to Handover Pending.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const shiftId = selectedShift.id;
+
+    lifecycleActionInProgress.current =
+      true;
+
+    setLifecycleAction("handover");
+    setLifecycleError(null);
+    setLifecycleSuccess(null);
+
+    try {
+      await beginShiftHandover(
+        shiftId,
+      );
+
+      setLifecycleSuccess(
+        "Shift handover started successfully.",
+      );
+
+      await loadShifts(true);
+      await loadMembers(shiftId);
+    } catch (caughtError) {
+      if (
+        caughtError instanceof
+        ShiftApiError
+      ) {
+        setLifecycleError(
+          caughtError.message,
+        );
+      } else {
+        setLifecycleError(
+          "Shift handover could not be started.",
+        );
+      }
+    } finally {
+      lifecycleActionInProgress.current =
+        false;
+
+      setLifecycleAction(null);
+    }
+  }
+
+  async function handleCompleteShift() {
+    if (
+      !selectedShift ||
+      selectedShift.status !==
+        "handover_pending" ||
+      lifecycleActionInProgress.current
+    ) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Complete this shift? This will end the current operational shift and advance the operational slot.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const shiftId = selectedShift.id;
+
+    lifecycleActionInProgress.current =
+      true;
+
+    setLifecycleAction("complete");
+    setLifecycleError(null);
+    setLifecycleSuccess(null);
+
+    try {
+      await completeShift(
+        shiftId,
+      );
+
+      setLifecycleSuccess(
+        "Shift completed successfully.",
+      );
+
+      await loadShifts(true);
+      await loadMembers(shiftId);
+    } catch (caughtError) {
+      if (
+        caughtError instanceof
+        ShiftApiError
+      ) {
+        setLifecycleError(
+          caughtError.message,
+        );
+      } else {
+        setLifecycleError(
+          "Shift completion could not be completed.",
+        );
+      }
+    } finally {
+      lifecycleActionInProgress.current =
+        false;
+
+      setLifecycleAction(null);
+    }
   }
 
   return (
@@ -516,6 +655,110 @@ export function SupervisorShiftWorkspace() {
                   </dd>
                 </div>
               </dl>
+
+                            {(lifecycleError ||
+                lifecycleSuccess) && (
+                <div className="mt-6">
+                  {lifecycleError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+                    >
+                      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+
+                      <span>
+                        {lifecycleError}
+                      </span>
+                    </div>
+                  )}
+
+                  {lifecycleSuccess && (
+                    <div
+                      role="status"
+                      className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300"
+                    >
+                      {lifecycleSuccess}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedShift.status ===
+                "active" && (
+                <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Shift Handover
+                  </p>
+
+                  <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                    Begin handover when the
+                    active shift is ready to
+                    transition to the
+                    handover-pending state.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleBeginHandover();
+                    }}
+                    disabled={
+                      lifecycleAction !==
+                        null ||
+                      refreshing
+                    }
+                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {lifecycleAction ===
+                    "handover" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Beginning Handover...
+                      </>
+                    ) : (
+                      "Begin Handover"
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {selectedShift.status ===
+                "handover_pending" && (
+                <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/40">
+                  <p className="text-sm font-semibold text-red-900 dark:text-red-200">
+                    Complete Shift
+                  </p>
+
+                  <p className="mt-1 text-sm text-red-700 dark:text-red-300">
+                    Complete the shift only
+                    after handover is ready
+                    to be finalized.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCompleteShift();
+                    }}
+                    disabled={
+                      lifecycleAction !==
+                        null ||
+                      refreshing
+                    }
+                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {lifecycleAction ===
+                    "complete" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Completing Shift...
+                      </>
+                    ) : (
+                      "Complete Shift"
+                    )}
+                  </button>
+                </div>
+              )}
 
               <div className="mt-8 border-t border-slate-200 pt-6 dark:border-slate-800">
                 <div className="flex items-center gap-2">

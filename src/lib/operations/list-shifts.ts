@@ -111,6 +111,17 @@ export async function listShifts(
         return {
           id: document.id,
 
+          operationalSlotToken:
+            typeof data.operationalSlotToken ===
+              "string"
+              ? data.operationalSlotToken
+              : null,
+
+          permanentPairId:
+            typeof data.permanentPairId === "string"
+              ? data.permanentPairId
+              : null,
+
           shiftType: data.shiftType,
           status: data.status,
 

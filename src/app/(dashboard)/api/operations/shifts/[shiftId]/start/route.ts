@@ -71,10 +71,11 @@ export async function POST(
 
   if (
     actor.role !== "admin" &&
-    actor.role !== "supervisor"
+    actor.role !== "supervisor" &&
+    actor.role !== "technician"
   ) {
     return errorResponse(
-      "Only administrators and supervisors can start shifts.",
+      "Only administrators, supervisors, or an explicitly authorized temporary technician can start shifts.",
       403
     );
   }

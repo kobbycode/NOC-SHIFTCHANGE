@@ -45,6 +45,38 @@ import {
   assertNoScheduleConflict,
 } from "./shift-overlap";
 
+import {
+  randomUUID,
+} from "node:crypto";
+
+import {
+  GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID,
+} from "./collections";
+
+import {
+  advanceOperationalShiftControl,
+  assertShiftOwnsOperationalSlot,
+} from "./operational-shift-control-state";
+
+import {
+  ensureOperationalShiftControl,
+  readOperationalShiftControl,
+} from "./operational-shift-control";
+
+import type {
+  NextShiftAuthorization,
+} from "@/types/next-shift-authorization";
+
+import {
+  completeConsumedNextShiftAuthorization,
+  createNextShiftAuthorizationDocumentId,
+} from "./next-shift-authorization-domain";
+
+import {
+  finalizeCurrentShiftMemberships,
+  validateShiftCompletionAttendance,
+} from "./shift-completion-domain";
+
 export interface CompleteShiftInput {
   shiftId: string;
   actorUid: string;
@@ -83,15 +115,25 @@ export async function completeShift(
 
   const db = getAdminFirestore();
 
+  await ensureOperationalShiftControl(actorUid);
+
   const {
     shifts,
     shiftMembers,
+    shiftAttendance,
     technicianSchedules,
     tasks,
     taskAssignments,
+    operationalShiftControl,
+    nextShiftAuthorizations,
   } = getOperationalCollections();
 
   const shiftRef = shifts.doc(shiftId);
+
+  const operationalShiftControlRef =
+    operationalShiftControl.doc(
+      GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID
+    );
 
   const actorRef = db
     .collection("users")
@@ -100,6 +142,8 @@ export async function completeShift(
   const auditRef = db
     .collection("audit_logs")
     .doc();
+
+  const nextSlotToken = randomUUID();
 
   return db.runTransaction(
     async (
@@ -116,6 +160,11 @@ export async function completeShift(
 
       const actorSnapshot =
         await transaction.get(actorRef);
+
+      const controlSnapshot =
+        await transaction.get(
+          operationalShiftControlRef
+        );
 
       const shift = shiftSnapshot.data();
       const actor = actorSnapshot.data();
@@ -140,6 +189,32 @@ export async function completeShift(
         throw new AssignmentOperationError(
           "Your account is not authorized to complete this shift.",
           403
+        );
+      }
+
+      if (!controlSnapshot.exists) {
+        throw new AssignmentOperationError(
+          "The global operational shift control is unavailable.",
+          409
+        );
+      }
+
+      const control =
+        readOperationalShiftControl(
+          controlSnapshot.data()
+        );
+
+      try {
+        assertShiftOwnsOperationalSlot(
+          control,
+          shiftId,
+          shift.operationalSlotToken,
+          shift.status
+        );
+      } catch {
+        throw new AssignmentOperationError(
+          "The shift is not the current occupant of the global operational slot.",
+          409
         );
       }
 
@@ -233,6 +308,8 @@ export async function completeShift(
         const member = document.data();
 
         if (
+          typeof member.id !== "string" ||
+          member.id !== document.id ||
           member.shiftId !== shiftId ||
           typeof member.technicianId !==
             "string" ||
@@ -261,10 +338,9 @@ export async function completeShift(
         }
 
         if (member.leftAt === null) {
-          currentMembers.push({
-            ...member,
-            id: document.id,
-          } as ShiftMember);
+          currentMembers.push(
+            member as ShiftMember
+          );
         }
       }
 
@@ -398,6 +474,182 @@ export async function completeShift(
             );
           }
         }
+      }
+      /*
+       * PHASE 5A:
+       * Read authoritative participation
+       * and temporary-authorization state.
+       *
+       * Attendance is read-only during
+       * shift completion.
+       *
+       * Authorization discovery uses:
+       * - its deterministic expected ID,
+       * - the current operational slot,
+       * - the current shift binding.
+       *
+       * Any conflicting or malformed state
+       * fails closed before completion writes.
+       */
+
+      let expectedAuthorizationId: string;
+
+      try {
+        expectedAuthorizationId =
+          createNextShiftAuthorizationDocumentId(
+            shift.permanentPairId,
+            control.generation,
+            control.slotToken
+          );
+      } catch (error) {
+        throw new AssignmentOperationError(
+          error instanceof Error
+            ? error.message
+            : "The shift temporary-authorization identity is invalid.",
+          409
+        );
+      }
+
+      const expectedAuthorizationRef =
+        nextShiftAuthorizations.doc(
+          expectedAuthorizationId
+        );
+
+      const [
+        attendanceSnapshot,
+        expectedAuthorizationSnapshot,
+        slotAuthorizationSnapshot,
+        shiftAuthorizationSnapshot,
+      ] = await Promise.all([
+        transaction.get(
+          shiftAttendance.where(
+            "shiftId",
+            "==",
+            shiftId
+          )
+        ),
+
+        transaction.get(
+          expectedAuthorizationRef
+        ),
+
+        transaction.get(
+          nextShiftAuthorizations
+            .where(
+              "slotToken",
+              "==",
+              control.slotToken
+            )
+            .where(
+              "slotGeneration",
+              "==",
+              control.generation
+            )
+        ),
+
+        transaction.get(
+          nextShiftAuthorizations.where(
+            "shiftId",
+            "==",
+            shiftId
+          )
+        ),
+      ]);
+
+      const attendanceRecords =
+        attendanceSnapshot.docs.map(
+          (document) => {
+            const attendance =
+              document.data();
+
+            if (
+              attendance.id !== document.id
+            ) {
+              throw new AssignmentOperationError(
+                "The shift contains an attendance record with inconsistent identity.",
+                409
+              );
+            }
+
+            return attendance;
+          }
+        );
+
+      const authorizationCandidates =
+        new Map<string, unknown>();
+
+      if (
+        expectedAuthorizationSnapshot.exists
+      ) {
+        authorizationCandidates.set(
+          expectedAuthorizationSnapshot.id,
+          expectedAuthorizationSnapshot.data()
+        );
+      }
+
+      for (
+        const document of
+        slotAuthorizationSnapshot.docs
+      ) {
+        authorizationCandidates.set(
+          document.id,
+          document.data()
+        );
+      }
+
+      for (
+        const document of
+        shiftAuthorizationSnapshot.docs
+      ) {
+        authorizationCandidates.set(
+          document.id,
+          document.data()
+        );
+      }
+
+      if (
+        authorizationCandidates.size > 1
+      ) {
+        throw new AssignmentOperationError(
+          "More than one temporary authorization conflicts with this shift or operational slot.",
+          409
+        );
+      }
+
+      let temporaryAuthorization:
+        NextShiftAuthorization | null = null;
+
+      for (
+        const [
+          authorizationDocumentId,
+          authorizationData,
+        ] of authorizationCandidates
+      ) {
+        if (
+          authorizationDocumentId !==
+            expectedAuthorizationId ||
+          !authorizationData ||
+          typeof authorizationData !==
+            "object" ||
+          Array.isArray(
+            authorizationData
+          ) ||
+          (
+            authorizationData as {
+              id?: unknown;
+            }
+          ).id !==
+            authorizationDocumentId
+        ) {
+          throw new AssignmentOperationError(
+            "The shift temporary authorization has inconsistent identity.",
+            409
+          );
+        }
+
+        temporaryAuthorization =
+          authorizationData as
+            NextShiftAuthorization;
       }
 
       /*
@@ -554,9 +806,107 @@ export async function completeShift(
        * scheduling release, and audit
        * event atomically.
        */
-
       const now =
         new Date().toISOString();
+
+      /*
+       * Validate authoritative participation
+       * only after every transaction read
+       * has completed.
+       *
+       * Missing A/B attendance is valid.
+       * Authorization without C joining is
+       * also valid.
+       */
+
+      let validatedAuthorization:
+        NextShiftAuthorization | null;
+
+      try {
+        validatedAuthorization =
+          validateShiftCompletionAttendance({
+            shiftId,
+            primaryTechnicianIds:
+              primaryIds,
+            completedAt: now,
+            members: currentMembers,
+            attendances:
+              attendanceRecords,
+            authorization:
+              temporaryAuthorization,
+          }).authorization;
+      } catch (error) {
+        throw new AssignmentOperationError(
+          error instanceof Error
+            ? error.message
+            : "The shift participation state is invalid.",
+          409
+        );
+      }
+
+      let finalizedMembers:
+        ShiftMember[];
+
+      try {
+        finalizedMembers =
+          finalizeCurrentShiftMemberships({
+            shiftId,
+            completedAt: now,
+            members: currentMembers,
+          });
+      } catch (error) {
+        throw new AssignmentOperationError(
+          error instanceof Error
+            ? error.message
+            : "The shift membership state cannot be finalized.",
+          409
+        );
+      }
+
+      let completedAuthorization:
+        NextShiftAuthorization | null = null;
+
+      if (validatedAuthorization) {
+        try {
+          completedAuthorization =
+            completeConsumedNextShiftAuthorization({
+              authorization:
+                validatedAuthorization,
+              shiftId,
+              slotToken:
+                control.slotToken,
+              slotGeneration:
+                control.generation,
+              permanentPairId:
+                shift.permanentPairId,
+              completedAt: now,
+            });
+        } catch (error) {
+          throw new AssignmentOperationError(
+            error instanceof Error
+              ? error.message
+              : "The temporary authorization cannot be finalized.",
+            409
+          );
+        }
+      }
+
+      let nextControl;
+
+      try {
+        nextControl =
+          advanceOperationalShiftControl(
+            control,
+            shiftId,
+            nextSlotToken,
+            now
+          );
+      } catch {
+        throw new AssignmentOperationError(
+          "The global operational slot cannot be advanced for this shift.",
+          409
+        );
+      }
 
       transaction.update(
         shiftRef,
@@ -575,6 +925,50 @@ export async function completeShift(
         }
       );
 
+      transaction.update(
+        operationalShiftControlRef,
+        nextControl
+      );
+      /*
+       * End current roster assignments.
+       * leftAt is NOT attendance/clock-out.
+       */
+
+      for (
+        const member of
+        finalizedMembers
+      ) {
+        transaction.update(
+          shiftMembers.doc(member.id),
+          {
+            leftAt: member.leftAt,
+          }
+        );
+      }
+
+      /*
+       * Successful intended-shift completion
+       * terminally completes its consumed
+       * temporary authorization.
+       */
+
+      if (completedAuthorization) {
+        transaction.update(
+          nextShiftAuthorizations.doc(
+            completedAuthorization.id
+          ),
+          {
+            status:
+              completedAuthorization.status,
+            completedAt:
+              completedAuthorization.completedAt,
+            expiredAt:
+              completedAuthorization.expiredAt,
+            updatedAt:
+              completedAuthorization.updatedAt,
+          }
+        );
+      }
       for (
         const record of
         scheduleReleases
@@ -604,17 +998,34 @@ export async function completeShift(
 
           shiftId,
 
+          previousOperationalSlotToken:
+            control.slotToken,
+
+          nextOperationalSlotToken:
+            nextControl.slotToken,
+
           previousStatus:
             SHIFT_STATUSES.HANDOVER_PENDING,
 
           newStatus:
             SHIFT_STATUSES.COMPLETED,
 
+          temporaryAuthorizationId:
+            completedAuthorization?.id ??
+            null,
+
+          temporaryTechnicianUid:
+            completedAuthorization
+              ?.authorizedTechnicianUid ??
+            null,
+
           createdAt:
             FieldValue.serverTimestamp(),
 
           details:
-            "The shift handover was completed and technician scheduling entries were released.",
+            completedAuthorization
+              ? "The shift handover was completed, technician scheduling and memberships were released, and the temporary authorization was finalized."
+              : "The shift handover was completed and technician scheduling and memberships were released.",
         }
       );
 

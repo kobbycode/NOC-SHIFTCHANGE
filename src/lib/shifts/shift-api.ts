@@ -1,4 +1,8 @@
 import type {
+  ShiftCompletionApiResponse,
+  ShiftCompletionResult,
+  ShiftHandoverApiResponse,
+  ShiftHandoverResult,
   ShiftListApiResponse,
   ShiftListResult,
   ShiftMemberListApiResponse,
@@ -199,5 +203,141 @@ export async function getShiftMembers(
   return {
     members: result.members,
     total: result.total,
+  };
+}
+
+/*
+ * Begin handover for one active operational
+ * shift.
+ *
+ * Lifecycle validation and authorization
+ * remain authoritative on the server.
+ */
+export async function beginShiftHandover(
+  shiftId: string,
+): Promise<ShiftHandoverResult> {
+  const normalizedShiftId = shiftId.trim();
+
+  if (
+    !normalizedShiftId ||
+    normalizedShiftId.includes("/") ||
+    normalizedShiftId.length > 512
+  ) {
+    throw new ShiftApiError(
+      "Please provide a valid shift identifier.",
+      400,
+    );
+  }
+
+  const response = await fetch(
+    `/api/operations/shifts/${encodeURIComponent(
+      normalizedShiftId
+    )}/handover`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }
+  );
+
+  const data =
+    await readApiResponse(response);
+
+  const result =
+    requireSuccessfulResponse<
+      ShiftHandoverApiResponse
+    >(response, data);
+
+  if (
+    result.success !== true ||
+    !result.shift ||
+    result.shift.id !== normalizedShiftId ||
+    result.shift.status !==
+      "handover_pending" ||
+    typeof result.shift.handoverStartedAt !==
+      "string" ||
+    !Number.isFinite(
+      Date.parse(
+        result.shift.handoverStartedAt
+      )
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift handover response is invalid.",
+      response.status,
+    );
+  }
+
+  return {
+    shiftId: result.shift.id,
+    status: result.shift.status,
+    handoverStartedAt:
+      result.shift.handoverStartedAt,
+  };
+}
+
+/*
+ * Complete one handover-pending operational
+ * shift.
+ *
+ * Lifecycle validation and authorization
+ * remain authoritative on the server.
+ */
+export async function completeShift(
+  shiftId: string,
+): Promise<ShiftCompletionResult> {
+  const normalizedShiftId = shiftId.trim();
+
+  if (
+    !normalizedShiftId ||
+    normalizedShiftId.includes("/") ||
+    normalizedShiftId.length > 512
+  ) {
+    throw new ShiftApiError(
+      "Please provide a valid shift identifier.",
+      400,
+    );
+  }
+
+  const response = await fetch(
+    `/api/operations/shifts/${encodeURIComponent(
+      normalizedShiftId
+    )}/complete`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }
+  );
+
+  const data =
+    await readApiResponse(response);
+
+  const result =
+    requireSuccessfulResponse<
+      ShiftCompletionApiResponse
+    >(response, data);
+
+  if (
+    result.success !== true ||
+    !result.shift ||
+    result.shift.id !== normalizedShiftId ||
+    result.shift.status !== "completed" ||
+    typeof result.shift.actualEnd !==
+      "string" ||
+    !Number.isFinite(
+      Date.parse(result.shift.actualEnd)
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift completion response is invalid.",
+      response.status,
+    );
+  }
+
+  return {
+    shiftId: result.shift.id,
+    status: result.shift.status,
+    actualEnd: result.shift.actualEnd,
   };
 }

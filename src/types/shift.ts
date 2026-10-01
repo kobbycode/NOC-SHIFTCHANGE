@@ -28,6 +28,10 @@ export type ShiftMemberRole =
 export interface Shift {
   id: string;
 
+  operationalSlotToken: string | null;
+
+  permanentPairId: string | null;
+
   shiftType: ShiftType;
 
   status: ShiftStatus;

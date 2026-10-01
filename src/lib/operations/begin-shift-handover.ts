@@ -22,6 +22,7 @@ import type {
 } from "@/types/technician-schedule";
 
 import {
+  GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID,
   getOperationalCollections,
 } from "./collections";
 
@@ -40,6 +41,16 @@ import {
   assertNoScheduleConflict,
   parseShiftTimeRange,
 } from "./shift-overlap";
+
+import {
+  assertShiftOwnsOperationalSlot,
+  transitionOperationalShiftControl,
+} from "./operational-shift-control-state";
+
+import {
+  ensureOperationalShiftControl,
+  readOperationalShiftControl,
+} from "./operational-shift-control";
 
 export interface BeginShiftHandoverInput {
   shiftId: string;
@@ -77,15 +88,23 @@ export async function beginShiftHandover(
     );
   }
 
+  await ensureOperationalShiftControl(actorUid);
+
   const db = getAdminFirestore();
 
   const {
     shifts,
     shiftMembers,
     technicianSchedules,
+    operationalShiftControl,
   } = getOperationalCollections();
 
   const shiftRef = shifts.doc(shiftId);
+
+  const operationalShiftControlRef =
+    operationalShiftControl.doc(
+      GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID
+    );
 
   const actorRef = db
     .collection("users")
@@ -110,6 +129,11 @@ export async function beginShiftHandover(
       const actorSnapshot =
         await transaction.get(actorRef);
 
+      const controlSnapshot =
+        await transaction.get(
+          operationalShiftControlRef
+        );
+
       const shift = shiftSnapshot.data();
       const actor = actorSnapshot.data();
 
@@ -133,6 +157,32 @@ export async function beginShiftHandover(
         throw new AssignmentOperationError(
           "Your account is not authorized to begin shift handover.",
           403
+        );
+      }
+
+      if (!controlSnapshot.exists) {
+        throw new AssignmentOperationError(
+          "The global operational shift control is unavailable.",
+          409
+        );
+      }
+
+      const control =
+        readOperationalShiftControl(
+          controlSnapshot.data()
+        );
+
+      try {
+        assertShiftOwnsOperationalSlot(
+          control,
+          shiftId,
+          shift.operationalSlotToken,
+          shift.status
+        );
+      } catch {
+        throw new AssignmentOperationError(
+          "The selected shift does not occupy the current global operational slot.",
+          409
         );
       }
 
@@ -208,6 +258,8 @@ export async function beginShiftHandover(
         const member = document.data();
 
         if (
+          typeof member.id !== "string" ||
+          member.id !== document.id ||
           member.shiftId !== shiftId ||
           typeof member.technicianId !==
             "string" ||
@@ -236,10 +288,9 @@ export async function beginShiftHandover(
         }
 
         if (member.leftAt === null) {
-          currentMembers.push({
-            ...member,
-            id: document.id,
-          } as ShiftMember);
+          currentMembers.push(
+            member as ShiftMember
+          );
         }
       }
 
@@ -445,6 +496,24 @@ export async function beginShiftHandover(
       const now =
         new Date().toISOString();
 
+      let handoverControl;
+
+      try {
+        handoverControl =
+          transitionOperationalShiftControl(
+            control,
+            shiftId,
+            SHIFT_STATUSES.ACTIVE,
+            SHIFT_STATUSES.HANDOVER_PENDING,
+            now
+          );
+      } catch {
+        throw new AssignmentOperationError(
+          "The global operational slot cannot transition to handover pending.",
+          409
+        );
+      }
+
       transaction.update(
         shiftRef,
         {
@@ -460,6 +529,11 @@ export async function beginShiftHandover(
           handoverStartedTimestamp:
             FieldValue.serverTimestamp(),
         }
+      );
+
+      transaction.update(
+        operationalShiftControlRef,
+        handoverControl
       );
 
       for (
