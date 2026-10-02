@@ -34,6 +34,7 @@ const AVAILABLE_ROUTES = new Set([
   "/admin/users",
   "/supervisor",
   "/supervisor/shifts",
+  "/supervisor/attendance",
   "/supervisor/tasks",
   "/technician",
   "/technician/tasks",
