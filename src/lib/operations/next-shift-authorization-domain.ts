@@ -898,6 +898,113 @@ export function completeConsumedNextShiftAuthorization(input: {
   }
 }
 
+export function expireConsumedNextShiftAuthorization(input: {
+  authorization: unknown;
+  shiftId: string;
+  slotToken: string;
+  slotGeneration: number;
+  permanentPairId: string;
+  expiredAt: string;
+}): NextShiftAuthorization {
+  let authorization: NextShiftAuthorization;
+
+  try {
+    authorization =
+      assertNextShiftAuthorization(
+        input.authorization
+      );
+  } catch {
+    throw new NextShiftAuthorizationDomainError(
+      "The temporary authorization cannot be expired because its lifecycle state is invalid.",
+      409
+    );
+  }
+
+  if (
+    !isValidIdentifier(input.shiftId, 512) ||
+    !isValidUuid(input.slotToken) ||
+    !Number.isSafeInteger(
+      input.slotGeneration
+    ) ||
+    input.slotGeneration < 1 ||
+    !isValidIdentifier(
+      input.permanentPairId,
+      512
+    ) ||
+    !isCanonicalTimestamp(
+      input.expiredAt
+    )
+  ) {
+    throw new NextShiftAuthorizationDomainError(
+      "The authorization expiry context is invalid.",
+      409
+    );
+  }
+
+  if (
+    authorization.status !==
+      NEXT_SHIFT_AUTHORIZATION_STATUSES.CONSUMED ||
+    authorization.shiftId !==
+      input.shiftId ||
+    authorization.slotToken !==
+      input.slotToken ||
+    authorization.slotGeneration !==
+      input.slotGeneration ||
+    authorization.permanentPairId !==
+      input.permanentPairId ||
+    !isCanonicalTimestamp(
+      authorization.consumedAt
+    ) ||
+    authorization.completedAt !== null ||
+    authorization.expiredAt !== null
+  ) {
+    throw new NextShiftAuthorizationDomainError(
+      "The temporary authorization does not match the expired scheduled shift.",
+      409
+    );
+  }
+
+  const expiredAt =
+    Date.parse(input.expiredAt);
+
+  const consumedAt =
+    Date.parse(authorization.consumedAt);
+
+  const updatedAt =
+    Date.parse(authorization.updatedAt);
+
+  if (
+    expiredAt < consumedAt ||
+    expiredAt < updatedAt
+  ) {
+    throw new NextShiftAuthorizationDomainError(
+      "The authorization expiry timestamp is inconsistent with its lifecycle.",
+      409
+    );
+  }
+
+  const expiredAuthorization:
+    NextShiftAuthorization = {
+      ...authorization,
+      status:
+        NEXT_SHIFT_AUTHORIZATION_STATUSES.EXPIRED,
+      completedAt: null,
+      expiredAt: input.expiredAt,
+      updatedAt: input.expiredAt,
+    };
+
+  try {
+    return assertNextShiftAuthorization(
+      expiredAuthorization
+    );
+  } catch {
+    throw new NextShiftAuthorizationDomainError(
+      "The expired temporary authorization is invalid.",
+      409
+    );
+  }
+}
+
 export function assertNextShiftAuthorization(
   value: unknown
 ): NextShiftAuthorization {

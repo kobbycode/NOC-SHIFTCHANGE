@@ -10,6 +10,8 @@ export const SHIFT_TRANSITION_ACTIONS = {
     "SHIFT_HANDOVER_STARTED",
 
   COMPLETED: "SHIFT_COMPLETED",
+
+  CANCELLED: "SHIFT_CANCELLED",
 } as const;
 
 export type ShiftTransitionAction =

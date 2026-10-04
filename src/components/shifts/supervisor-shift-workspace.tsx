@@ -55,6 +55,8 @@ function formatShiftStatus(
       return "Handover Pending";
     case "completed":
       return "Completed";
+    case "cancelled":
+      return "Cancelled";
     default:
       return status;
   }
@@ -92,6 +94,8 @@ function statusClasses(
     case "completed":
       return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
 
+    case "cancelled":
+      return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300";
     default:
       return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
   }

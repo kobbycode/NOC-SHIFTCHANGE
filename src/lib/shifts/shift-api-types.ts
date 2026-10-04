@@ -1,4 +1,7 @@
 import type {
+  Attendance,
+} from "@/types/attendance";
+import type {
   Shift,
   ShiftMember,
 } from "@/types/shift";
@@ -117,4 +120,133 @@ export interface ShiftCompletionSuccessResponse {
  */
 export type ShiftCompletionApiResponse =
   | ShiftCompletionSuccessResponse
+  | ShiftApiErrorResponse;
+/*
+ * Technician-scoped authoritative
+ * current-shift projection.
+ *
+ * This is intentionally narrower than the
+ * supervisor/admin shift-list model.
+ */
+export interface TechnicianCurrentShiftResult {
+  id: string;
+
+  shiftType:
+    Shift["shiftType"];
+
+  status:
+    | "scheduled"
+    | "active"
+    | "handover_pending";
+
+  scheduledStart: string;
+  scheduledEnd: string;
+
+  actualStart: string | null;
+  actualEnd: null;
+
+  participationAuthority:
+    Attendance["participationAuthority"];
+
+  authorizationId: string | null;
+
+  attendance: Attendance | null;
+
+  joinedAt: string | null;
+
+  canStart: boolean;
+  canJoin: boolean;
+}
+
+/*
+ * Successful technician current-shift
+ * retrieval response.
+ */
+export interface TechnicianCurrentShiftSuccessResponse {
+  success: true;
+
+  currentShift:
+    TechnicianCurrentShiftResult | null;
+}
+
+/*
+ * Technician current-shift API response.
+ */
+export type TechnicianCurrentShiftApiResponse =
+  | TechnicianCurrentShiftSuccessResponse
+  | ShiftApiErrorResponse;
+
+/*
+ * Authoritative shift-start result exposed
+ * to the browser.
+ *
+ * Starting a shift does not create
+ * attendance.
+ */
+export interface ShiftStartResult {
+  shiftId: string;
+  status: "active";
+  actualStart: string;
+}
+
+/*
+ * Successful shift-start API response.
+ */
+export interface ShiftStartSuccessResponse {
+  success: true;
+  message: string;
+
+  shift: {
+    id: string;
+    status: "active";
+    actualStart: string;
+  };
+}
+
+/*
+ * Shift-start API response.
+ */
+export type ShiftStartApiResponse =
+  | ShiftStartSuccessResponse
+  | ShiftApiErrorResponse;
+
+/*
+ * Authoritative attendance record returned
+ * by explicit technician join.
+ *
+ * The join endpoint intentionally returns
+ * only the fields required by the immediate
+ * client transition. The full authoritative
+ * current-shift projection is reloaded after
+ * the action.
+ */
+export interface ShiftJoinResult {
+  id: string;
+  shiftId: string;
+  technicianId: string;
+
+  status:
+    Attendance["status"];
+
+  participationAuthority:
+    Attendance["participationAuthority"];
+
+  recordedAt: string;
+}
+
+/*
+ * Successful explicit shift-join response.
+ */
+export interface ShiftJoinSuccessResponse {
+  success: true;
+  message: string;
+
+  attendance: ShiftJoinResult;
+}
+
+/*
+ * Shift-join API response.
+ */
+export type ShiftJoinApiResponse =
+  | ShiftJoinSuccessResponse
   | ShiftApiErrorResponse;

@@ -81,7 +81,7 @@ export function doShiftTimesOverlap(
  * Prevent overlapping shifts using
  * authoritative shift records.
  *
- * Completed shifts are ignored.
+ * Completed and cancelled shifts are ignored.
  *
  * Active shifts and unfinished handovers
  * prevent new assignments.
@@ -103,7 +103,9 @@ export function assertNoOverlappingShifts(
 
     if (
       existingShift.status ===
-      SHIFT_STATUSES.COMPLETED
+        SHIFT_STATUSES.COMPLETED ||
+      existingShift.status ===
+        SHIFT_STATUSES.CANCELLED
     ) {
       continue;
     }

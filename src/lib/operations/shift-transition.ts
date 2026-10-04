@@ -33,6 +33,9 @@ export const SHIFT_TRANSITIONS: Readonly<
 
   [SHIFT_STATUSES.COMPLETED]:
     null,
+
+  [SHIFT_STATUSES.CANCELLED]:
+    null,
 };
 
 export function isShiftStatus(
@@ -42,7 +45,8 @@ export function isShiftStatus(
     value === SHIFT_STATUSES.SCHEDULED ||
     value === SHIFT_STATUSES.ACTIVE ||
     value === SHIFT_STATUSES.HANDOVER_PENDING ||
-    value === SHIFT_STATUSES.COMPLETED
+    value === SHIFT_STATUSES.COMPLETED ||
+    value === SHIFT_STATUSES.CANCELLED
   );
 }
 

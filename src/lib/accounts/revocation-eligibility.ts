@@ -13,7 +13,8 @@ export type RevocationShiftStatus =
   | "scheduled"
   | "active"
   | "handover_pending"
-  | "completed";
+  | "completed"
+  | "cancelled";
 
 export interface RevocationShift {
   id: string;

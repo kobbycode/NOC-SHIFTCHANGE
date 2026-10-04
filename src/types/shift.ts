@@ -12,6 +12,7 @@ export const SHIFT_STATUSES = {
   ACTIVE: "active",
   HANDOVER_PENDING: "handover_pending",
   COMPLETED: "completed",
+  CANCELLED: "cancelled",
 } as const;
 
 export type ShiftStatus =

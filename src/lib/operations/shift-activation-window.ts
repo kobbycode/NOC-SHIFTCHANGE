@@ -73,3 +73,45 @@ export function assertShiftActivationWindow(
     );
   }
 }
+
+/**
+ * Require the normal shift activation window
+ * to have fully expired before recovery.
+ *
+ * This helper validates only. It performs no
+ * Firestore writes.
+ */
+export function assertShiftActivationWindowExpired(
+  scheduledStart: string,
+  scheduledEnd: string,
+  recoveryTime: Date = new Date()
+): void {
+  const range = parseShiftTimeRange(
+    scheduledStart,
+    scheduledEnd
+  );
+
+  const now = recoveryTime.getTime();
+
+  if (!Number.isFinite(now)) {
+    throw new AssignmentOperationError(
+      "The shift recovery time is invalid.",
+      409
+    );
+  }
+
+  const latestStart =
+    Math.min(
+      range.start +
+        SHIFT_ACTIVATION_WINDOW.LATE_MINUTES *
+          60_000,
+      range.end
+    );
+
+  if (now <= latestStart) {
+    throw new AssignmentOperationError(
+      "The shift activation window has not expired. Recovery is not permitted.",
+      409
+    );
+  }
+}

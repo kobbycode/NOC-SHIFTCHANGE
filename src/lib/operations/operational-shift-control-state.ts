@@ -398,6 +398,53 @@ export function advanceOperationalShiftControl(
   );
 }
 
+export function advanceExpiredScheduledOperationalShiftControl(
+  value: unknown,
+  cancelledShiftId: string,
+  nextSlotToken: string,
+  advancedAt: string
+): OperationalShiftControl {
+  const control =
+    assertOperationalShiftControl(value);
+
+  if (
+    control.slotStatus !== "consumed" ||
+    control.shiftId !== cancelledShiftId ||
+    control.shiftStatus !== "scheduled"
+  ) {
+    throw new Error(
+      "Only the current expired scheduled shift can advance the global operational slot through recovery."
+    );
+  }
+
+  requireShiftId(cancelledShiftId);
+  requireSlotToken(nextSlotToken);
+  requireTimestamp(advancedAt);
+
+  if (
+    Date.parse(advancedAt) <
+    Date.parse(control.updatedAt)
+  ) {
+    throw new Error(
+      "The operational shift recovery advancement timestamp is stale."
+    );
+  }
+
+  if (nextSlotToken === control.slotToken) {
+    throw new Error(
+      "An operational shift slot token cannot be reused."
+    );
+  }
+
+  return createPendingOperationalShiftControl(
+    nextSlotToken,
+    control.generation + 1,
+    advancedAt,
+    control.slotToken,
+    advancedAt
+  );
+}
+
 export function assertShiftOwnsOperationalSlot(
   controlValue: unknown,
   shiftId: string,

@@ -1,3 +1,12 @@
+import {
+  ATTENDANCE_PARTICIPATION_AUTHORITIES,
+  ATTENDANCE_STATUSES,
+} from "@/types/attendance";
+
+import {
+  SHIFT_STATUSES,
+  SHIFT_TYPES,
+} from "@/types/shift";
 import type {
   ShiftCompletionApiResponse,
   ShiftCompletionResult,
@@ -7,6 +16,12 @@ import type {
   ShiftListResult,
   ShiftMemberListApiResponse,
   ShiftMemberListResult,
+  ShiftJoinApiResponse,
+  ShiftJoinResult,
+  ShiftStartApiResponse,
+  ShiftStartResult,
+  TechnicianCurrentShiftApiResponse,
+  TechnicianCurrentShiftResult,
 } from "./shift-api-types";
 
 /*
@@ -339,5 +354,540 @@ export async function completeShift(
     shiftId: result.shift.id,
     status: result.shift.status,
     actualEnd: result.shift.actualEnd,
+  };
+}
+function isShiftApiRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function isCanonicalShiftApiTimestamp(
+  value: unknown,
+): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const timestamp =
+    Date.parse(value);
+
+  return (
+    Number.isFinite(timestamp) &&
+    new Date(timestamp).toISOString() ===
+      value
+  );
+}
+
+function isNullableShiftApiTimestamp(
+  value: unknown,
+): value is string | null {
+  return (
+    value === null ||
+    isCanonicalShiftApiTimestamp(value)
+  );
+}
+
+function normalizeOperationalShiftId(
+  shiftId: string,
+): string {
+  const normalizedShiftId =
+    shiftId.trim();
+
+  if (
+    !normalizedShiftId ||
+    normalizedShiftId === "." ||
+    normalizedShiftId === ".." ||
+    normalizedShiftId.includes("/") ||
+    normalizedShiftId.length > 512
+  ) {
+    throw new ShiftApiError(
+      "Please provide a valid shift identifier.",
+      400,
+    );
+  }
+
+  return normalizedShiftId;
+}
+
+function isAllowedParticipationAuthority(
+  value: unknown,
+): value is
+  | "primary"
+  | "temporary_authorized" {
+  return Object.values(
+    ATTENDANCE_PARTICIPATION_AUTHORITIES,
+  ).some(
+    (authority) =>
+      authority === value,
+  );
+}
+
+function isPresentShiftAttendanceStatus(
+  value: unknown,
+): value is "present" {
+  return (
+    value ===
+    ATTENDANCE_STATUSES.PRESENT
+  );
+}
+
+function isTechnicianCurrentShiftAttendance(
+  value: unknown,
+  expectedShiftId: string,
+  expectedAuthority:
+    | "primary"
+    | "temporary_authorized",
+  expectedAuthorizationId:
+    string | null,
+): boolean {
+  if (!isShiftApiRecord(value)) {
+    return false;
+  }
+
+  const {
+    id,
+    shiftId,
+    technicianId,
+    status,
+    participationAuthority,
+    authorizationId,
+    clockIn,
+    clockOut,
+    isProvisional,
+    recordedAt,
+    updatedAt,
+  } = value;
+
+  if (
+    typeof id !== "string" ||
+    shiftId !== expectedShiftId ||
+    typeof technicianId !== "string" ||
+    !technicianId.trim() ||
+    id !==
+      `${expectedShiftId}_${technicianId}` ||
+    !isPresentShiftAttendanceStatus(
+      status,
+    ) ||
+    participationAuthority !==
+      expectedAuthority ||
+    authorizationId !==
+      expectedAuthorizationId ||
+    typeof isProvisional !==
+      "boolean" ||
+    !isNullableShiftApiTimestamp(
+      clockIn,
+    ) ||
+    !isNullableShiftApiTimestamp(
+      clockOut,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      recordedAt,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      updatedAt,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    Date.parse(updatedAt) <
+    Date.parse(recordedAt)
+  ) {
+    return false;
+  }
+
+  if (
+    clockIn !== null &&
+    clockOut !== null &&
+    Date.parse(clockOut) <
+      Date.parse(clockIn)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isTechnicianCurrentShift(
+  value: unknown,
+): value is TechnicianCurrentShiftResult {
+  if (!isShiftApiRecord(value)) {
+    return false;
+  }
+
+  const {
+    id,
+    shiftType,
+    status,
+    scheduledStart,
+    scheduledEnd,
+    actualStart,
+    actualEnd,
+    participationAuthority,
+    authorizationId,
+    attendance,
+    joinedAt,
+    canStart,
+    canJoin,
+  } = value;
+
+  if (
+    typeof id !== "string" ||
+    !id.trim() ||
+    id === "." ||
+    id === ".." ||
+    id.includes("/") ||
+    id.length > 512 ||
+    !Object.values(
+      SHIFT_TYPES,
+    ).some(
+      (allowedType) =>
+        allowedType === shiftType,
+    ) ||
+    (
+      status !==
+        SHIFT_STATUSES.SCHEDULED &&
+      status !==
+        SHIFT_STATUSES.ACTIVE &&
+      status !==
+        SHIFT_STATUSES.HANDOVER_PENDING
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      scheduledStart,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      scheduledEnd,
+    ) ||
+    Date.parse(scheduledEnd) <=
+      Date.parse(scheduledStart) ||
+    !isNullableShiftApiTimestamp(
+      actualStart,
+    ) ||
+    actualEnd !== null ||
+    !isAllowedParticipationAuthority(
+      participationAuthority,
+    ) ||
+    typeof canStart !== "boolean" ||
+    typeof canJoin !== "boolean"
+  ) {
+    return false;
+  }
+
+  if (
+    participationAuthority ===
+      ATTENDANCE_PARTICIPATION_AUTHORITIES.PRIMARY
+  ) {
+    if (authorizationId !== null) {
+      return false;
+    }
+  } else if (
+    typeof authorizationId !== "string" ||
+    !authorizationId.trim()
+  ) {
+    return false;
+  }
+
+  if (
+    status ===
+      SHIFT_STATUSES.SCHEDULED
+  ) {
+    if (
+      actualStart !== null ||
+      attendance !== null ||
+      joinedAt !== null ||
+      canJoin ||
+      canStart !==
+        (
+          participationAuthority ===
+          ATTENDANCE_PARTICIPATION_AUTHORITIES.TEMPORARY_AUTHORIZED
+        )
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  if (
+    !isCanonicalShiftApiTimestamp(
+      actualStart,
+    )
+  ) {
+    return false;
+  }
+
+  if (attendance === null) {
+    if (joinedAt !== null) {
+      return false;
+    }
+  } else {
+    if (
+      !isTechnicianCurrentShiftAttendance(
+        attendance,
+        id,
+        participationAuthority,
+        authorizationId,
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      !isShiftApiRecord(
+        attendance,
+      ) ||
+      joinedAt !==
+        attendance.recordedAt
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    status ===
+      SHIFT_STATUSES.ACTIVE
+  ) {
+    return (
+      canStart === false &&
+      canJoin ===
+        (attendance === null)
+    );
+  }
+
+  return (
+    canStart === false &&
+    canJoin === false
+  );
+}
+
+/*
+ * Retrieve only the operational shift that
+ * is authoritative and relevant to the
+ * currently authenticated technician.
+ *
+ * This deliberately does not use getShifts(),
+ * because the general shift-list endpoint
+ * remains restricted to supervisors/admins.
+ */
+export async function getTechnicianCurrentShift():
+Promise<TechnicianCurrentShiftResult | null> {
+  const response =
+    await fetch(
+      "/api/operations/technician/current-shift",
+      {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      },
+    );
+
+  const data =
+    await readApiResponse(
+      response,
+    );
+
+  const result =
+    requireSuccessfulResponse<
+      TechnicianCurrentShiftApiResponse
+    >(
+      response,
+      data,
+    );
+
+  if (
+    result.success !== true ||
+    !(
+      result.currentShift === null ||
+      isTechnicianCurrentShift(
+        result.currentShift,
+      )
+    )
+  ) {
+    throw new ShiftApiError(
+      "The technician current-shift response is invalid.",
+      response.status,
+    );
+  }
+
+  return result.currentShift;
+}
+
+/*
+ * Request authoritative shift activation.
+ *
+ * For a technician, the server independently
+ * verifies exact temporary authorization,
+ * slot ownership, eligibility, and the
+ * activation window.
+ *
+ * Starting a shift is not attendance.
+ */
+export async function startShift(
+  shiftId: string,
+): Promise<ShiftStartResult> {
+  const normalizedShiftId =
+    normalizeOperationalShiftId(
+      shiftId,
+    );
+
+  const response =
+    await fetch(
+      `/api/operations/shifts/${encodeURIComponent(
+        normalizedShiftId,
+      )}/start`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      },
+    );
+
+  const data =
+    await readApiResponse(
+      response,
+    );
+
+  const result =
+    requireSuccessfulResponse<
+      ShiftStartApiResponse
+    >(
+      response,
+      data,
+    );
+
+  if (
+    result.success !== true ||
+    !isShiftApiRecord(
+      result.shift,
+    ) ||
+    result.shift.id !==
+      normalizedShiftId ||
+    result.shift.status !==
+      SHIFT_STATUSES.ACTIVE ||
+    !isCanonicalShiftApiTimestamp(
+      result.shift.actualStart,
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift-start response is invalid.",
+      response.status,
+    );
+  }
+
+  return {
+    shiftId:
+      result.shift.id,
+    status:
+      result.shift.status,
+    actualStart:
+      result.shift.actualStart,
+  };
+}
+
+/*
+ * Explicitly join an active shift.
+ *
+ * This is the participation boundary that
+ * creates authoritative attendance.
+ *
+ * The caller should reload
+ * getTechnicianCurrentShift() after success
+ * instead of constructing optimistic
+ * attendance state locally.
+ */
+export async function joinShift(
+  shiftId: string,
+): Promise<ShiftJoinResult> {
+  const normalizedShiftId =
+    normalizeOperationalShiftId(
+      shiftId,
+    );
+
+  const response =
+    await fetch(
+      `/api/operations/shifts/${encodeURIComponent(
+        normalizedShiftId,
+      )}/join`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      },
+    );
+
+  const data =
+    await readApiResponse(
+      response,
+    );
+
+  const result =
+    requireSuccessfulResponse<
+      ShiftJoinApiResponse
+    >(
+      response,
+      data,
+    );
+
+  if (
+    result.success !== true ||
+    !isShiftApiRecord(
+      result.attendance,
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift-join response is invalid.",
+      response.status,
+    );
+  }
+
+  const attendance =
+    result.attendance;
+
+  const {
+    id,
+    shiftId:
+      attendanceShiftId,
+    technicianId,
+    status,
+    participationAuthority,
+    recordedAt,
+  } = attendance;
+
+  if (
+    typeof technicianId !== "string" ||
+    !technicianId.trim() ||
+    attendanceShiftId !==
+      normalizedShiftId ||
+    id !==
+      `${normalizedShiftId}_${technicianId}` ||
+    status !==
+      ATTENDANCE_STATUSES.PRESENT ||
+    !isAllowedParticipationAuthority(
+      participationAuthority,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      recordedAt,
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift-join response is invalid.",
+      response.status,
+    );
+  }
+
+  return {
+    id,
+    shiftId:
+      attendanceShiftId,
+    technicianId,
+    status,
+    participationAuthority,
+    recordedAt,
   };
 }

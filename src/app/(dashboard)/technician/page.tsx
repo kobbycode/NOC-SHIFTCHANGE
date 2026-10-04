@@ -1,20 +1,24 @@
+import {
+  TechnicianShiftWorkspace,
+} from "@/components/shifts/technician-shift-workspace";
 
 export default function TechnicianDashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
           Technician Overview
         </h1>
 
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Your shift, attendance, and assigned responsibilities.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <TechnicianShiftWorkspace />
+
+      <div className="grid gap-4 sm:grid-cols-2">
         {[
-          "My Shift",
           "My Assigned Tasks",
           "Outstanding Faults",
         ].map((label) => (
@@ -39,4 +43,3 @@ export default function TechnicianDashboardPage() {
     </div>
   );
 }
-  
