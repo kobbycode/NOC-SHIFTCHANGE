@@ -6,6 +6,7 @@ import {
 } from "@/lib/firebase/admin";
 
 export const OPERATIONAL_COLLECTIONS = {
+  HANDOVERS: "handovers",
   SHIFTS: "shifts",
 
   SHIFT_MEMBERS: "shift_members",
@@ -43,6 +44,7 @@ export function getOperationalCollections() {
 
   return {
     db,
+    handovers: db.collection(OPERATIONAL_COLLECTIONS.HANDOVERS),
 
     shifts: db.collection(
       OPERATIONAL_COLLECTIONS.SHIFTS

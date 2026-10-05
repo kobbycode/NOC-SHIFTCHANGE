@@ -1,6 +1,7 @@
 import type {
   ShiftStatus,
 } from "@/types/shift";
+import type { TransferOperationalShiftControlInput } from "@/types/handover";
 
 export type OperationalShiftSlotStatus =
   | "pending"
@@ -466,4 +467,49 @@ export function assertShiftOwnsOperationalSlot(
   }
 
   return control;
+}
+
+// Formal handover switches directly between consumed owners. Readiness and
+// authenticated service checks belong to the caller; this validates slot lineage.
+export function transferOperationalShiftControl(
+  input: TransferOperationalShiftControlInput
+): OperationalShiftControl {
+  const control = assertOperationalShiftControl(input.currentControl);
+  requireShiftId(input.outgoingShiftId);
+  requireShiftId(input.incomingShiftId);
+  requireSlotToken(input.outgoingSlotToken);
+  requireSlotToken(input.successorSlotToken);
+  requireTimestamp(input.transferTimestamp);
+  if (
+    control.slotStatus !== "consumed" ||
+    control.shiftStatus !== "handover_pending" ||
+    control.shiftId !== input.outgoingShiftId ||
+    control.slotToken.toLowerCase() !== input.outgoingSlotToken.toLowerCase() ||
+    control.generation !== input.outgoingGeneration
+  ) {
+    throw new Error("Stale operational control: only the expected handover-pending owner can transfer.");
+  }
+  if (
+    !Number.isSafeInteger(input.successorGeneration) ||
+    input.successorGeneration !== control.generation + 1 ||
+    input.successorSlotToken.toLowerCase() === control.slotToken.toLowerCase() ||
+    input.incomingShiftId === control.shiftId
+  ) {
+    throw new Error("Invalid successor lineage for operational transfer.");
+  }
+  if (Date.parse(input.transferTimestamp) < Date.parse(control.updatedAt)) {
+    throw new Error("The operational shift transfer timestamp is stale.");
+  }
+  return assertOperationalShiftControl({
+    generation: input.successorGeneration,
+    slotToken: input.successorSlotToken.toLowerCase(),
+    slotStatus: "consumed",
+    shiftId: input.incomingShiftId,
+    shiftStatus: "active",
+    createdAt: input.transferTimestamp,
+    consumedAt: input.transferTimestamp,
+    previousSlotToken: control.slotToken,
+    advancedAt: input.transferTimestamp,
+    updatedAt: input.transferTimestamp,
+  });
 }

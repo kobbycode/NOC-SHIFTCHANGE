@@ -12,6 +12,11 @@ import {
   SESSION_COOKIE,
 } from "@/lib/auth/session";
 
+import {
+  PasswordReauthenticationError,
+  reauthenticatePassword,
+} from "@/lib/auth/password-reauthentication";
+
 export const runtime = "nodejs";
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -147,57 +152,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the current password with Firebase.
-    const verificationResponse = await fetch(
-      "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" +
-        encodeURIComponent(apiKey),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: authUser.email,
-          password: currentPassword,
-          returnSecureToken: true,
-        }),
-        cache: "no-store",
-      }
-    );
-
-    if (!verificationResponse.ok) {
-      if (
-        verificationResponse.status === 400 ||
-        verificationResponse.status === 401
-      ) {
-        return errorResponse(
-          "Current password is incorrect or authentication was rejected.",
-          400
-        );
-      }
-
-      console.error(
-        "Firebase password verification failed:",
-        verificationResponse.status
-      );
-
-      return errorResponse(
-        "Unable to verify your password. Please try again later.",
-        503
-      );
-    }
-
-    const verification =
-      await verificationResponse.json();
-
-    // Ensure the verified credentials belong
-    // to the currently authenticated user.
-    if (verification.localId !== user.uid) {
-      return errorResponse(
-        "Account verification failed.",
-        403
-      );
-    }
+    // Verify the password and bind the Firebase identity to the session actor.
+    await reauthenticatePassword({
+      expectedUid: user.uid,
+      email: authUser.email,
+      password: currentPassword,
+    }, { apiKey });
 
     // Recheck the latest account status.
     const latestProfile = await firestore
@@ -274,6 +234,10 @@ export async function POST(request: NextRequest) {
         "Password changed successfully. Please sign in again.",
     });
   } catch (error) {
+    if (error instanceof PasswordReauthenticationError) {
+      return errorResponse(error.message, error.status);
+    }
+
     console.error(
       "Password change failed:",
       error instanceof Error

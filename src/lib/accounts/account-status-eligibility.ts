@@ -23,6 +23,12 @@ import {
 import {
   isShiftStatus,
 } from "@/lib/operations/shift-transition";
+import {
+  assertHandoverAggregate,
+  createHandoverDocumentId,
+  resolveHandoverParticipants,
+} from "@/lib/operations/handover-domain";
+import { HANDOVER_LIFECYCLE_STATUSES } from "@/types/handover";
 
 export class AccountOperationalError extends Error {
   constructor(
@@ -38,6 +44,12 @@ export class AccountOperationalError extends Error {
 function invalidData(): never {
   throw new AccountOperationalError(
     "The technician's operational records require administrator review."
+  );
+}
+
+function protectedShiftDuty(): never {
+  throw new AccountOperationalError(
+    "This technician has a scheduled or active shift, or an unfinished handover. Complete or reassign these duties before blocking the account."
   );
 }
 
@@ -146,6 +158,7 @@ export async function requireSafeAccountBlocking(
     technicianSchedules,
     tasks,
     taskAssignments,
+    handovers,
   } = getOperationalCollections();
 
   if (
@@ -232,6 +245,10 @@ export async function requireSafeAccountBlocking(
 
   const shiftIds =
     new Set<string>();
+  const scheduleByShiftId = new Map<string, Record<string, unknown>>();
+  // A future reservation can explain only a schedule reference. Active
+  // membership and actual primary-Shift references still require a real Shift.
+  const materializedShiftIds = new Set<string>();
 
   for (const entry of entries) {
     if (
@@ -285,6 +302,7 @@ export async function requireSafeAccountBlocking(
     shiftIds.add(
       record.shiftId
     );
+    scheduleByShiftId.set(record.shiftId, record);
   }
 
   /*
@@ -311,6 +329,7 @@ export async function requireSafeAccountBlocking(
     if (
       member.leftAt === null
     ) {
+      materializedShiftIds.add(member.shiftId);
       shiftIds.add(
         member.shiftId
       );
@@ -331,6 +350,7 @@ export async function requireSafeAccountBlocking(
     const document of
     primaryShiftSnapshot.docs
   ) {
+    materializedShiftIds.add(document.id);
     shiftIds.add(
       document.id
     );
@@ -364,7 +384,31 @@ export async function requireSafeAccountBlocking(
     if (
       !snapshot.exists
     ) {
-      invalidData();
+      const entry = scheduleByShiftId.get(snapshot.id);
+      if (!entry || entry.status !== SHIFT_STATUSES.SCHEDULED ||
+          materializedShiftIds.has(snapshot.id)) invalidData();
+      const backing = await transaction.get(handovers.where(
+        "reservation.reservedIncomingShiftId", "==", snapshot.id
+      ));
+      if (backing.size !== 1) invalidData();
+      const document = backing.docs[0];
+      // Translate malformed domain data into the existing account corruption
+      // result. Query/transport failures are not mistaken for validated duties.
+      try {
+        const aggregate = assertHandoverAggregate(document.data());
+        if (document.id !== createHandoverDocumentId(aggregate.identity.outgoingShiftId) ||
+            aggregate.lifecycleStatus !== HANDOVER_LIFECYCLE_STATUSES.COLLECTING_CONFIRMATIONS ||
+            aggregate.reservation.reservedIncomingShiftId !== entry.shiftId ||
+            aggregate.reservation.scheduledStart !== entry.scheduledStart ||
+            aggregate.reservation.scheduledEnd !== entry.scheduledEnd ||
+            !resolveHandoverParticipants(aggregate).some((participant) =>
+              participant.side === "incoming" && participant.technicianUid === technicianUid)) {
+          invalidData();
+        }
+      } catch {
+        invalidData();
+      }
+      protectedShiftDuty();
     }
 
     const shift =
@@ -394,9 +438,7 @@ export async function requireSafeAccountBlocking(
       shift.status !==
       SHIFT_STATUSES.COMPLETED
     ) {
-      throw new AccountOperationalError(
-        "This technician has a scheduled or active shift, or an unfinished handover. Complete or reassign these duties before blocking the account."
-      );
+      protectedShiftDuty();
     }
   }
 
