@@ -96,7 +96,7 @@ async function readPair(transaction: Transaction, pairId: string) {
   return ids;
 }
 
-async function readWork(transaction: Transaction, outgoingShiftId: string) {
+export async function readAuthoritativeHandoverWorkSnapshot(transaction: Transaction, outgoingShiftId: string) {
   const { tasks, taskAssignments } = getOperationalCollections();
   // The handover_pending Shift prevents query-membership additions. Reading ALL
   // tasks (including terminal tasks) also protects manager lifecycle resolution.
@@ -219,7 +219,7 @@ async function persist(operation: Operation, input: FormalHandoverActor,
     }
     const incomingIds: string[] = selected ? await readPair(transaction, selected.incomingPermanentPairId) : [];
     for (const uid of incomingIds) await requireEligibleTechnician(transaction, uid);
-    const workSnapshot = await readWork(transaction, input.outgoingShiftId);
+    const workSnapshot = await readAuthoritativeHandoverWorkSnapshot(transaction, input.outgoingShiftId);
     const now = new Date().toISOString();
     const supervisor = { uid: input.actorUid, authority: input.expectedRole === "admin" ? "manager" as const : "supervisor" as const };
     const context = { revision: expected?.expectedRevision ?? 1, snapshotHash: expected?.expectedSnapshotHash ?? "",
