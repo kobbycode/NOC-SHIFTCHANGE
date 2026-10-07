@@ -326,7 +326,7 @@ for (const kind of ["duplicate physical document", "missing task", "relinked tas
       await ref("handover_task_dispositions", dispositionId(f, task)).update({ recordedRevision: 100 });
       message = "Inconsistent authoritative disposition provenance; administrator review required.";
     }
-    if (kind === "assignment corruption") { await ref("task_assignments", assignment.id).update({ transferredTo: "bad" }); Class = HandoverDomainError; message = "Malformed authoritative handover work."; }
+    if (kind === "assignment corruption") { await ref("task_assignments", assignment.id).update({ transferredTo: "bad" }); Class = AssignmentOperationError; message = "Inconsistent authoritative assignment release evidence."; }
     if (kind === "unknown snapshot schema") {
       await ref("handovers", next.handoverDocumentId).update({ "workSnapshot.schema": "handover-work-v3" });
       Class = HandoverDomainError; message = "Unsupported handover work snapshot schema.";

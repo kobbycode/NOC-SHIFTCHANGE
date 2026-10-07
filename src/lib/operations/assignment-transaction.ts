@@ -13,6 +13,15 @@ import {
 import {
   evaluateAssignmentEligibility,
 } from "./assignment-eligibility";
+import { validateTaskAssignmentHistory } from "./assignment-generation-domain";
+
+export function requireValidTaskAssignmentHistory(taskId: string, documents: readonly { id: string; data(): unknown }[]) {
+  try {
+    return validateTaskAssignmentHistory(taskId, documents.map(document => ({ id: document.id, data: document.data() })));
+  } catch {
+    throw new AssignmentOperationError("Malformed assignment generation history; administrator review required.", 409);
+  }
+}
 
 export class AssignmentOperationError extends Error {
   constructor(

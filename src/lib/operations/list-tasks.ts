@@ -1,3 +1,4 @@
+import { assertAssignmentRelease } from "./assignment-generation-domain";
 
 import "server-only";
 
@@ -20,6 +21,7 @@ import type {
 
 import {
   AssignmentOperationError,
+  requireValidTaskAssignmentHistory,
 } from "./assignment-transaction";
 
 export interface TaskListItem {
@@ -111,18 +113,11 @@ export async function listTasks(
         )
         .get();
 
-    const activeAssignments =
-      assignmentSnapshot.docs
-        .map(
-          (document) =>
-            document.data() as TaskAssignment
-        )
-        .filter(
-          (assignment) =>
-            assignment.responsibilityStatus !==
-              "released" &&
-            assignment.releasedAt == null
-        );
+    const assignmentTaskIds = new Set(assignmentSnapshot.docs.map(document => document.data().taskId));
+    const validated = [...assignmentTaskIds].flatMap(taskId => requireValidTaskAssignmentHistory(taskId,
+      assignmentSnapshot.docs.filter(document => document.data().taskId === taskId)));
+    const activeAssignments = validated.filter(assignment =>
+      assertAssignmentRelease(assignment as unknown as Record<string, unknown>) === "active");
 
     const taskIds = [
       ...new Set(
@@ -192,13 +187,9 @@ export async function listTasks(
   const assignmentSnapshot =
     await taskAssignments.get();
 
-  const allAssignments =
-    assignmentSnapshot.docs.map(
-      (document) => ({
-        ...document.data(),
-        id: document.id,
-      }) as TaskAssignment
-    );
+  const assignmentTaskIds = new Set(assignmentSnapshot.docs.map(document => document.data().taskId));
+  const allAssignments = [...assignmentTaskIds].flatMap(taskId => requireValidTaskAssignmentHistory(taskId,
+    assignmentSnapshot.docs.filter(document => document.data().taskId === taskId)));
 
   const results: TaskListItem[] =
     taskSnapshot.docs.map(

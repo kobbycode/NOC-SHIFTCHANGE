@@ -122,7 +122,7 @@ test("supervisor is authorized and no extra endpoint exists", async () => {
 // Exercise the production service and real pure/schedule helpers with a small
 // transactional store. Retry discards the first attempt's queued writes.
 const helperSources = Object.fromEntries(await Promise.all([
-  "handover-domain", "handover-work-disposition-domain", "handover-work-snapshot", "operational-shift-control-state",
+  "assignment-identity", "assignment-generation-domain", "handover-domain", "handover-work-disposition-domain", "handover-work-snapshot", "operational-shift-control-state",
   "shift-overlap", "prepare-technician-schedule",
 ].map(async (name) => [name, await readFile(new URL(`../src/lib/operations/${name}.ts`, import.meta.url), "utf8")])));
 function replacementStore(proposedId = "replacement-id", collision = false) {

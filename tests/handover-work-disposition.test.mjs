@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import ts from "typescript";
 
-const sources = Object.fromEntries(await Promise.all(["handover-domain", "handover-work-disposition-domain", "handover-work-snapshot"]
+const sources = Object.fromEntries(await Promise.all(["assignment-identity", "assignment-generation-domain", "handover-domain", "handover-work-disposition-domain", "handover-work-snapshot"]
   .map(async name => [name, await readFile(new URL(`../src/lib/operations/${name}.ts`, import.meta.url), "utf8")])));
 const modules = {};
 function load(name) {

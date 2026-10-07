@@ -154,12 +154,14 @@ export function TaskAssignmentForm({
       item.assignments.some(
         (assignment) =>
           assignment.technicianId ===
-          technicianUid
+          technicianUid &&
+          assignment.responsibilityStatus !== "released" &&
+          assignment.releasedAt == null
       );
 
     if (alreadyAssigned) {
       setError(
-        "This technician already has an assignment record for this task."
+        "This technician already has an active assignment for this task."
       );
 
       return;
@@ -291,7 +293,9 @@ export function TaskAssignmentForm({
                   item.assignments.some(
                     (assignment) =>
                       assignment.technicianId ===
-                      technician.uid
+                      technician.uid &&
+                      assignment.responsibilityStatus !== "released" &&
+                      assignment.releasedAt == null
                   );
 
                 return (

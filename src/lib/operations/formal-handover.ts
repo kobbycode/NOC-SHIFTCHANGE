@@ -1,3 +1,5 @@
+import { assertAssignmentGenerationIdentity, assertAssignmentRelease } from "./assignment-generation-domain";
+import { resolveTaskAssignmentGeneration } from "./assignment-identity";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -109,11 +111,24 @@ export async function readAuthoritativeHandoverWorkState(transaction: Transactio
     if (task.id !== document.id || task.shiftId !== outgoingShiftId) fail("Inconsistent authoritative task identity.");
     taskData.push(task);
     const assignmentDocuments = await transaction.get(taskAssignments.where("taskId", "==", document.id));
+    const seenGenerations = new Set<string>();
+    const activeTechnicians = new Set<string>();
     for (const assignmentDocument of assignmentDocuments.docs) {
       const assignment = assignmentDocument.data();
       if (assignment.id !== assignmentDocument.id || assignment.taskId !== document.id) {
         fail("Inconsistent authoritative assignment identity.");
       }
+      try {
+        assertAssignmentGenerationIdentity(assignmentDocument.id, assignment, document.id);
+        const key = JSON.stringify([assignment.technicianId, resolveTaskAssignmentGeneration(assignment.generation)]);
+        if (seenGenerations.has(key) || (assignment.responsibilityStatus !== "released" && activeTechnicians.has(assignment.technicianId))) {
+          fail("Inconsistent authoritative assignment identity.");
+        }
+        seenGenerations.add(key);
+        if (assignment.responsibilityStatus !== "released") activeTechnicians.add(assignment.technicianId);
+      } catch { fail("Inconsistent authoritative assignment identity."); }
+      try { assertAssignmentRelease(assignment); }
+      catch { fail("Inconsistent authoritative assignment release evidence."); }
       assignments.push(assignment);
     }
   }

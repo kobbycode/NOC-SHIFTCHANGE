@@ -21,7 +21,9 @@ function load(sourceText, dependencies = {}) {
 }
 const domain = load(domainSource);
 const dispositionDomain = load(await readFile(new URL("../src/lib/operations/handover-work-disposition-domain.ts", import.meta.url), "utf8"), { "./handover-domain": domain });
-const { createHandoverWorkSnapshot: snapshot } = load(source, { "./handover-domain": domain, "./handover-work-disposition-domain": dispositionDomain });
+const identity = load(await readFile(new URL("../src/lib/operations/assignment-identity.ts", import.meta.url), "utf8"));
+const assignmentDomain = load(await readFile(new URL("../src/lib/operations/assignment-generation-domain.ts", import.meta.url), "utf8"), { "./assignment-identity": identity });
+const { createHandoverWorkSnapshot: snapshot } = load(source, { "./handover-domain": domain, "./handover-work-disposition-domain": dispositionDomain, "./assignment-generation-domain": assignmentDomain });
 const at = "2026-10-04T06:00:00.000Z", later = "2026-10-04T06:01:00.000Z";
 function task(overrides = {}) { return { id: "task-a", shiftId: "outgoing", title: "Inspect pump",
   description: "Check operating pressure", status: "open", priority: "medium", sectionId: null,

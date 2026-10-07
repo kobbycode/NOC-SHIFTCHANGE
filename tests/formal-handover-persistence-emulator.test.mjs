@@ -13,7 +13,7 @@ assert.ok([200, 403, 404].includes(probe.status));
 const { getAdminFirestore } = await import("../src/lib/firebase/admin/index.ts");
 const { initializeFormalHandover: initialize, replaceFormalHandoverReservation: replace,
   cancelFormalHandoverReservation: cancel } = await import("../src/lib/operations/formal-handover.ts");
-const { createHandoverSnapshot, assertHandoverAggregate, confirmHandoverParticipant } = await import("../src/lib/operations/handover-domain.ts");
+const { assertHandoverAggregate, confirmHandoverParticipant } = await import("../src/lib/operations/handover-domain.ts");
 const { createHandoverWorkSnapshot } = await import("../src/lib/operations/handover-work-snapshot.ts");
 const { createPendingOperationalShiftControl, consumeOperationalShiftSlot, transitionOperationalShiftControl } =
   await import("../src/lib/operations/operational-shift-control-state.ts");
@@ -573,7 +573,7 @@ for (const kind of ["create task", "create assignment", "reassign", "respond"]) 
     const assignment = ["reassign", "respond"].includes(kind) ? await seedAssignment(f, task) : null;
     const writer = () => kind === "create task" ? createTask({ title: "Concurrent task", description: "Work", priority: "medium", sectionId: null, shiftId: f.outgoing, createdBy: f.actor }) :
       kind === "create assignment" ? createTaskAssignment({ taskId: task.id, technicianUid: f.out[0], responsibility: "lead", assignedBy: f.actor }) :
-      kind === "reassign" ? reassignTask({ taskId: task.id, originalTechnicianUid: f.out[0], replacementTechnicianUid: f.out[1], performedBy: f.actor, reason: "Concurrent replacement" }) :
+      kind === "reassign" ? reassignTask({ taskId: task.id, assignmentId: assignment.id, originalTechnicianUid: f.out[0], replacementTechnicianUid: f.out[1], performedBy: f.actor, reason: "Concurrent replacement" }) :
       respondToTaskAssignment({ taskId: task.id, assignmentId: assignment.id, technicianUid: f.out[0], action: "accept" });
     const [written, barrier] = await contend(t, ref("shifts", f.outgoing), writer,
       () => beginShiftHandover({ shiftId: f.outgoing, actorUid: f.actor }));
@@ -698,7 +698,7 @@ for (const kind of ["create task", "create assignment", "reassign", "respond"]) 
     const assignment = ["reassign", "respond"].includes(kind) ? await seedAssignment(f, task) : null;
     const writer = () => kind === "create task" ? createTask({ title: "New linked task", description: "Work", priority: "medium", sectionId: null, shiftId: f.outgoing, createdBy: f.actor }) :
       kind === "create assignment" ? createTaskAssignment({ taskId: task.id, technicianUid: f.out[0], responsibility: "lead", assignedBy: f.actor }) :
-      kind === "reassign" ? reassignTask({ taskId: task.id, originalTechnicianUid: f.out[0], replacementTechnicianUid: f.out[1], performedBy: f.actor, reason: "Replacement needed" }) :
+      kind === "reassign" ? reassignTask({ taskId: task.id, assignmentId: assignment.id, originalTechnicianUid: f.out[0], replacementTechnicianUid: f.out[1], performedBy: f.actor, reason: "Replacement needed" }) :
       respondToTaskAssignment({ taskId: task.id, assignmentId: assignment.id, technicianUid: f.out[0], action: "accept" });
     const barrier = () => beginShiftHandover({ shiftId: f.outgoing, actorUid: f.actor });
     if (first === "writer") { await writer(); await barrier(); }

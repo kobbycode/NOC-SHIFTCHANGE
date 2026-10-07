@@ -1,3 +1,4 @@
+import { assertAssignmentRelease, assertAssignmentGenerationIdentity } from "./assignment-generation-domain";
 import { assertHandoverWorkDisposition, hashHandoverWork } from "./handover-work-disposition-domain";
 import type { HandoverWorkDisposition } from "@/types/handover-work-disposition";
 import type { HandoverWorkSnapshot } from "@/types/handover";
@@ -84,14 +85,14 @@ function projectWork(input: {
     const releasedAt = assignment.releasedAt === undefined ? null : assignment.releasedAt;
     const releasedBy = assignment.releasedBy === undefined ? null : assignment.releasedBy;
     const transferredTo = assignment.transferredTo === undefined ? null : assignment.transferredTo;
-    if (responsibilityStatus === "active") {
-      if (releasedAt !== null || releasedBy !== null || transferredTo !== null) fail();
-    } else if (responsibilityStatus === "released") {
-      text(releasedAt);
-      identifier(releasedBy, 128);
-      identifier(transferredTo, 128);
-      if (transferredTo === assignment.technicianId) fail();
-    } else fail();
+    try {
+      assertAssignmentRelease(assignment);
+      // Preserve legacy content vectors. The authoritative reader validates
+      // physical identity/history; explicit generations also prove their ID here.
+      if (Object.hasOwn(assignment, "generation")) {
+        assertAssignmentGenerationIdentity(assignment.id, assignment, assignment.taskId as string);
+      }
+    } catch { fail(); }
     text(assignment.assignedAt);
     if (assignment.acceptanceStatus === "pending") {
       if (assignment.acceptedAt !== null || assignment.rejectedAt !== null || assignment.rejectionReason !== null) fail();

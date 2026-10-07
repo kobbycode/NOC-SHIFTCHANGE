@@ -62,6 +62,10 @@ export interface Task {
 export interface TaskAssignment {
   id: string;
 
+  // Missing only on historical generation-1 records.
+  generation?: number;
+  releaseMode?: "reassignment" | "handover_transfer";
+
   taskId: string;
   technicianId: string;
 

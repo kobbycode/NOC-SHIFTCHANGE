@@ -1,3 +1,4 @@
+import { assertAssignmentRelease } from "./assignment-generation-domain";
 
 import "server-only";
 
@@ -27,6 +28,7 @@ import {
 import {
   AssignmentOperationError,
   markAssignmentActivity,
+  requireValidTaskAssignmentHistory,
 } from "./assignment-transaction";
 
 /*
@@ -404,6 +406,8 @@ export async function transitionTask(
           )
         );
 
+      requireValidTaskAssignmentHistory(taskId, assignmentsSnapshot.docs);
+
       /*
        * Validate every assignment,
        * including released records.
@@ -527,24 +531,8 @@ export async function transitionTask(
            * retain valid transfer data.
            */
 
-          if (
-            typeof assignment.releasedAt !==
-              "string" ||
-            !validIdentifier(
-              assignment.releasedBy,
-              128
-            ) ||
-            !validIdentifier(
-              assignment.transferredTo,
-              128
-            ) ||
-            assignment.transferredTo ===
-              assignment.technicianId
-          ) {
-            lifecycleError(
-              "A released assignment has inconsistent transfer information."
-            );
-          }
+          try { assertAssignmentRelease(assignment); }
+          catch { lifecycleError("A released assignment has inconsistent transfer information."); }
         }
       }
 

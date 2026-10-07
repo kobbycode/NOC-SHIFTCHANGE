@@ -16,11 +16,12 @@ import { SHIFT_STATUSES } from "@/types/shift";
 
 import { getOperationalCollections } from "./collections";
 
-import { getTaskAssignmentId } from "./assignment-identity";
+import { resolveTaskAssignmentGeneration } from "./assignment-identity";
 
 import {
   AssignmentOperationError,
   markAssignmentActivity,
+  requireValidTaskAssignmentHistory,
 } from "./assignment-transaction";
 
 export interface RespondToTaskAssignmentInput {
@@ -86,23 +87,6 @@ export async function respondToTaskAssignment(
   }
 
   /*
-   * The assignment ID must match the
-   * authoritative task/technician pair.
-   *
-   * Never trust an assignment ID supplied
-   * by the browser without validation.
-   */
-
-  const expectedAssignmentId = getTaskAssignmentId(taskId, technicianUid);
-
-  if (assignmentId !== expectedAssignmentId) {
-    throw new AssignmentOperationError(
-      "You are not authorized to respond to this assignment.",
-      403,
-    );
-  }
-
-  /*
    * PHASE 2:
    * Prepare authoritative references.
    */
@@ -138,6 +122,7 @@ export async function respondToTaskAssignment(
     const assignmentSnapshot = await transaction.get(assignmentRef);
 
     const taskSnapshot = await transaction.get(taskRef);
+    const historySnapshot = await transaction.get(taskAssignments.where("taskId", "==", taskId));
 
     /*
      * PHASE 4:
@@ -186,6 +171,8 @@ export async function respondToTaskAssignment(
         409,
       );
     }
+
+    requireValidTaskAssignmentHistory(taskId, historySnapshot.docs);
 
     /*
      * A released assignment must never
@@ -332,6 +319,7 @@ export async function respondToTaskAssignment(
 
     const updatedAssignment: TaskAssignment = {
       id: assignmentId,
+      ...(assignment.generation === undefined ? {} : { generation: assignment.generation }),
 
       taskId,
 
@@ -384,6 +372,7 @@ export async function respondToTaskAssignment(
       taskId,
 
       assignmentId,
+      assignmentGeneration: resolveTaskAssignmentGeneration(assignment.generation),
 
       event: action === "accept" ? "accepted" : "rejected",
 
@@ -441,6 +430,7 @@ export async function respondToTaskAssignment(
       taskId,
 
       assignmentId,
+      assignmentGeneration: resolveTaskAssignmentGeneration(assignment.generation),
 
       technicianUid,
 

@@ -18,10 +18,6 @@ import {
   reassignTask,
 } from "@/lib/operations/reassign-task";
 
-import {
-  getTaskAssignmentId,
-} from "@/lib/operations/assignment-identity";
-
 export const runtime = "nodejs";
 
 type RouteContext = {
@@ -185,28 +181,6 @@ export async function POST(
     }
 
     /*
-     * Verify that the requested
-     * assignment belongs to the
-     * original technician and task.
-     */
-
-    const expectedAssignmentId =
-      getTaskAssignmentId(
-        taskId,
-        originalTechnicianUid
-      );
-
-    if (
-      assignmentId !==
-      expectedAssignmentId
-    ) {
-      return errorResponse(
-        "The selected assignment does not match the original technician.",
-        400
-      );
-    }
-
-    /*
      * PHASE 4:
      * Execute the authoritative
      * reassignment transaction.
@@ -215,6 +189,7 @@ export async function POST(
     const result =
       await reassignTask({
         taskId,
+        assignmentId,
 
         originalTechnicianUid,
 

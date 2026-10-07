@@ -24,6 +24,7 @@ import {
   AssignmentOperationError,
   requireEligibleTechnician,
   markAssignmentActivity,
+  requireValidTaskAssignmentHistory,
 } from "./assignment-transaction";
 
 import {
@@ -31,11 +32,16 @@ import {
 } from "./assignment-shift-eligibility";
 
 import {
-  getTaskAssignmentId,
+  getTaskAssignmentInstanceId,
+  resolveTaskAssignmentGeneration,
 } from "./assignment-identity";
+
+import { nextTaskAssignmentGeneration } from "./assignment-generation-domain";
 
 export interface ReassignTaskInput {
   taskId: string;
+
+  assignmentId: string;
 
   originalTechnicianUid: string;
 
@@ -71,6 +77,7 @@ export async function reassignTask(
 ): Promise<ReassignTaskResult> {
   const {
     taskId,
+    assignmentId,
     originalTechnicianUid,
     replacementTechnicianUid,
     performedBy,
@@ -84,6 +91,7 @@ export async function reassignTask(
 
   if (
     !validIdentifier(taskId, 512) ||
+    !validIdentifier(assignmentId, 1500) ||
     !validIdentifier(
       originalTechnicianUid,
       128
@@ -144,21 +152,7 @@ export async function reassignTask(
   const taskRef =
     tasks.doc(taskId);
 
-  const originalAssignmentRef =
-    taskAssignments.doc(
-      getTaskAssignmentId(
-        taskId,
-        originalTechnicianUid
-      )
-    );
-
-  const replacementAssignmentRef =
-    taskAssignments.doc(
-      getTaskAssignmentId(
-        taskId,
-        replacementTechnicianUid
-      )
-    );
+  const originalAssignmentRef = taskAssignments.doc(assignmentId);
 
   const actorRef = db
     .collection("users")
@@ -200,10 +194,7 @@ export async function reassignTask(
           originalAssignmentRef
         );
 
-      const replacementAssignmentSnapshot =
-        await transaction.get(
-          replacementAssignmentRef
-        );
+      const assignmentHistory = await transaction.get(taskAssignments.where("taskId", "==", taskId));
 
       const originalTechnicianSnapshot =
         await transaction.get(
@@ -301,6 +292,7 @@ export async function reassignTask(
         );
       }
 
+      const history = requireValidTaskAssignmentHistory(taskId, assignmentHistory.docs);
       const originalAssignment =
         originalAssignmentSnapshot.data();
 
@@ -432,12 +424,20 @@ export async function reassignTask(
        */
 
       if (
-        replacementAssignmentSnapshot.exists
+        history.some(record => record.technicianId === replacementTechnicianUid && record.responsibilityStatus !== "released")
       ) {
         throw new AssignmentOperationError(
-          "The replacement technician already has an assignment record for this task.",
+          "The replacement technician already has an active assignment for this task.",
           409
         );
+      }
+
+      let replacementGeneration: number;
+      try { replacementGeneration = nextTaskAssignmentGeneration(history, replacementTechnicianUid); }
+      catch { throw new AssignmentOperationError("Malformed assignment generation history; administrator review required.", 409); }
+      const replacementAssignmentRef = taskAssignments.doc(getTaskAssignmentInstanceId(taskId, replacementTechnicianUid, replacementGeneration));
+      if ((await transaction.get(replacementAssignmentRef)).exists) {
+        throw new AssignmentOperationError("Assignment instance identity is already occupied; administrator review required.", 409);
       }
 
       /*
@@ -526,6 +526,7 @@ export async function reassignTask(
         TaskAssignment = {
           id:
             replacementAssignmentRef.id,
+          generation: replacementGeneration,
 
           taskId,
 
@@ -569,6 +570,7 @@ export async function reassignTask(
           responsibilityStatus:
             TASK_RESPONSIBILITY_STATUSES.RELEASED,
 
+          releaseMode: "reassignment",
           releasedAt: now,
 
           releasedBy:
@@ -603,6 +605,8 @@ export async function reassignTask(
             originalAssignmentRef.id,
 
           event: "transferred",
+          originalGeneration: resolveTaskAssignmentGeneration(originalAssignment.generation),
+          replacementGeneration,
 
           previousTechnicianId:
             originalTechnicianUid,
@@ -681,6 +685,8 @@ export async function reassignTask(
 
           action:
             "TASK_REASSIGNED",
+          originalGeneration: resolveTaskAssignmentGeneration(originalAssignment.generation),
+          replacementGeneration,
 
           actorUid:
             performedBy,

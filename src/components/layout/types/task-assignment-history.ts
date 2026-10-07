@@ -20,6 +20,11 @@ export interface TaskAssignmentHistory {
   taskId: string;
   assignmentId: string;
 
+  assignmentGeneration?: number;
+  originalGeneration?: number;
+  replacementAssignmentId?: string;
+  replacementGeneration?: number;
+
   event: TaskAssignmentEvent;
 
   previousTechnicianId: string | null;

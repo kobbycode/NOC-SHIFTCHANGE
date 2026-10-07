@@ -27,11 +27,14 @@ import {
   AssignmentOperationError,
   requireEligibleTechnician,
   markAssignmentActivity,
+  requireValidTaskAssignmentHistory,
 } from "./assignment-transaction";
 
 import {
-  getTaskAssignmentId,
+  getTaskAssignmentInstanceId,
 } from "./assignment-identity";
+
+import { nextTaskAssignmentGeneration } from "./assignment-generation-domain";
 
 export interface CreateTaskAssignmentInput {
   taskId: string;
@@ -98,14 +101,6 @@ export async function createTaskAssignment(
 
   const taskRef = tasks.doc(taskId);
 
-  const assignmentRef =
-    taskAssignments.doc(
-      getTaskAssignmentId(
-        taskId,
-        technicianUid
-      )
-    );
-
   const actorRef = db
     .collection("users")
     .doc(assignedBy);
@@ -134,8 +129,7 @@ export async function createTaskAssignment(
       const actorSnapshot =
         await transaction.get(actorRef);
 
-      const existingAssignment =
-        await transaction.get(assignmentRef);
+      const assignmentHistory = await transaction.get(taskAssignments.where("taskId", "==", taskId));
 
       /*
        * Validate the acting administrator
@@ -209,11 +203,22 @@ export async function createTaskAssignment(
        * Prevent duplicate assignments.
        */
 
-      if (existingAssignment.exists) {
+      const history = requireValidTaskAssignmentHistory(taskId, assignmentHistory.docs);
+      if (history.some(record => record.technicianId === technicianUid &&
+          record.responsibilityStatus !== "released")) {
         throw new AssignmentOperationError(
           "This technician is already assigned to the selected task.",
           409
         );
+      }
+
+      let generation: number;
+      try { generation = nextTaskAssignmentGeneration(history, technicianUid); }
+      catch { throw new AssignmentOperationError("Malformed assignment generation history; administrator review required.", 409); }
+      const assignmentRef = taskAssignments.doc(getTaskAssignmentInstanceId(taskId, technicianUid, generation));
+      // Protect legacy cross-pair underscore collisions as well as generated IDs.
+      if ((await transaction.get(assignmentRef)).exists) {
+        throw new AssignmentOperationError("Assignment instance identity is already occupied; administrator review required.", 409);
       }
 
       /*
@@ -253,6 +258,7 @@ export async function createTaskAssignment(
 
       const assignment: TaskAssignment = {
         id: assignmentRef.id,
+        generation,
 
         taskId,
 
@@ -301,6 +307,7 @@ export async function createTaskAssignment(
           taskId,
 
           assignmentId: assignmentRef.id,
+          assignmentGeneration: generation,
 
           event: "assigned",
 
@@ -349,6 +356,8 @@ export async function createTaskAssignment(
           id: auditRef.id,
 
           action: "TASK_ASSIGNED",
+          assignmentId: assignmentRef.id,
+          assignmentGeneration: generation,
 
           actorUid: assignedBy,
 

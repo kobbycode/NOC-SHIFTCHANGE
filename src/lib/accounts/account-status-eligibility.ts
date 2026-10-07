@@ -1,3 +1,4 @@
+import { validateTaskAssignmentHistory, assertAssignmentRelease } from "../operations/assignment-generation-domain";
 
 import "server-only";
 
@@ -96,56 +97,8 @@ function validIdentifier(
 function getAssignmentResponsibilityStatus(
   assignment: Record<string, unknown>
 ): "active" | "released" {
-  const status =
-    assignment.responsibilityStatus;
-
-  if (
-    status === undefined ||
-    status ===
-      TASK_RESPONSIBILITY_STATUSES.ACTIVE
-  ) {
-    if (
-      assignment.releasedAt != null ||
-      assignment.releasedBy != null ||
-      assignment.transferredTo != null
-    ) {
-      invalidData();
-    }
-
-    return TASK_RESPONSIBILITY_STATUSES.ACTIVE;
-  }
-
-  if (
-    status ===
-    TASK_RESPONSIBILITY_STATUSES.RELEASED
-  ) {
-    if (
-      typeof assignment.releasedAt !==
-        "string" ||
-      !assignment.releasedAt.trim() ||
-      !validIdentifier(
-        assignment.releasedBy,
-        128
-      ) ||
-      !validIdentifier(
-        assignment.transferredTo,
-        128
-      )
-    ) {
-      invalidData();
-    }
-
-    if (
-      assignment.transferredTo ===
-      assignment.technicianId
-    ) {
-      invalidData();
-    }
-
-    return TASK_RESPONSIBILITY_STATUSES.RELEASED;
-  }
-
-  invalidData();
+  try { return assertAssignmentRelease(assignment); }
+  catch { invalidData(); }
 }
 
 export async function requireSafeAccountBlocking(
@@ -479,6 +432,13 @@ export async function requireSafeAccountBlocking(
    * active operational responsibility.
    */
 
+  try {
+    const taskIds = new Set(assignmentSnapshot.docs.map(document => document.data().taskId));
+    for (const taskId of taskIds) validateTaskAssignmentHistory(taskId, assignmentSnapshot.docs
+      .filter(document => document.data().taskId === taskId)
+      .map(document => ({ id: document.id, data: document.data() })));
+  } catch { invalidData(); }
+
   const assignedTaskIds =
     new Set<string>();
 
@@ -511,20 +471,6 @@ export async function requireSafeAccountBlocking(
         TASK_ACCEPTANCE_STATUSES
       ).includes(
         assignment.acceptanceStatus
-      )
-    ) {
-      invalidData();
-    }
-
-    /*
-     * Multiple records for the same
-     * technician and task require
-     * administrator review.
-     */
-
-    if (
-      assignedTaskIds.has(
-        assignment.taskId
       )
     ) {
       invalidData();
