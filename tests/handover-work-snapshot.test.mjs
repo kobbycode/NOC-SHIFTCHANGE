@@ -20,7 +20,8 @@ function load(sourceText, dependencies = {}) {
   return loaded.exports;
 }
 const domain = load(domainSource);
-const { createHandoverWorkSnapshot: snapshot } = load(source, { "./handover-domain": domain });
+const dispositionDomain = load(await readFile(new URL("../src/lib/operations/handover-work-disposition-domain.ts", import.meta.url), "utf8"), { "./handover-domain": domain });
+const { createHandoverWorkSnapshot: snapshot } = load(source, { "./handover-domain": domain, "./handover-work-disposition-domain": dispositionDomain });
 const at = "2026-10-04T06:00:00.000Z", later = "2026-10-04T06:01:00.000Z";
 function task(overrides = {}) { return { id: "task-a", shiftId: "outgoing", title: "Inspect pump",
   description: "Check operating pressure", status: "open", priority: "medium", sectionId: null,
@@ -38,7 +39,7 @@ function released(overrides = {}) { return assignment({ responsibilityStatus: "r
   releasedBy: "manager", transferredTo: "tech-b", ...overrides }); }
 
 test("empty snapshot matches independent schema-marked UTF-8 SHA-256 vector", () => {
-  const canonical = '{"assignments":[],"outgoingShiftId":"outgoing","schema":"handover-work-v1","tasks":[]}';
+  const canonical = '{"outgoingShiftId":"outgoing","schema":"handover-work-v2","tasks":[]}';
   assert.equal(empty(), createHash("sha256").update(canonical, "utf8").digest("hex"));
   assert.equal(empty(), empty());
   assert.match(empty(), /^[0-9a-f]{64}$/);
@@ -159,7 +160,7 @@ test("snapshot scope does not apply persistence document byte limits", () => {
 test("canonical projected content matches an independent full-content vector", () => {
   const projectedTask = { id: "task-a", shiftId: "outgoing", title: "Inspect pump", description: "Check operating pressure",
     status: "open", priority: "medium", sectionId: null, updatedAt: at };
-  const payload = { schema: "handover-work-v1", outgoingShiftId: "outgoing", tasks: [projectedTask], assignments: [assignment()] };
+  const payload = { schema: "handover-work-v2", outgoingShiftId: "outgoing", tasks: [{ task: projectedTask, assignments: [assignment()], disposition: null }] };
   const sortKeys = value => Array.isArray(value) ? value.map(sortKeys) : value && typeof value === "object"
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sortKeys(value[key])])) : value;
   assert.equal(digest(), createHash("sha256").update(JSON.stringify(sortKeys(payload)), "utf8").digest("hex"));

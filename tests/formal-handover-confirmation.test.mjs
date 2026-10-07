@@ -213,7 +213,7 @@ test("persistence input has only trusted identity and reviewed binding", () => {
 test("shared work reader preserves all-task query and per-task assignment reads", () => {
   assert.match(serviceSource, /readAuthoritativeHandoverWorkSnapshot\(transaction, outgoingShiftId\)/);
   assert.match(reservationSource, /export async function readAuthoritativeHandoverWorkSnapshot/);
-  const reader = reservationSource.slice(reservationSource.indexOf("export async function readAuthoritative"), reservationSource.indexOf("function scheduleEntries"));
+  const reader = reservationSource.slice(reservationSource.indexOf("export async function readAuthoritativeHandoverWorkState"), reservationSource.indexOf("function scheduleEntries"));
   assert.match(reader, /tasks.where\("shiftId", "==", outgoingShiftId\)/); assert.match(reader, /taskAssignments.where\("taskId", "==", document.id\)/);
   assert.doesNotMatch(reader, /where\("status"/);
 });

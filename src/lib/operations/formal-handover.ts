@@ -1,13 +1,14 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { FieldValue, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, type Transaction, type DocumentSnapshot } from "firebase-admin/firestore";
 import type { HandoverAggregate, HandoverIdentity } from "@/types/handover";
 import type { TechnicianSchedule, TechnicianScheduleEntry } from "@/types/technician-schedule";
 import { getOperationalCollections, GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID } from "./collections";
 import { AssignmentOperationError, markAssignmentActivity, requireEligibleTechnician } from "./assignment-transaction";
 import { assertHandoverAggregate, closeHandover, createHandover, createHandoverDocumentId,
   createHandoverIdentity, createHandoverSnapshot, replaceHandoverReservation } from "./handover-domain";
+import { assertHandoverWorkDisposition, createHandoverWorkDispositionDocumentId } from "./handover-work-disposition-domain";
 import { createHandoverWorkSnapshot } from "./handover-work-snapshot";
 import { assertOperationalShiftControl, assertShiftOwnsOperationalSlot } from "./operational-shift-control-state";
 import { readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
@@ -96,8 +97,8 @@ async function readPair(transaction: Transaction, pairId: string) {
   return ids;
 }
 
-export async function readAuthoritativeHandoverWorkSnapshot(transaction: Transaction, outgoingShiftId: string) {
-  const { tasks, taskAssignments } = getOperationalCollections();
+export async function readAuthoritativeHandoverWorkState(transaction: Transaction, outgoingShiftId: string) {
+  const { tasks, taskAssignments, handoverTaskDispositions, handovers } = getOperationalCollections();
   // The handover_pending Shift prevents query-membership additions. Reading ALL
   // tasks (including terminal tasks) also protects manager lifecycle resolution.
   const taskDocuments = await transaction.get(tasks.where("shiftId", "==", outgoingShiftId));
@@ -116,7 +117,48 @@ export async function readAuthoritativeHandoverWorkSnapshot(transaction: Transac
       assignments.push(assignment);
     }
   }
-  return createHandoverWorkSnapshot({ outgoingShiftId, tasks: taskData, assignments });
+  const handoverDocumentId = createHandoverDocumentId(outgoingShiftId);
+  // Union scoped queries with deterministic locations. A malformed scope cannot
+  // hide a record for an existing task; duplicate physical documents fail closed.
+  const [byShift, byHandover] = await Promise.all([
+    transaction.get(handoverTaskDispositions.where("outgoingShiftId", "==", outgoingShiftId)),
+    transaction.get(handoverTaskDispositions.where("handoverDocumentId", "==", handoverDocumentId)),
+  ]);
+  const documents = new Map<string, DocumentSnapshot>([...byShift.docs, ...byHandover.docs].map((document) => [document.id, document]));
+  for (const task of taskDocuments.docs) {
+    const document = await transaction.get(handoverTaskDispositions.doc(createHandoverWorkDispositionDocumentId({
+      outgoingShiftId, handoverDocumentId, taskId: task.id })));
+    if (document.exists) documents.set(document.id, document);
+  }
+  const aggregateDocument = await transaction.get(handovers.doc(handoverDocumentId));
+  const aggregate = aggregateDocument.exists ? assertHandoverAggregate(aggregateDocument.data()) : null;
+  const dispositions = [];
+  const seen = new Set<string>();
+  for (const document of documents.values()) {
+    const record = assertHandoverWorkDisposition(document.data());
+    if (record.id !== document.id || record.outgoingShiftId !== outgoingShiftId ||
+        record.handoverDocumentId !== handoverDocumentId || seen.has(record.taskId)) {
+      fail("Inconsistent authoritative disposition identity; administrator review required.");
+    }
+    // Reservation replacement retains outgoing classification history but gives
+    // the replacement aggregate a new createdAt. Only its upper time bound applies.
+    if (!aggregate || record.recordedRevision > aggregate.revision ||
+        Date.parse(record.classifiedAt) > Date.parse(aggregate.updatedAt)) {
+      fail("Inconsistent authoritative disposition provenance; administrator review required.");
+    }
+    seen.add(record.taskId);
+    // A record for a missing/relinked task is corruption, not benign absence.
+    if (!taskDocuments.docs.some((task) => task.id === record.taskId)) {
+      await transaction.get(tasks.doc(record.taskId));
+      fail("Disposition task is missing or relinked; administrator review required.");
+    }
+    dispositions.push(record);
+  }
+  return { outgoingShiftId, tasks: taskData, assignments, dispositions };
+}
+
+export async function readAuthoritativeHandoverWorkSnapshot(transaction: Transaction, outgoingShiftId: string) {
+  return createHandoverWorkSnapshot(await readAuthoritativeHandoverWorkState(transaction, outgoingShiftId));
 }
 
 function scheduleEntries(data: unknown, uid: string): TechnicianScheduleEntry[] {

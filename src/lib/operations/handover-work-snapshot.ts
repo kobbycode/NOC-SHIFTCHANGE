@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { assertHandoverWorkDisposition, hashHandoverWork } from "./handover-work-disposition-domain";
+import type { HandoverWorkDisposition } from "@/types/handover-work-disposition";
 import type { HandoverWorkSnapshot } from "@/types/handover";
 import { HandoverDomainError } from "./handover-domain";
 
@@ -20,15 +21,6 @@ function text(value: unknown): asserts value is string {
   if (typeof value !== "string" || !value) fail();
 }
 
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const data = value as Record<string, unknown>;
-    return `{${Object.keys(data).sort().map((key) => `${JSON.stringify(key)}:${canonical(data[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 /**
  * Accepts broader authoritative record sets; irrelevant object records are
  * excluded before content validation. Every outgoing task (including terminal
@@ -44,11 +36,11 @@ function canonical(value: unknown): string {
  * writers changing query membership must provide equivalent transactional
  * protection or shared coordination. No such mechanism is implemented here.
  */
-export function createHandoverWorkSnapshot(input: {
+function projectWork(input: {
   outgoingShiftId: string;
   tasks: readonly unknown[];
   assignments: readonly unknown[];
-}): HandoverWorkSnapshot {
+}) {
   // Match the handover domain's exact scope identifier; persistence byte limits
   // are separate from work scope identity.
   identifier(input.outgoingShiftId, 512);
@@ -119,8 +111,75 @@ export function createHandoverWorkSnapshot(input: {
   }
   const byId = (a: Record<string, unknown>, b: Record<string, unknown>) =>
     (a.id as string) < (b.id as string) ? -1 : (a.id as string) > (b.id as string) ? 1 : 0;
-  const payload = { schema: "handover-work-v1", outgoingShiftId: input.outgoingShiftId,
-    tasks: tasks.sort(byId), assignments: assignments.sort(byId) };
-  return { id: input.outgoingShiftId,
-    version: createHash("sha256").update(canonical(payload), "utf8").digest("hex") };
+  return { outgoingShiftId: input.outgoingShiftId, tasks: tasks.sort(byId), assignments: assignments.sort(byId), taskIds };
+}
+
+export interface HandoverWorkInput {
+  outgoingShiftId: string;
+  tasks: readonly unknown[];
+  assignments: readonly unknown[];
+  dispositions?: readonly unknown[];
+}
+
+function dispositionState(input: HandoverWorkInput) {
+  const projected = projectWork(input);
+  if (input.dispositions !== undefined && !Array.isArray(input.dispositions)) fail();
+  const records = new Map<string, HandoverWorkDisposition>();
+  for (const value of input.dispositions ?? []) {
+    const record = assertHandoverWorkDisposition(value);
+    if (record.outgoingShiftId !== input.outgoingShiftId || !projected.taskIds.has(record.taskId) || records.has(record.taskId)) fail();
+    records.set(record.taskId, record);
+  }
+  const tasks = projected.tasks.map((task) => {
+    const assignments = projected.assignments.filter((assignment) => assignment.taskId === task.id);
+    const taskWorkHash = hashHandoverWork({ schema: "handover-task-work-v1", outgoingShiftId: input.outgoingShiftId, task, assignments });
+    const record = records.get(task.id as string);
+    // Original reviewed hash/revision are persisted and audited, but excluded
+    // from confirmation-visible content. Neither depends on the new snapshot.
+    // Never refresh a stale binding: manager reclassification is required.
+    const disposition = record ? {
+      state: record.classifiedTaskWorkHash === taskWorkHash ? "current" : "stale",
+      id: record.id, schema: record.schema, outgoingShiftId: record.outgoingShiftId,
+      handoverDocumentId: record.handoverDocumentId, taskId: record.taskId,
+      disposition: record.disposition, reason: record.reason, classifiedBy: record.classifiedBy,
+      classifierRole: record.classifierRole, classifiedAt: record.classifiedAt,
+      classifiedTaskWorkHash: record.classifiedTaskWorkHash,
+    } : null;
+    return { task, assignments, taskWorkHash, disposition };
+  });
+  return { projected, tasks };
+}
+
+export function createHandoverTaskWorkHash(input: HandoverWorkInput & { taskId: string }): string {
+  const state = dispositionState({ ...input, dispositions: [] });
+  const task = state.tasks.find((entry) => entry.task.id === input.taskId);
+  if (!task) fail();
+  return task.taskWorkHash;
+}
+
+export function createHandoverWorkSnapshot(input: HandoverWorkInput): HandoverWorkSnapshot {
+  const { tasks } = dispositionState(input);
+  return { schema: "handover-work-v2", id: input.outgoingShiftId,
+    version: hashHandoverWork({ schema: "handover-work-v2", outgoingShiftId: input.outgoingShiftId,
+      tasks: tasks.map(({ task, assignments, disposition }) => ({ task, assignments, disposition })) }) };
+}
+
+export function resolveHandoverWorkReadiness(input: HandoverWorkInput) {
+  const { tasks } = dispositionState(input);
+  const workSnapshot = createHandoverWorkSnapshot(input);
+  const blockers = tasks.flatMap(({ task, disposition }) => {
+    const reason = disposition === null ? "unclassified" : disposition.state === "stale" ? "stale_disposition" :
+      disposition.disposition === "resolve_before_transfer" ? "resolve_before_transfer" : null;
+    return reason ? [{ taskId: task.id as string, reason }] : [];
+  });
+  return { ready: blockers.length === 0, blockers, workSnapshot };
+}
+
+// Work readiness only. Permanent-participant readiness remains a separate gate.
+export function assertFormalTransferWorkReady(input: HandoverWorkInput, expected: HandoverWorkSnapshot) {
+  const result = resolveHandoverWorkReadiness(input);
+  if (expected.schema !== "handover-work-v2" || expected.id !== result.workSnapshot.id ||
+      expected.version !== result.workSnapshot.version) throw new HandoverDomainError("Review the current v2 handover work snapshot.");
+  if (!result.ready) throw new HandoverDomainError("Unfinished handover work is not ready for transfer.");
+  return result;
 }

@@ -1,28 +1,28 @@
 import "server-only";
-
-import { FieldValue, type Transaction } from "firebase-admin/firestore";
-import type { SupervisorExceptionCategory } from "@/types/handover";
+import { FieldValue } from "firebase-admin/firestore";
+import type { Transaction } from "firebase-admin/firestore";
 import type { TechnicianScheduleEntry } from "@/types/technician-schedule";
+import type { HandoverWorkDispositionValue } from "@/types/handover-work-disposition";
 import { AssignmentOperationError } from "./assignment-transaction";
 import { getOperationalCollections, GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID } from "./collections";
-import { readAuthoritativeHandoverWorkSnapshot } from "./formal-handover";
-import { assertHandoverAggregate, recordHandoverAbsence, recordHandoverException, clearHandoverResolution, createHandoverDocumentId,
-  createHandoverSnapshot, resolveHandoverParticipants, reviseHandoverSnapshot } from "./handover-domain";
+import { readAuthoritativeHandoverWorkState } from "./formal-handover";
+import { assertHandoverAggregate, createHandoverDocumentId, createHandoverSnapshot, resolveHandoverParticipants, reviseHandoverSnapshot } from "./handover-domain";
+import { classifyHandoverWork, clearHandoverWorkDisposition, createHandoverWorkDispositionDocumentId } from "./handover-work-disposition-domain";
+import { createHandoverWorkSnapshot, createHandoverTaskWorkHash } from "./handover-work-snapshot";
 import { readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
 import { assertOperationalShiftControl, assertShiftOwnsOperationalSlot } from "./operational-shift-control-state";
 import { assertNoScheduleConflict, parseShiftTimeRange } from "./shift-overlap";
 
-type ResolutionBinding = { technicianUid: string; expectedRevision: number; expectedSnapshotHash: string };
-export type FormalHandoverResolutionRequest = ResolutionBinding & (
-  | { operation: "absence"; reason: string }
-  | { operation: "exception"; reason: string; category: SupervisorExceptionCategory }
+type Binding = { expectedRevision: number; expectedSnapshotHash: string; reason: string };
+export type FormalHandoverWorkDispositionRequest = Binding & (
+  | { operation: "classify"; disposition: HandoverWorkDispositionValue }
   | { operation: "clear" }
 );
-export type FormalHandoverResolutionInput = FormalHandoverResolutionRequest & {
-  outgoingShiftId: string; actorUid: string; actorRole: "admin" | "supervisor";
+export type FormalHandoverWorkDispositionInput = FormalHandoverWorkDispositionRequest & {
+  outgoingShiftId: string; taskId: string; actorUid: string;
 };
-export interface FormalHandoverResolutionOutcome {
-  status: "RESOLVED" | "ALREADY_RESOLVED" | "REVIEW_REQUIRED";
+export interface FormalHandoverWorkDispositionOutcome {
+  status: "CLASSIFIED" | "CLEARED" | "ALREADY_CLASSIFIED" | "ALREADY_UNCLASSIFIED" | "REVIEW_REQUIRED";
   handover: { revision: number; snapshotHash: string };
 }
 
@@ -31,7 +31,7 @@ function fail(message: string, status = 409): never {
 }
 function identifier(value: unknown, max: number): asserts value is string {
   if (typeof value !== "string" || !value || value.trim() !== value || value.length > max ||
-      value.includes("/") || value === "." || value === "..") fail("Invalid resolution identifier.", 400);
+      value.includes("/") || value === "." || value === "..") fail("Invalid disposition identifier.", 400);
 }
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
@@ -77,64 +77,53 @@ function validateSchedule(value: unknown, uid: string, target: TechnicianSchedul
     entries.filter((entry) => entry.shiftId !== target.shiftId));
 }
 
-/** Accept only operation-specific reviewed input, never evidence or authority. */
-export function parseFormalHandoverResolutionRequest(value: unknown): FormalHandoverResolutionRequest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) fail("Invalid resolution request.", 400);
+export function parseFormalHandoverWorkDispositionRequest(value: unknown): FormalHandoverWorkDispositionRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("Invalid disposition request.", 400);
   const data = value as Record<string, unknown>;
-  if (!["absence", "exception", "clear"].includes(data.operation as string)) fail("Invalid resolution operation.", 400);
-  const fields = ["operation", "technicianUid", "expectedRevision", "expectedSnapshotHash",
-    ...(data.operation === "clear" ? [] : ["reason"]), ...(data.operation === "exception" ? ["category"] : [])];
+  if (data.operation !== "classify" && data.operation !== "clear") fail("Invalid disposition operation.", 400);
+  const fields = ["operation", "reason", "expectedRevision", "expectedSnapshotHash", ...(data.operation === "classify" ? ["disposition"] : [])];
   if (Object.keys(data).some((key) => !fields.includes(key)) || fields.some((key) => !Object.hasOwn(data, key))) {
-    fail("Missing or unsupported resolution fields.", 400);
+    fail("Missing or unsupported disposition fields.", 400);
   }
-  identifier(data.technicianUid, 128);
   if (!Number.isSafeInteger(data.expectedRevision) || (data.expectedRevision as number) < 1 ||
       typeof data.expectedSnapshotHash !== "string" || !/^[0-9a-f]{64}$/.test(data.expectedSnapshotHash)) {
     fail("Invalid handover revision or snapshot hash.", 400);
   }
-  const binding = { technicianUid: data.technicianUid, expectedRevision: data.expectedRevision as number,
-    expectedSnapshotHash: data.expectedSnapshotHash };
-  if (data.operation === "clear") return { ...binding, operation: "clear" };
-  if (typeof data.reason !== "string" || !data.reason.trim()) fail("A non-empty reason is required.", 400);
-  if (data.operation === "absence") return { ...binding, operation: "absence", reason: data.reason.trim() };
-  if (!["unavailable", "emergency", "operational_constraint"].includes(data.category as string)) {
-    fail("Invalid supervisor exception category.", 400);
+  if (typeof data.reason !== "string" || data.reason.trim().length < 10 || data.reason.trim().length > 1000) {
+    fail("Provide a disposition reason between 10 and 1000 characters.", 400);
   }
-  return { ...binding, operation: "exception", reason: data.reason.trim(), category: data.category as SupervisorExceptionCategory };
+  const binding = { reason: data.reason.trim(), expectedRevision: data.expectedRevision as number, expectedSnapshotHash: data.expectedSnapshotHash };
+  if (data.operation === "clear") return { ...binding, operation: "clear" };
+  if (data.disposition !== "carry_forward" && data.disposition !== "resolve_before_transfer") fail("Invalid work disposition.", 400);
+  return { ...binding, operation: "classify", disposition: data.disposition };
 }
 
-/** Authority, reservation and work checks share one transaction. Later task
- * lifecycle changes remain possible and must be reviewed by the next mutation.
- */
-export async function persistFormalHandoverResolution(input: FormalHandoverResolutionInput): Promise<FormalHandoverResolutionOutcome> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) fail("Invalid resolution input.", 400);
-  const { outgoingShiftId, actorUid, actorRole, ...request } = input;
-  identifier(actorUid, 128);
+export async function persistFormalHandoverWorkDisposition(input: FormalHandoverWorkDispositionInput): Promise<FormalHandoverWorkDispositionOutcome> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) fail("Invalid disposition input.", 400);
+  const { outgoingShiftId, taskId, actorUid, ...request } = input;
+  identifier(actorUid, 128); identifier(taskId, 512);
   const documentId = createHandoverDocumentId(outgoingShiftId);
-  if (actorRole !== "admin" && actorRole !== "supervisor") fail("Supervisor authority required.", 403);
-  const parsed = parseFormalHandoverResolutionRequest(request);
-  const { technicianUid, expectedRevision, expectedSnapshotHash } = parsed;
-  const authority = actorRole === "admin" ? "manager" as const : "supervisor" as const;
-  const { db, handovers, shifts, operationalShiftControl, shiftMembers, technicianSchedules } = getOperationalCollections();
+  const parsed = parseFormalHandoverWorkDispositionRequest(request);
+  const { db, handovers, shifts, operationalShiftControl, shiftMembers, technicianSchedules, handoverTaskDispositions, tasks } = getOperationalCollections();
   const handoverRef = handovers.doc(documentId);
+  const dispositionRef = handoverTaskDispositions.doc(createHandoverWorkDispositionDocumentId({ outgoingShiftId, handoverDocumentId: documentId, taskId }));
   const auditRef = db.collection("audit_logs").doc();
-  return db.runTransaction(async (transaction): Promise<FormalHandoverResolutionOutcome> => {
-    const [actorSnapshot, shiftSnapshot, controlSnapshot, handoverSnapshot] = await Promise.all([
+  return db.runTransaction(async (transaction): Promise<FormalHandoverWorkDispositionOutcome> => {
+    const [actorSnapshot, shiftSnapshot, controlSnapshot, handoverSnapshot, targetSnapshot, dispositionSnapshot] = await Promise.all([
       transaction.get(db.collection("users").doc(actorUid)), transaction.get(shifts.doc(outgoingShiftId)),
       transaction.get(operationalShiftControl.doc(GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID)), transaction.get(handoverRef),
+      transaction.get(tasks.doc(taskId)), transaction.get(dispositionRef),
     ]);
     const actor = actorSnapshot.data();
-    if (!actor || actor.status !== "active" || actor.statusOperation != null || actor.mustChangePassword !== false ||
-        actor.role !== actorRole) fail("Your account is not authorized to resolve handover participants.", 403);
+    if (!actor || actor.status !== "active" || actor.statusOperation !== null || actor.mustChangePassword !== false ||
+        (actor.role !== "admin" && actor.role !== "supervisor")) fail("Your account is not authorized to classify handover work.", 403);
     if (!handoverSnapshot.exists) fail("The formal handover was not found.", 404);
     const aggregate = assertHandoverAggregate(handoverSnapshot.data());
     const previousHash = createHandoverSnapshot(aggregate).snapshotHash;
     if (handoverSnapshot.id !== documentId || aggregate.identity.outgoingShiftId !== outgoingShiftId ||
-        aggregate.lifecycleStatus !== "collecting_confirmations" || aggregate.revision !== expectedRevision ||
-        previousHash !== expectedSnapshotHash) fail("Stale or closed handover. Review it before resolving.");
+        aggregate.lifecycleStatus !== "collecting_confirmations" || aggregate.revision !== parsed.expectedRevision ||
+        previousHash !== parsed.expectedSnapshotHash) fail("Stale or closed handover. Review it before classifying work.");
     const participants = resolveHandoverParticipants(aggregate);
-    const participant = participants.find((entry) => entry.technicianUid === technicianUid);
-    if (!participant) fail("Only a permanent handover participant can receive a resolution.", 403);
     const shift = shiftSnapshot.data();
     if (!shift || shift.id !== outgoingShiftId || shift.status !== "handover_pending" || shift.actualEnd !== null ||
         !timestamp(shift.actualStart) || !timestamp(shift.scheduledStart) || !timestamp(shift.scheduledEnd) ||
@@ -187,38 +176,53 @@ export async function persistFormalHandoverResolution(input: FormalHandoverResol
         scheduledEnd: outgoing ? shift.scheduledEnd : aggregate.reservation.scheduledEnd,
       });
     }
-    const observedWork = await readAuthoritativeHandoverWorkSnapshot(transaction, outgoingShiftId);
+    const work = await readAuthoritativeHandoverWorkState(transaction, outgoingShiftId);
+    const observedWork = createHandoverWorkSnapshot(work);
     const recordedAt = new Date(Math.max(Date.now(), Date.parse(aggregate.updatedAt))).toISOString();
-    const audit = { id: auditRef.id, actorUid, actorRole, authority, outgoingShiftId, handoverDocumentId: documentId,
-      technicianUid, position: participant.position, previousRevision: aggregate.revision,
-      previousSnapshotHash: previousHash, recordedAt, createdAt: FieldValue.serverTimestamp() };
-    // Reconcile before evaluating an identical resolution or already-clear request.
-    if (aggregate.workSnapshot.schema !== "handover-work-v2" || observedWork.id !== aggregate.workSnapshot.id || observedWork.version !== aggregate.workSnapshot.version) {
+    const audit = { id: auditRef.id, actorUid, actorRole: actor.role, outgoingShiftId, handoverDocumentId: documentId,
+      taskId, previousRevision: aggregate.revision, previousSnapshotHash: previousHash,
+      recordedAt, createdAt: FieldValue.serverTimestamp() };
+    if (aggregate.workSnapshot.schema !== "handover-work-v2" || observedWork.version !== aggregate.workSnapshot.version) {
       const revised = reviseHandoverSnapshot(aggregate, { revision: aggregate.revision, snapshotHash: previousHash,
         recordedAt, workSnapshot: observedWork, temporaryAuthorization: aggregate.temporaryAuthorization });
       const snapshotHash = createHandoverSnapshot(revised).snapshotHash;
       transaction.set(handoverRef, revised);
       transaction.create(auditRef, { ...audit, action: "SHIFT_HANDOVER_SNAPSHOT_REVISED", newRevision: revised.revision,
         newSnapshotHash: snapshotHash, previousWorkSnapshot: aggregate.workSnapshot, newWorkSnapshot: observedWork,
-        reason: "Authoritative work changed before supervisor resolution." });
-      // Returning lets the revision commit before the route reports HTTP 409.
+        reason: "Authoritative work reconciled before disposition mutation." });
       return { status: "REVIEW_REQUIRED", handover: { revision: revised.revision, snapshotHash } };
     }
-    const context = { actor: { uid: actorUid, authority }, technicianUid, revision: aggregate.revision,
-      snapshotHash: previousHash, recordedAt };
-    const resolved = parsed.operation === "absence" ? recordHandoverAbsence(aggregate, { ...context, reason: parsed.reason }) :
-      parsed.operation === "exception" ? recordHandoverException(aggregate, { ...context, reason: parsed.reason, category: parsed.category }) :
-      clearHandoverResolution(aggregate, context);
-    const snapshotHash = createHandoverSnapshot(resolved).snapshotHash;
-    const handover = { revision: resolved.revision, snapshotHash };
-    if (resolved.revision === aggregate.revision) return { status: "ALREADY_RESOLVED", handover };
-    transaction.set(handoverRef, resolved);
-    transaction.create(auditRef, { ...audit,
-      action: parsed.operation === "absence" ? "SHIFT_HANDOVER_ABSENCE_RECORDED" :
-        parsed.operation === "exception" ? "SHIFT_HANDOVER_EXCEPTION_RECORDED" : "SHIFT_HANDOVER_RESOLUTION_CLEARED",
-      newRevision: resolved.revision, newSnapshotHash: snapshotHash,
-      ...(parsed.operation === "clear" ? {} : { reason: parsed.reason }),
-      ...(parsed.operation === "exception" ? { category: parsed.category } : {}) });
-    return { status: "RESOLVED", handover };
+    const target = targetSnapshot.data();
+    if (!targetSnapshot.exists) fail("The selected task was not found.", 404);
+    if (!target || target.id !== taskId || target.shiftId !== outgoingShiftId) fail("The task does not belong to the outgoing handover.");
+    if (target.status === "completed" || target.status === "cancelled") fail("Terminal tasks cannot receive handover disposition mutations.");
+    const previous = work.dispositions.find((record) => record.taskId === taskId) ?? null;
+    if (dispositionSnapshot.exists !== (previous !== null)) fail("Inconsistent authoritative disposition identity; administrator review required.");
+    const taskWorkHash = createHandoverTaskWorkHash({ ...work, taskId });
+    const classified = parsed.operation === "classify" ? classifyHandoverWork(previous, {
+      outgoingShiftId, handoverDocumentId: documentId, taskId, disposition: parsed.disposition,
+      classifiedBy: actorUid, classifierRole: actor.role, classifiedAt: recordedAt, reason: parsed.reason,
+      recordedRevision: aggregate.revision + 1, reviewedSnapshotHash: previousHash, classifiedTaskWorkHash: taskWorkHash,
+    }) : null;
+    const cleared = parsed.operation === "clear" ? clearHandoverWorkDisposition(previous, parsed.reason) : null;
+    if (classified?.changed === false || cleared?.changed === false) return {
+      status: classified ? "ALREADY_CLASSIFIED" : "ALREADY_UNCLASSIFIED", handover: { revision: aggregate.revision, snapshotHash: previousHash },
+    };
+    const nextRecord = classified?.record ?? null;
+    const dispositions = [...work.dispositions.filter((record) => record.taskId !== taskId), ...(nextRecord ? [nextRecord] : [])];
+    const nextWork = createHandoverWorkSnapshot({ ...work, dispositions });
+    const revised = reviseHandoverSnapshot(aggregate, { revision: aggregate.revision, snapshotHash: previousHash,
+      recordedAt, workSnapshot: nextWork, temporaryAuthorization: aggregate.temporaryAuthorization });
+    const snapshotHash = createHandoverSnapshot(revised).snapshotHash;
+    // No reads follow these writes. No tasks, assignments, shifts or accounts are mutated.
+    if (nextRecord) transaction.set(dispositionRef, nextRecord);
+    else transaction.delete(dispositionRef);
+    transaction.set(handoverRef, revised);
+    transaction.create(auditRef, { ...audit, action: !nextRecord ? "SHIFT_HANDOVER_WORK_DISPOSITION_CLEARED" :
+      previous ? "SHIFT_HANDOVER_WORK_DISPOSITION_CHANGED" : "SHIFT_HANDOVER_WORK_DISPOSITION_CREATED",
+      oldDisposition: previous, newDisposition: nextRecord, reason: parsed.reason,
+      newRevision: revised.revision, newSnapshotHash: snapshotHash,
+      previousWorkSnapshot: aggregate.workSnapshot, newWorkSnapshot: nextWork });
+    return { status: nextRecord ? "CLASSIFIED" : "CLEARED", handover: { revision: revised.revision, snapshotHash } };
   });
 }

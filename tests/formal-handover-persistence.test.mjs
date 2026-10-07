@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import ts from "typescript";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 const serviceSource = await readFile(new URL("../src/lib/operations/formal-handover.ts", import.meta.url), "utf8");
 const routeSource = await readFile(new URL("../src/app/(dashboard)/api/operations/shifts/[shiftId]/handover/reservation/route.ts", import.meta.url), "utf8");
@@ -122,7 +122,7 @@ test("supervisor is authorized and no extra endpoint exists", async () => {
 // Exercise the production service and real pure/schedule helpers with a small
 // transactional store. Retry discards the first attempt's queued writes.
 const helperSources = Object.fromEntries(await Promise.all([
-  "handover-domain", "handover-work-snapshot", "operational-shift-control-state",
+  "handover-domain", "handover-work-disposition-domain", "handover-work-snapshot", "operational-shift-control-state",
   "shift-overlap", "prepare-technician-schedule",
 ].map(async (name) => [name, await readFile(new URL(`../src/lib/operations/${name}.ts`, import.meta.url), "utf8")])));
 function replacementStore(proposedId = "replacement-id", collision = false) {
@@ -205,7 +205,7 @@ function replacementStore(proposedId = "replacement-id", collision = false) {
     return result;
   } };
   dependencies["./collections"] = { GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID: "global", getOperationalCollections: () => ({ db,
-    ...Object.fromEntries(Object.entries({ handovers: "handovers", shifts: "shifts", shiftMembers: "shift_members",
+    ...Object.fromEntries(Object.entries({ handovers: "handovers", handoverTaskDispositions: "handover_task_dispositions", shifts: "shifts", shiftMembers: "shift_members",
       operationalShiftControl: "operational_shift_control", technicianSchedules: "technician_schedules", technicianPairs: "technician_pairs",
       technicianPairMemberships: "technician_pair_memberships", tasks: "tasks", taskAssignments: "task_assignments" }).map(([key, value]) => [key, collection(value)])) }) };
   dependencies["firebase-admin/firestore"] = { FieldValue: { serverTimestamp: () => "server-time" } };

@@ -150,9 +150,11 @@ export interface HandoverAggregate {
   updatedAt: string;
 }
 
-// Exact outgoing-shift scope and SHA-256 digest of its unfinished task content.
-// This does not classify or transfer work, or accept individual assignments.
+// Exact outgoing-shift scope and SHA-256 digest of reviewed unfinished work.
+// V2 includes disposition evidence; a snapshot does not execute transfer or accept assignments.
 export interface HandoverWorkSnapshot {
+  // Omission is recognized only on the exact legacy {id, version} shape.
+  schema?: "handover-work-v1" | "handover-work-v2";
   id: string;
   version: string;
 }

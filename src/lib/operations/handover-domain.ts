@@ -155,12 +155,18 @@ export function assertHandoverReservation(value: unknown, identity: HandoverIden
 }
 
 function work(value: unknown): HandoverWorkSnapshot {
-  const data = record(value, ["id", "version"]);
+  const hasSchema = value !== null && typeof value === "object" && Object.hasOwn(value, "schema");
+  const data = record(value, hasSchema ? ["schema", "id", "version"] : ["id", "version"]);
+  if (hasSchema && data.schema !== "handover-work-v1" && data.schema !== "handover-work-v2") {
+    fail("Unsupported handover work snapshot schema.");
+  }
   identifier(data.id, "work snapshot ID");
   if (typeof data.version !== "string" || !/^[0-9a-f]{64}$/.test(data.version)) {
     fail("Invalid work snapshot digest.", 400);
   }
-  return { id: data.id, version: data.version };
+  // Preserve legacy shape: normalizing it would invalidate historical hashes.
+  return { ...(hasSchema ? { schema: data.schema as HandoverWorkSnapshot["schema"] } : {}),
+    id: data.id, version: data.version };
 }
 
 function temporary(value: unknown, identity: HandoverIdentity): HandoverTemporaryAuthorization | null {

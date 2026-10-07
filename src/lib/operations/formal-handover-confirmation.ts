@@ -168,7 +168,7 @@ export async function persistFormalHandoverConfirmation(
     const observedWork = await readAuthoritativeHandoverWorkSnapshot(transaction, outgoingShiftId);
     // Attempt-local timestamp also remains monotonic across concurrent retries.
     const recordedAt = new Date(Math.max(Date.now(), Date.parse(aggregate.updatedAt))).toISOString();
-    if (observedWork.id !== aggregate.workSnapshot.id || observedWork.version !== aggregate.workSnapshot.version) {
+    if (aggregate.workSnapshot.schema !== "handover-work-v2" || observedWork.id !== aggregate.workSnapshot.id || observedWork.version !== aggregate.workSnapshot.version) {
       const revised = reviseHandoverSnapshot(aggregate, { revision: aggregate.revision, snapshotHash: previousHash,
         recordedAt, workSnapshot: observedWork, temporaryAuthorization: aggregate.temporaryAuthorization });
       const snapshotHash = createHandoverSnapshot(revised).snapshotHash;
