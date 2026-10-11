@@ -1,6 +1,7 @@
 import {
   TechnicianShiftWorkspace,
 } from "@/components/shifts/technician-shift-workspace";
+import Link from "next/link";
 
 export default function TechnicianDashboardPage() {
   return (
@@ -17,29 +18,10 @@ export default function TechnicianDashboardPage() {
 
       <TechnicianShiftWorkspace />
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {[
-          "My Assigned Tasks",
-          "Outstanding Faults",
-        ].map((label) => (
-          <div
-            key={label}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800"
-          >
-            <p className="text-sm text-slate-500">
-              {label}
-            </p>
-
-            <p className="mt-3 text-2xl font-bold">
-              —
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              Awaiting live data
-            </p>
-          </div>
-        ))}
-      </div>
+      <Link href="/technician/operations" className="block rounded-xl border border-blue-200 bg-blue-50 p-5 text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
+        <h2 className="font-semibold">Open Shift Operations</h2>
+        <p className="mt-2 text-sm">Record broadcast checks, faults, activities, and outside broadcasts. Review your shared shift records and their histories.</p>
+      </Link>
     </div>
   );
 }

@@ -98,6 +98,11 @@ export const SUPERVISOR_NAVIGATION: NavigationItem[] = [
 
 export const TECHNICIAN_NAVIGATION: NavigationItem[] = [
   {
+    label: "Shift Operations",
+    href: "/technician/operations",
+    icon: Radio,
+  },
+  {
     label: "Dashboard",
     href: "/technician",
     icon: LayoutDashboard,
