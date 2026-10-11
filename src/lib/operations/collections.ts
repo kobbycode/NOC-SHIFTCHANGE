@@ -8,6 +8,7 @@ import {
 export const OPERATIONAL_COLLECTIONS = {
   HANDOVERS: "handovers",
   HANDOVER_TASK_DISPOSITIONS: "handover_task_dispositions",
+  HANDOVER_TASK_TRANSFERS: "handover_task_transfers",
   SHIFTS: "shifts",
 
   SHIFT_MEMBERS: "shift_members",
@@ -47,6 +48,7 @@ export function getOperationalCollections() {
     db,
     handovers: db.collection(OPERATIONAL_COLLECTIONS.HANDOVERS),
     handoverTaskDispositions: db.collection(OPERATIONAL_COLLECTIONS.HANDOVER_TASK_DISPOSITIONS),
+    handoverTaskTransfers: db.collection(OPERATIONAL_COLLECTIONS.HANDOVER_TASK_TRANSFERS),
 
     shifts: db.collection(
       OPERATIONAL_COLLECTIONS.SHIFTS

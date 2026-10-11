@@ -460,6 +460,17 @@ export function closeHandover(value: HandoverAggregate, input: MutationContext &
   return assertHandoverAggregate({ ...aggregate, lifecycleStatus: input.status, updatedAt: input.recordedAt });
 }
 
+// Successful transfer preserves the final reviewed evidence and reservation.
+// Receipt-backed idempotency belongs to the persistence boundary.
+export function completeHandoverTransfer(value: HandoverAggregate, input: MutationContext & {
+  actor: HandoverSupervisorActor;
+}): HandoverAggregate {
+  const aggregate = mutation(value, input);
+  supervisor(input.actor);
+  assertHandoverReadyForTransfer(aggregate, input);
+  return assertHandoverAggregate({ ...aggregate, lifecycleStatus: "completed", updatedAt: input.recordedAt });
+}
+
 
 // Replacement explicitly retires the old aggregate and starts fresh evidence at
 // the next revision. It never silently edits the reserved successor in place.

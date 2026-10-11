@@ -19,6 +19,17 @@ runInNewContext(ts.transpileModule(source, {
   },
 });
 const domain = loaded.exports;
+test("successful completion preserves final reviewed evidence and rejects a second transition", () => {
+  const state = confirmRemaining(aggregate());
+  const result = domain.completeHandoverTransfer(state, { ...context(state), actor });
+  assert.equal(result.lifecycleStatus, "completed");
+  assert.equal(result.revision, state.revision);
+  assert.equal(domain.createHandoverSnapshot(result).snapshotHash, domain.createHandoverSnapshot(state).snapshotHash);
+  assert.deepEqual(result.reservation, state.reservation);
+  assert.deepEqual(result.confirmations, state.confirmations);
+  assert.throws(() => domain.completeHandoverTransfer(result, { ...context(result), actor }));
+  assert.throws(() => domain.completeHandoverTransfer(aggregate(), { ...context(aggregate()), actor }));
+});
 const at = "2026-10-04T06:00:00.000Z";
 const later = "2026-10-04T06:01:00.000Z";
 const first = "a0000000-0000-4000-8000-000000000001";

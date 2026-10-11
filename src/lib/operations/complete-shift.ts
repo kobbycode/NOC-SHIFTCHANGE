@@ -1,5 +1,6 @@
 
 import "server-only";
+import { assertHandoverAggregate, createHandoverDocumentId } from "./handover-domain";
 
 import {
   FieldValue,
@@ -160,6 +161,10 @@ export async function completeShift(
 
       const actorSnapshot =
         await transaction.get(actorRef);
+
+      const formalHandoverSnapshot = await transaction.get(
+        db.collection("handovers").doc(createHandoverDocumentId(shiftId))
+      );
 
       const controlSnapshot =
         await transaction.get(
@@ -429,6 +434,16 @@ export async function completeShift(
         completedTaskIds.push(
           document.id
         );
+      }
+
+      // Keep the existing unfinished-work rejection precedence. The stable
+      // formal handover was read above and still guards every completion write.
+      if (formalHandoverSnapshot.exists) {
+        const formalHandover = assertHandoverAggregate(formalHandoverSnapshot.data());
+        if (formalHandover.identity.outgoingShiftId !== shiftId ||
+            formalHandover.lifecycleStatus === "collecting_confirmations") {
+          throw new AssignmentOperationError("Complete the collecting formal handover through the atomic transfer boundary.", 409);
+        }
       }
 
       /*

@@ -10,6 +10,13 @@ const completionSource = await readFile(
   "utf8"
 );
 
+test("ordinary completion reads stable formal handover and guards collecting lifecycle before writes", () => {
+  const read = completionSource.indexOf('db.collection("handovers").doc(createHandoverDocumentId(shiftId))');
+  const guard = completionSource.indexOf('formalHandover.lifecycleStatus === "collecting_confirmations"');
+  assert.ok(read > 0 && guard > read && guard < firstTransactionWrite(completionSource));
+  assert.ok(completionSource.includes("assertHandoverAggregate(formalHandoverSnapshot.data())"));
+});
+
 const handoverSource = await readFile(
   new URL(
     "../src/lib/operations/begin-shift-handover.ts",

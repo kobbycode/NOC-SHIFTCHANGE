@@ -27,6 +27,10 @@ export type ShiftMemberRole =
   (typeof SHIFT_MEMBER_ROLES)[keyof typeof SHIFT_MEMBER_ROLES];
 
 export interface Shift {
+  previousShiftId?: string;
+  previousOperationalSlotToken?: string;
+  operationalGeneration?: number;
+  handoverDocumentId?: string;
   id: string;
 
   operationalSlotToken: string | null;
