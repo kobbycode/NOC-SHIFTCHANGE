@@ -13,7 +13,7 @@ assert.ok([200, 403, 404].includes(probe.status));
 const { getAdminFirestore } = await import("../src/lib/firebase/admin/index.ts");
 const { initializeFormalHandover: initialize, replaceFormalHandoverReservation: replace,
   cancelFormalHandoverReservation: cancel } = await import("../src/lib/operations/formal-handover.ts");
-const { assertHandoverAggregate, confirmHandoverParticipant } = await import("../src/lib/operations/handover-domain.ts");
+const { assertHandoverAggregate, createHandoverSnapshot, confirmHandoverParticipant } = await import("../src/lib/operations/handover-domain.ts");
 const { createHandoverWorkSnapshot } = await import("../src/lib/operations/handover-work-snapshot.ts");
 const { createPendingOperationalShiftControl, consumeOperationalShiftSlot, transitionOperationalShiftControl } =
   await import("../src/lib/operations/operational-shift-control-state.ts");
@@ -229,6 +229,10 @@ for (const status of ["collecting_confirmations", "cancelled", "superseded", "co
 test("replacement renews reserved Shift ID, recomputes work, moves schedules and records superseded evidence", async () => {
   const f = await fixture(); const task = await seedTask(f); await seedAssignment(f, task);
   const first = await initialize(f.input);
+  assert.equal(first.aggregate.reportBinding, null);
+  // Preserve the pre-report replacement regression with persisted legacy evidence.
+  delete first.aggregate.reportBinding;
+  first.snapshotHash = createHandoverSnapshot(first.aggregate).snapshotHash;
   const confirmed = confirmHandoverParticipant(first.aggregate, { revision: 1, snapshotHash: first.snapshotHash,
     actorUid: f.out[0], technicianUid: f.out[0], recordedAt: new Date().toISOString() });
   await ref("handovers", first.handoverDocumentId).set(confirmed);
@@ -277,6 +281,10 @@ test("same-pair time replacement removes self-conflict and preserves unrelated s
 });
 test("same-pair same-time replacement still renews both identities and clears evidence", async () => {
   const f = await fixture(); const first = await initialize(f.input);
+  assert.equal(first.aggregate.reportBinding, null);
+  // Preserve the pre-report replacement regression with persisted legacy evidence.
+  delete first.aggregate.reportBinding;
+  first.snapshotHash = createHandoverSnapshot(first.aggregate).snapshotHash;
   const confirmed = confirmHandoverParticipant(first.aggregate, { revision: 1, snapshotHash: first.snapshotHash,
     actorUid: f.out[0], technicianUid: f.out[0], recordedAt: new Date().toISOString() });
   await ref("handovers", first.handoverDocumentId).set(confirmed);

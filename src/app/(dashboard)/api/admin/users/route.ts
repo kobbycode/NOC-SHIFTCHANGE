@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
       email,
       role,
       status: "active",
+      statusOperation: null,
       mustChangePassword: true,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

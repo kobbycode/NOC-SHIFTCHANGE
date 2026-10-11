@@ -68,6 +68,19 @@ async function verify(f, result) {
   assert.deepEqual(await data(`audit_logs/${result.receipt.id}`), result.receipt);
   assert.equal((await db.collection("audit_logs").where("action", "==", "SHIFT_HANDOVER_TRANSFERRED").get()).size, 1);
 }
+test("native missing cleanup metadata fails closed atomically", async () => {
+  const f = await fixture();
+  for (const [path, profile] of f.records) if (path.startsWith("users/")) {
+    const provisioned = { ...profile }; delete provisioned.statusOperation;
+    await ref(path).set(provisioned);
+  }
+  const before = await state();
+  await assert.rejects(() => transfer(f.input), error => {
+    assert.ok(error instanceof AssignmentOperationError); assert.equal(error.status, 403);
+    assert.equal(error.message, "Your account is not authorized to transfer this handover."); return true;
+  });
+  assert.deepEqual(await state(), before);
+});
 for (const a of ["confirmed", "absent", "exception"]) for (const b of ["confirmed", "absent", "exception"]) test(`native atomic incoming resolution ${a}/${b}`, async () => {
   const f = await fixture({ incomingStates: [a, b] });
   if (a === "confirmed" || b === "confirmed") await verify(f, await transfer(f.input));

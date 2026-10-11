@@ -84,6 +84,7 @@ async function bootstrap() {
       email,
       role: "admin",
       status: "active",
+      statusOperation: null,
       mustChangePassword: true,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

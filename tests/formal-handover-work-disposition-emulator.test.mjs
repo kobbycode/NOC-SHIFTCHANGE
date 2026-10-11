@@ -11,7 +11,7 @@ if (!host || !["127.0.0.1:8088", "localhost:8088"].includes(host) ||
       .some((key) => process.env[key] !== project)) throw new Error("Refusing to run outside the isolated local demo emulator.");
 const { FieldValue } = await import("firebase-admin/firestore");
 const { getAdminFirestore } = await import("../src/lib/firebase/admin/index.ts");
-const { initializeFormalHandover: initialize } = await import("../src/lib/operations/formal-handover.ts");
+const { initializeFormalHandover: initializeCurrent } = await import("../src/lib/operations/formal-handover.ts");
 const { persistFormalHandoverResolution: resolve } = await import("../src/lib/operations/formal-handover-resolution.ts");
 const { persistFormalHandoverConfirmation: confirm } = await import("../src/lib/operations/formal-handover-confirmation.ts");
 const { AssignmentOperationError } = await import("../src/lib/operations/assignment-transaction.ts");
@@ -24,6 +24,16 @@ const { createPendingOperationalShiftControl, consumeOperationalShiftSlot, trans
 const { transitionTask } = await import("../src/lib/operations/task-lifecycle.ts");
 const db = getAdminFirestore();
 const ref = (collection, id) => db.collection(collection).doc(id);
+// These protected regressions exercise persisted pre-report handovers. New
+// report-required creation and confirmation are tested in shift-operations-emulator.
+async function initialize(input) {
+  const result = await initializeCurrent(input);
+  assert.equal(result.aggregate.reportBinding, null, "new handovers require a frozen report");
+  const legacy = { ...result.aggregate }; delete legacy.reportBinding;
+  await ref("handovers", `handover_${input.outgoingShiftId}`).set(legacy);
+  const reviewed = createHandoverSnapshot(legacy);
+  return { ...result, aggregate: legacy, snapshotHash: reviewed.snapshotHash };
+}
 const at = "2020-01-01T00:00:00.000Z";
 const start = "2030-01-01T06:00:00.000Z";
 const end = "2030-01-01T14:00:00.000Z";
@@ -247,6 +257,12 @@ async function assertClassified(f, task, expectedRevision) {
   assert.equal(record.classifierRole, f.role); assert.equal(record.reason, reason); assert.ok(Number.isFinite(Date.parse(record.classifiedAt)));
   return result;
 }
+test("provisioned manager must have explicit inactive cleanup metadata before classification", async () => {
+  const { f, task, result } = await prepared();
+  assert.equal((await data("users", f.actor)).statusOperation, null);
+  const outcome = await classify(request(f, task, result, { disposition: "carry_forward" }));
+  assert.equal(outcome.status, "CLASSIFIED"); await assertClassified(f, task, 2);
+});
 for (const role of ["admin", "supervisor"]) for (const value of ["carry_forward", "resolve_before_transfer"]) test(`${role} persists ${value} with only approved writes`, async () => {
   const f = await fixture("handover_pending", role); const task = await seedTask(f); const result = await initialize(f.input);
   await confirm(input(f, result)); const before = await state();

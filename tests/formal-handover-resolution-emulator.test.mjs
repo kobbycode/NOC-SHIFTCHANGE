@@ -9,7 +9,7 @@ if (!host || !["127.0.0.1:8088", "localhost:8088"].includes(host) ||
     ["FIREBASE_PROJECT_ID", "NEXT_PUBLIC_FIREBASE_PROJECT_ID", "GCLOUD_PROJECT", "GOOGLE_CLOUD_PROJECT"]
       .some((key) => process.env[key] !== project)) throw new Error("Refusing to run outside the isolated local demo emulator.");
 const { getAdminFirestore } = await import("../src/lib/firebase/admin/index.ts");
-const { initializeFormalHandover: initialize } = await import("../src/lib/operations/formal-handover.ts");
+const { initializeFormalHandover: initializeCurrent } = await import("../src/lib/operations/formal-handover.ts");
 const { persistFormalHandoverResolution: resolve } = await import("../src/lib/operations/formal-handover-resolution.ts");
 const { persistFormalHandoverConfirmation: confirm } = await import("../src/lib/operations/formal-handover-confirmation.ts");
 const { AssignmentOperationError } = await import("../src/lib/operations/assignment-transaction.ts");
@@ -22,6 +22,16 @@ const { createPendingOperationalShiftControl, consumeOperationalShiftSlot, trans
 const { transitionTask } = await import("../src/lib/operations/task-lifecycle.ts");
 const db = getAdminFirestore();
 const ref = (collection, id) => db.collection(collection).doc(id);
+// These protected regressions exercise persisted pre-report handovers. New
+// report-required creation and confirmation are tested in shift-operations-emulator.
+async function initialize(input) {
+  const result = await initializeCurrent(input);
+  assert.equal(result.aggregate.reportBinding, null, "new handovers require a frozen report");
+  const legacy = { ...result.aggregate }; delete legacy.reportBinding;
+  await ref("handovers", `handover_${input.outgoingShiftId}`).set(legacy);
+  const reviewed = createHandoverSnapshot(legacy);
+  return { ...result, aggregate: legacy, snapshotHash: reviewed.snapshotHash };
+}
 const at = "2020-01-01T00:00:00.000Z";
 const start = "2030-01-01T06:00:00.000Z";
 const end = "2030-01-01T14:00:00.000Z";
