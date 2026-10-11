@@ -1,6 +1,18 @@
 
 @import "tailwindcss";
 
+@media print {
+  body { background: white !important; color: black !important; }
+  aside, nav, button, [data-dashboard-header] { display: none !important; }
+  main { margin: 0 !important; padding: 0 !important; }
+  .handover-print { border: 0; padding: 0; background: white !important; color: black !important; font-size: 10pt; }
+  .handover-print section { break-inside: auto; }
+  .handover-print tr, .handover-print h2, .handover-print h3 { break-inside: avoid; }
+  .handover-print h2, .handover-print h3 { break-after: avoid; }
+  .handover-print th, .handover-print td { border-color: #aaa; }
+  @page { size: A4; margin: 14mm; }
+}
+
 /* Enable class-based dark mode for next-themes */
 @custom-variant dark (&:where(.dark, .dark *));
 
