@@ -29,7 +29,7 @@ export function AppHeader({
   }[role];
 
   return (
-    <header
+    <header data-dashboard-header
       className="
         sticky top-0 z-30
         flex h-20 items-center

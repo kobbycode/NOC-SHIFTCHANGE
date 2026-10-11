@@ -39,6 +39,8 @@ const AVAILABLE_ROUTES = new Set([
   "/technician",
   "/technician/tasks",
   "/technician/operations",
+  "/technician/handovers",
+  "/supervisor/handovers",
 ]);
 
 export function AppSidebar({

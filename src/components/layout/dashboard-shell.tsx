@@ -60,7 +60,7 @@ export function DashboardShell({
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="min-h-screen lg:pl-72">
+      <div className="min-h-screen lg:pl-72 print:pl-0">
         <AppHeader
           role={role}
           onMenuClick={() => setSidebarOpen(true)}

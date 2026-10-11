@@ -6,6 +6,8 @@ if(host!=="127.0.0.1:8088" || ["FIREBASE_PROJECT_ID","NEXT_PUBLIC_FIREBASE_PROJE
 const {getAdminFirestore}=await import("../src/lib/firebase/admin/index.ts");
 const {recordShiftOperation:save,getShiftOperations:read}=await import("../src/lib/operations/shift-operations.ts");
 const {getHandoverReport:report}=await import("../src/lib/operations/handover-report.ts");
+const {getHandoverWorkspace:workspace}=await import("../src/lib/operations/handover-workspace.ts");
+const {getDashboardOverview:overview}=await import("../src/lib/operations/dashboard-overview.ts");
 const {freezeHandoverReport:freeze}=await import("../src/lib/operations/freeze-handover-report.ts");
 const {persistFormalHandoverConfirmation:confirm}=await import("../src/lib/operations/formal-handover-confirmation.ts");
 const {persistFormalHandoverTransfer:transfer}=await import("../src/lib/operations/formal-handover-transfer.ts");
@@ -81,5 +83,25 @@ test("tampered frozen evidence fails closed without confirmations or transfer",a
 test("report document capacity failure is atomic and never truncates evidence",async()=>{
  await preparedReport();const base=(await events()).find(event=>event.kind==="broadcast"),batch=db.batch();for(let i=0;i<170;i++){const id=`capacity-${i}`;batch.create(db.doc(`shift_operation_events/${id}`),{...base,id,recordId:id,remarks:"界".repeat(5000)});}await batch.commit();
  const old=await reviewed();await assert.rejects(()=>freezeCurrent(),/capacity/);assert.equal((await db.collection("handover_reports").get()).size,0);assert.equal((await reviewed()).expectedSnapshotHash,old.expectedSnapshotHash);assert.equal((await events()).length,176);
+});
+test("handover lists expose incoming and outgoing reports only to their permanent participants",async()=>{
+ await preparedReport();
+ for(const uid of ["out-a","out-b","in-a","in-b"]){const view=await workspace(actor(uid));assert.equal(view.reports.length,1);assert.equal(view.reports[0].shiftId,"outgoing");assert.equal(view.pairs.length,0);assert.equal(view.availableShifts.length,0);}
+ await db.doc("users/unrelated").set({uid:"unrelated",role:"technician",status:"active",mustChangePassword:false});
+ assert.equal((await workspace(actor("unrelated"))).reports.length,0);
+ await db.doc("users/in-a").update({status:"blocked"});await assert.rejects(()=>workspace(actor("in-a")));
+});
+test("supervisor handover list provides authoritative active pair choices and pending shifts",async()=>{
+ await fixture();const manager={...actor("manager"),role:"supervisor"};
+ await db.doc("users/manager").set({...manager,statusOperation:null});
+ await db.doc("shifts/outgoing").update({status:"handover_pending"});
+ const view=await workspace(manager);assert.equal(view.reports.length,0);assert.equal(view.availableShifts.length,1);assert.equal(view.availableShifts[0].id,"outgoing");assert.ok(view.pairs.length>=2);assert.ok(view.pairs.every(pair=>pair.label.includes(" + ")));
+});
+test("dashboard summaries use authoritative ownership and actual attendance, and enforce manager access",async()=>{
+ const f=await fixture();const manager={...actor("manager"),role:"supervisor"};await db.doc("users/manager").set({...manager,statusOperation:null});
+ const summary=await overview(manager);assert.equal(summary.techniciansOnDuty,2);assert.equal(summary.openTasks,f.tasks.length);assert.equal(summary.pendingHandovers,0);assert.match(summary.currentShift,/active/);assert.equal(summary.totalUsers,null);
+ await assert.rejects(()=>overview(actor("out-a")));
+ await db.doc("users/manager").update({role:"admin"});const adminSummary=await overview({...manager,role:"admin"});assert.equal(adminSummary.totalUsers,(await db.collection("users").get()).size);assert.equal(adminSummary.stations,4);
+ await db.doc("operational_shift_control/global").update({shiftId:"missing"});await assert.rejects(()=>overview({...manager,role:"admin"}),/inconsistent/);
 });
 test.after(async()=>{await db.terminate();});
