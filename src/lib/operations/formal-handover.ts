@@ -296,7 +296,7 @@ async function persist(operation: Operation, input: FormalHandoverActor,
         const result = replaceHandoverReservation(previous, { ...context, identity, workSnapshot, temporaryAuthorization: null });
         aggregate = result.replacement;
         superseded = result.superseded;
-      } else aggregate = createHandover({ identity, workSnapshot, reservedAt: now, reservedBy: input.actorUid });
+      } else aggregate = createHandover({ identity, workSnapshot, reservedAt: now, reservedBy: input.actorUid,requireReport:true });
     }
     aggregate = assertHandoverAggregate(aggregate);
     const affected = new Set([...(previous?.identity.incomingPrimaryTechnicianIds ?? []), ...incomingIds]);

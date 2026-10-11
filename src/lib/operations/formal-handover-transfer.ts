@@ -1,4 +1,5 @@
 import "server-only";
+import { readBoundHandoverReport } from "./handover-report";
 import { FieldValue, type Transaction, type DocumentData } from "firebase-admin/firestore";
 import type { FormalHandoverTransferPlan, FormalHandoverTransferReceipt, FormalHandoverTransferResult,
   HandoverTaskTransferEvidence } from "@/types/handover-transfer";
@@ -125,6 +126,7 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
     }
     const receiptSnapshot = await transaction.get(receiptRef);
     if (aggregate.lifecycleStatus === "completed") {
+      await readBoundHandoverReport(transaction,aggregate,false);
       return { status: "ALREADY_TRANSFERRED", receipt: assertFormalHandoverTransferReceipt(receiptSnapshot.data(), aggregate, documentId) };
     }
     if (aggregate.lifecycleStatus !== "collecting_confirmations") fail("The handover is closed.");
@@ -236,6 +238,7 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
         newWorkSnapshot: observedWork, recordedAt: now, createdAt: FieldValue.serverTimestamp() });
       return { status: "REVIEW_REQUIRED", handover: { revision: revised.revision, snapshotHash: hash } };
     }
+    await readBoundHandoverReport(transaction,aggregate,true);
     assertFormalTransferWorkReady(work, aggregate.workSnapshot);
     assertHandoverReadyForTransfer(aggregate, { revision: binding.expectedRevision, snapshotHash: binding.expectedSnapshotHash });
     const attendanceUids = assertIncomingHandoverActivation(aggregate);

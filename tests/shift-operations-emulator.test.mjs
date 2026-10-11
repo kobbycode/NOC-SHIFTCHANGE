@@ -6,6 +6,10 @@ if(host!=="127.0.0.1:8088" || ["FIREBASE_PROJECT_ID","NEXT_PUBLIC_FIREBASE_PROJE
 const {getAdminFirestore}=await import("../src/lib/firebase/admin/index.ts");
 const {recordShiftOperation:save,getShiftOperations:read}=await import("../src/lib/operations/shift-operations.ts");
 const {getHandoverReport:report}=await import("../src/lib/operations/handover-report.ts");
+const {freezeHandoverReport:freeze}=await import("../src/lib/operations/freeze-handover-report.ts");
+const {persistFormalHandoverConfirmation:confirm}=await import("../src/lib/operations/formal-handover-confirmation.ts");
+const {persistFormalHandoverTransfer:transfer}=await import("../src/lib/operations/formal-handover-transfer.ts");
+const {createHandoverSnapshot:snapshot,assertHandoverAggregate}=await import("../src/lib/operations/handover-domain.ts");
 const db=getAdminFirestore();
 const actor=uid=>({uid,role:"technician",status:"active",mustChangePassword:false,fullName:uid,email:`${uid}@demo.invalid`});
 async function fixture({temporary=false}={}){
@@ -37,4 +41,45 @@ test("direct unauthenticated client writes remain denied by real rules",async()=
 test("consolidated report includes both authors, missing information and real attendance",async()=>{const f=await fixture();for(const disposition of f.dispositions)await db.doc(`handover_task_dispositions/${disposition.id}`).delete();await save(actor("out-a"),"outgoing",{details:observation()});const original=await save(actor("out-a"),"outgoing",{details:incident()});await save(actor("out-b"),"outgoing",{recordId:original.recordId,expectedRevision:1,details:{...incident(),occurredAt:original.occurredAt,actionTaken:"Checked backup",status:"monitoring"}});await save(actor("out-b"),"outgoing",{details:ob()});const result=await report(actor("out-a"),"outgoing");assert.equal(result.content.operations.events.length,4);assert.equal(result.content.operations.latest.filter(event=>event.kind==="incident").length,1);assert.equal(result.content.attendance.length,2);assert.ok(result.content.attendance.every(row=>row.reportingTime&&row.evidence.clockIn===null&&row.hoursWorked===null));assert.equal(result.content.pendingTasks[0].id,"task-0");assert.equal(result.content.pendingTasks[0].disposition,"unclassified");assert.equal(result.content.completeness.blockers.filter(item=>item.startsWith("Missing verified")).length,3);assert.equal(result.frozen,false);});
 test("reserved incoming participants can review; unrelated and blocked users cannot",async()=>{const f=await fixture();await assert.rejects(()=>report(actor("in-a"),"outgoing"));await db.doc("handovers/handover_outgoing").set(f.aggregate);const result=await report(actor("in-a"),"outgoing");assert.equal(result.content.staff.incoming.length,2);assert.equal(result.content.staff.incomingShiftId,"incoming");await assert.rejects(()=>report(actor("c"),"outgoing"));await db.doc("users/in-a").update({status:"blocked"});await assert.rejects(()=>report(actor("in-a"),"outgoing"));});
 test("report source ordering is stable and reads do not mutate work or assignments",async()=>{const f=await fixture();await db.doc("handovers/handover_outgoing").set(f.aggregate);const before=(await db.doc("task_assignments/task-0_out-a").get()).data();const first=await report(actor("out-a"),"outgoing"),second=await report(actor("out-b"),"outgoing");assert.deepEqual(first.content,second.content);assert.deepEqual((await db.doc("task_assignments/task-0_out-a").get()).data(),before);assert.equal(first.content.workSnapshot.schema,"handover-work-v2");});
+const manager={...actor("manager"),role:"admin"};
+async function preparedReport({complete=true}={}){
+ const f=await fixture();
+ if(complete){for(const station of ["joy-fm","adom-fm","asempa-fm","hitz-fm"])await save(actor("out-a"),"outgoing",{details:observation(station)});await save(actor("out-b"),"outgoing",{details:ob()});await save(actor("out-a"),"outgoing",{details:incident()});}
+ const aggregate={...f.aggregate,confirmations:[],reportBinding:null};
+ const batch=db.batch();batch.set(db.doc("handovers/handover_outgoing"),aggregate);batch.update(db.doc("shifts/outgoing"),{status:"handover_pending",handoverStartedAt:f.at});batch.update(db.doc("operational_shift_control/global"),{shiftStatus:"handover_pending"});
+ for(const uid of f.out){const schedule=(await db.doc(`technician_schedules/${uid}`).get()).data();schedule.entries[0].status="handover_pending";batch.set(db.doc(`technician_schedules/${uid}`),schedule);}await batch.commit();return f;
+}
+async function reviewed(){const aggregate=assertHandoverAggregate((await db.doc("handovers/handover_outgoing").get()).data());return {aggregate,expectedRevision:aggregate.revision,expectedSnapshotHash:snapshot(aggregate).snapshotHash};}
+async function freezeCurrent(extra={}){const {expectedRevision,expectedSnapshotHash}=await reviewed();return freeze(manager,"outgoing",{expectedRevision,expectedSnapshotHash,reason:"Reviewed outgoing report",...extra});}
+async function confirmCurrent(uid){const {expectedRevision,expectedSnapshotHash}=await reviewed();return confirm({outgoingShiftId:"outgoing",actorUid:uid,expectedRevision,expectedSnapshotHash});}
+async function transferCurrent(){const {expectedRevision,expectedSnapshotHash}=await reviewed();return transfer({outgoingShiftId:"outgoing",actorUid:"manager",actorRole:"admin",expectedRevision,expectedSnapshotHash});}
+test("new handovers cannot confirm before a complete report freeze",async()=>{await preparedReport({complete:false});await assert.rejects(()=>confirmCurrent("out-a"),/Freeze and review/);await assert.rejects(()=>freezeCurrent(),/incomplete/);assert.equal((await db.collection("handover_reports").get()).size,0);});
+test("frozen report binds all four confirmations and atomic transfer; completed report survives task movement and replay",async()=>{
+ await preparedReport();const binding=await freezeCurrent();assert.equal(binding.reportBinding.schema,"handover-report-v1");
+ for(const uid of ["out-a","out-b","in-a","in-b"])assert.equal((await confirmCurrent(uid)).status,"CONFIRMED");
+ const before=await report(actor("in-a"),"outgoing"),result=await transferCurrent();assert.equal(result.status,"TRANSFERRED");
+ const completed=await report(actor("out-a"),"outgoing");assert.equal(completed.frozen,true);assert.deepEqual(completed.content,before.content);assert.equal(completed.content.pendingTasks[0].id,"task-0");assert.equal((await db.doc("tasks/task-0").get()).data().shiftId,"incoming");assert.equal((await db.collection("task_assignments").get()).size,1);
+ const updates=await Promise.all(["handovers/handover_outgoing","operational_shift_control/global","shifts/incoming","shifts/outgoing"].map(async path=>(await db.doc(path).get()).updateTime.toMillis()));
+ assert.equal((await transferCurrent()).status,"ALREADY_TRANSFERRED");assert.deepEqual(await Promise.all(["handovers/handover_outgoing","operational_shift_control/global","shifts/incoming","shifts/outgoing"].map(async path=>(await db.doc(path).get()).updateTime.toMillis())),updates);
+});
+test("explicit report correction preserves original snapshot and invalidates real confirmation",async()=>{
+ await preparedReport();const original=await freezeCurrent();await confirmCurrent("out-a");const stale=await reviewed();const revised=await freezeCurrent({reason:"Correct codec location wording",correctionNote:"The affected codec is the backup studio codec; original entry retained for audit."});
+ assert.notEqual(revised.reportBinding.digest,original.reportBinding.digest);const {aggregate}=await reviewed();assert.equal(aggregate.confirmations.length,0);assert.equal((await db.doc(`handover_reports/${original.reportBinding.id}`).get()).exists,true);
+ await assert.rejects(()=>confirm({outgoingShiftId:"outgoing",actorUid:"in-a",expectedRevision:stale.expectedRevision,expectedSnapshotHash:stale.expectedSnapshotHash}));await confirmCurrent("out-a");assert.equal((await report(actor("in-a"),"outgoing")).content.corrections.length,1);
+});
+test("changed report sources reject actual confirmation and transfer until explicit revision",async()=>{
+ await preparedReport();await freezeCurrent();const source=(await db.collection("shift_operation_events").where("kind","==","broadcast").get()).docs[0];const original=source.data();await source.ref.update({remarks:"Changed authoritative observation"});
+ await assert.rejects(()=>confirmCurrent("out-a"),/sources changed/);assert.equal((await reviewed()).aggregate.confirmations.length,0);await source.ref.set(original);
+ for(const uid of ["out-a","out-b","in-a","in-b"])await confirmCurrent(uid);await source.ref.update({remarks:"Changed after all four confirmations"});await assert.rejects(()=>transferCurrent(),/sources changed/);assert.equal((await db.doc("shifts/outgoing").get()).data().status,"handover_pending");assert.equal((await db.doc("shifts/incoming").get()).exists,false);
+ await freezeCurrent({reason:"Review changed authoritative source"});assert.equal((await reviewed()).aggregate.confirmations.length,0);
+});
+test("concurrent freeze and confirmation never leave old report confirmation on new revision",async()=>{
+ await preparedReport();await freezeCurrent();const old=await reviewed();await Promise.allSettled([confirm({outgoingShiftId:"outgoing",actorUid:"out-a",expectedRevision:old.expectedRevision,expectedSnapshotHash:old.expectedSnapshotHash}),freeze(manager,"outgoing",{expectedRevision:old.expectedRevision,expectedSnapshotHash:old.expectedSnapshotHash,reason:"Controlled concurrent revision",correctionNote:"Checked additional backup path."})]);
+ const current=await reviewed();assert.ok(current.aggregate.revision>old.aggregate.revision);assert.equal(current.aggregate.confirmations.length,0);
+});
+test("tampered frozen evidence fails closed without confirmations or transfer",async()=>{await preparedReport();const binding=await freezeCurrent();await db.doc(`handover_reports/${binding.reportBinding.id}`).update({"content.staff.shiftType":"night"});await assert.rejects(()=>confirmCurrent("out-a"),/inconsistent/);assert.equal((await reviewed()).aggregate.confirmations.length,0);});
+test("report document capacity failure is atomic and never truncates evidence",async()=>{
+ await preparedReport();const base=(await events()).find(event=>event.kind==="broadcast"),batch=db.batch();for(let i=0;i<170;i++){const id=`capacity-${i}`;batch.create(db.doc(`shift_operation_events/${id}`),{...base,id,recordId:id,remarks:"界".repeat(5000)});}await batch.commit();
+ const old=await reviewed();await assert.rejects(()=>freezeCurrent(),/capacity/);assert.equal((await db.collection("handover_reports").get()).size,0);assert.equal((await reviewed()).expectedSnapshotHash,old.expectedSnapshotHash);assert.equal((await events()).length,176);
+});
 test.after(async()=>{await db.terminate();});

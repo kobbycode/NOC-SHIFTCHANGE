@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { HandoverReportBinding } from "@/types/handover-report";
 import type {
   HandoverAbsence, HandoverAggregate, HandoverConfirmation, HandoverIdentity,
   HandoverParticipant, HandoverReservation, HandoverSnapshot,
@@ -17,6 +18,11 @@ export class HandoverDomainError extends Error {
 
 function fail(message: string, status = 409): never {
   throw new HandoverDomainError(message, status);
+}
+function assertReportBinding(value:unknown):HandoverReportBinding {
+  const data=record(value,["schema","id","digest"]);
+  if(data.schema!=="handover-report-v1"||typeof data.id!=="string"||!/^report_[0-9a-f-]{36}$/.test(data.id)||typeof data.digest!=="string"||!/^[0-9a-f]{64}$/.test(data.digest))fail("Malformed report binding.");
+  return data as unknown as HandoverReportBinding;
 }
 
 function record(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -196,6 +202,7 @@ function snapshotOf(aggregate: HandoverAggregate): HandoverSnapshot {
     identity: aggregate.identity, reservation: aggregate.reservation, revision: aggregate.revision,
     workSnapshot: aggregate.workSnapshot, temporaryAuthorization: aggregate.temporaryAuthorization,
     absences: sorted(aggregate.absences), exceptions: sorted(aggregate.exceptions),
+    ...(Object.hasOwn(aggregate,"reportBinding")?{reportBinding:aggregate.reportBinding}:{}),
   };
   // Confirmations are excluded to avoid circularity. Lifecycle/update metadata
   // are excluded: they cannot change what was reviewed.
@@ -204,7 +211,9 @@ function snapshotOf(aggregate: HandoverAggregate): HandoverSnapshot {
 
 export function assertHandoverAggregate(value: unknown): HandoverAggregate {
   const data = record(value, ["identity", "reservation", "workSnapshot", "temporaryAuthorization",
-    "confirmations", "absences", "exceptions", "revision", "lifecycleStatus", "createdAt", "updatedAt", "retiredSuccessorSlotTokens"]);
+    "confirmations", "absences", "exceptions", "revision", "lifecycleStatus", "createdAt", "updatedAt", "retiredSuccessorSlotTokens",
+    ...(value!==null&&typeof value==="object"&&Object.hasOwn(value,"reportBinding")?["reportBinding"]:[])]);
+  if(Object.hasOwn(data,"reportBinding")&&data.reportBinding!==null){try{assertReportBinding(data.reportBinding);}catch{fail("Malformed report binding.");}}
   const identity = createHandoverIdentity(data.identity);
   // Aggregates store canonical token spelling; factories normalize external identity.
   if (canonical(identity) !== canonical(data.identity)) fail("Non-canonical handover identity.");
@@ -277,11 +286,13 @@ export function assertHandoverAggregate(value: unknown): HandoverAggregate {
 export function createHandover(input: {
   identity: HandoverIdentity; workSnapshot: HandoverWorkSnapshot;
   temporaryAuthorization?: HandoverTemporaryAuthorization | null; reservedAt: string; reservedBy: string;
+  requireReport?:boolean;
 }): HandoverAggregate {
   const identity = createHandoverIdentity(input.identity);
   timestamp(input.reservedAt);
   identifier(input.reservedBy, "reservation actor UID", 128);
   return assertHandoverAggregate({
+    ...(input.requireReport?{reportBinding:null}:{}),
     identity, reservation: reservationFor(identity, 1, input.reservedAt, input.reservedBy),
     workSnapshot: work(input.workSnapshot), temporaryAuthorization: temporary(input.temporaryAuthorization ?? null, identity),
     confirmations: [], absences: [], exceptions: [], retiredSuccessorSlotTokens: [], revision: 1,
@@ -341,6 +352,7 @@ export function confirmHandoverParticipant(value: HandoverAggregate, input: Muta
   actorUid: string; technicianUid: string;
 }): HandoverAggregate {
   const aggregate = mutation(value, input);
+  if(aggregate.reportBinding===null)fail("Freeze and review the consolidated report before confirmation.");
   const participant = participantFor(aggregate, input.technicianUid);
   if (input.actorUid !== participant.technicianUid) fail("A technician must confirm for self.", 403);
   if (aggregate.absences.some((item) => item.position === participant.position) ||
@@ -435,7 +447,15 @@ export function reviseHandoverSnapshot(value: HandoverAggregate, input: Mutation
   if (canonical(nextWork) === canonical(aggregate.workSnapshot) &&
       canonical(nextTemporary) === canonical(aggregate.temporaryAuthorization)) return aggregate;
   if (nextWork.id !== aggregate.identity.outgoingShiftId) fail("Work snapshot scope must match outgoing shift.");
-  return assertHandoverAggregate({ ...revise(aggregate, input.recordedAt), workSnapshot: nextWork, temporaryAuthorization: nextTemporary });
+  return assertHandoverAggregate({ ...revise(aggregate, input.recordedAt), workSnapshot: nextWork, temporaryAuthorization: nextTemporary,
+    ...(Object.hasOwn(aggregate,"reportBinding")?{reportBinding:null}:{}) });
+}
+
+export function reviseHandoverReportSnapshot(value:HandoverAggregate,input:MutationContext&{reportBinding:HandoverReportBinding;workSnapshot:HandoverWorkSnapshot}):HandoverAggregate {
+  const aggregate=mutation(value,input);
+  const binding=assertReportBinding(input.reportBinding),nextWork=work(input.workSnapshot);
+  if(nextWork.id!==aggregate.identity.outgoingShiftId)fail("Report work scope differs from the outgoing shift.");
+  return assertHandoverAggregate({...revise(aggregate,input.recordedAt),reportBinding:binding,workSnapshot:nextWork});
 }
 
 export function assertHandoverReadyForTransfer(value: HandoverAggregate, expected: {
@@ -443,6 +463,7 @@ export function assertHandoverReadyForTransfer(value: HandoverAggregate, expecte
 }): HandoverAggregate {
   const aggregate = assertHandoverAggregate(value);
   if (aggregate.lifecycleStatus !== "collecting_confirmations") fail("Handover lifecycle does not permit transfer.");
+  if(aggregate.reportBinding===null)fail("Freeze and review the consolidated report before transfer.");
   if (expected.revision !== aggregate.revision) fail("Stale handover revision.");
   if (expected.snapshotHash !== snapshotOf(aggregate).snapshotHash) fail("Stale handover snapshot.");
   if (resolveHandoverParticipants(aggregate).some((participant) => participant.state === "awaiting_confirmation")) {
@@ -495,6 +516,7 @@ export function replaceHandoverReservation(value: HandoverAggregate, input: Muta
   const created = createHandover({
     identity, workSnapshot: input.workSnapshot, temporaryAuthorization: input.temporaryAuthorization,
     reservedAt: input.recordedAt, reservedBy: input.actor.uid,
+    requireReport:Object.hasOwn(aggregate,"reportBinding"),
   });
   const replacement = assertHandoverAggregate({
     ...created, revision, reservation: { ...created.reservation, revision },

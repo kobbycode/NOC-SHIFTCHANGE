@@ -1,4 +1,5 @@
 import "server-only";
+import { readBoundHandoverReport } from "./handover-report";
 
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 import type { HandoverConfirmation } from "@/types/handover";
@@ -181,6 +182,7 @@ export async function persistFormalHandoverConfirmation(
       // Return after commit; throwing here would roll back the required revision.
       return { status: "REVIEW_REQUIRED", handover: { revision: revised.revision, snapshotHash } };
     }
+    await readBoundHandoverReport(transaction,aggregate,true);
     const confirmed = confirmHandoverParticipant(aggregate, { actorUid, technicianUid: actorUid,
       revision: aggregate.revision, snapshotHash: previousHash, recordedAt });
     const confirmation = confirmed.confirmations.find((entry) => entry.technicianUid === actorUid)!;

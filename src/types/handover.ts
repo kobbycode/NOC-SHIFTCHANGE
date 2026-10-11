@@ -1,3 +1,4 @@
+import type { HandoverReportBinding } from "./handover-report";
 export const HANDOVER_PARTICIPANT_SIDES = {
   OUTGOING: "outgoing",
   INCOMING: "incoming",
@@ -80,6 +81,7 @@ export interface HandoverReservation {
 }
 
 export interface HandoverSnapshot {
+  reportBinding?:HandoverReportBinding|null;
   identity: HandoverIdentity;
   reservation: HandoverReservation;
   workSnapshot: HandoverWorkSnapshot;
@@ -135,6 +137,8 @@ export interface HandoverSupervisorException {
 }
 
 export interface HandoverAggregate {
+  // Omission is legacy. Explicit null requires a report freeze before signing.
+  reportBinding?:HandoverReportBinding|null;
   // Exact retired reservation lineage, not request/idempotency history.
   retiredSuccessorSlotTokens: string[];
   identity: HandoverIdentity;

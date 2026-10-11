@@ -11,6 +11,7 @@ export interface HandoverReportContent {
     disposition:string;reason:string|null;carryForwardEligible:boolean}[];
   workSnapshot:HandoverWorkSnapshot;
   completeness:{blockers:string[];warnings:string[]};
+  corrections:{id:string;note:string;recordedBy:string;recordedAt:string}[];
 }
 export interface HandoverReportView {
   content:HandoverReportContent;
