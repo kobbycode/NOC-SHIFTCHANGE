@@ -110,7 +110,7 @@ export function SupervisorShiftWorkspace() {
     setSelectedShiftId,
   ] = useState<string | null>(null);
 
-  const [members, setMembers] =
+  const [storedMembers, setMembers] =
     useState<ShiftMember[]>([]);
 
   const [loading, setLoading] =
@@ -120,7 +120,7 @@ export function SupervisorShiftWorkspace() {
     useState(false);
 
   const [
-    membersLoading,
+    membersBusy,
     setMembersLoading,
   ] = useState(false);
 
@@ -128,7 +128,7 @@ export function SupervisorShiftWorkspace() {
     useState<string | null>(null);
 
     const [
-    membersError,
+    storedMembersError,
     setMembersError,
   ] = useState<string | null>(null);
 
@@ -164,30 +164,32 @@ export function SupervisorShiftWorkspace() {
         shift.id === selectedShiftId,
     ) ?? null;
 
+  const [loadedMemberShiftId, setLoadedMemberShiftId] = useState<string | null>(null);
+  const members = loadedMemberShiftId === selectedShiftId ? storedMembers : [];
+  const membersError = loadedMemberShiftId === selectedShiftId ? storedMembersError : null;
+  const membersLoading = selectedShiftId !== null &&
+    (loadedMemberShiftId !== selectedShiftId || membersBusy);
+
   const loadMembers = useCallback(
-    async (
+    (
       shiftId: string,
     ): Promise<void> => {
       const requestId =
         ++memberRequestId.current;
 
-      setMembersLoading(true);
-      setMembersError(null);
-      setMembers([]);
-
-      try {
-        const result =
-          await getShiftMembers(shiftId);
+      return getShiftMembers(shiftId).then((result) => {
 
         if (
           requestId !==
           memberRequestId.current
         ) {
-          return;
+          return Promise.resolve();
         }
 
+        setLoadedMemberShiftId(shiftId);
+        setMembersError(null);
         setMembers(result.members);
-      } catch (caughtError) {
+      }).catch((caughtError) => {
         if (
           requestId !==
           memberRequestId.current
@@ -195,6 +197,7 @@ export function SupervisorShiftWorkspace() {
           return;
         }
 
+        setLoadedMemberShiftId(shiftId);
         setMembers([]);
 
         if (
@@ -209,42 +212,31 @@ export function SupervisorShiftWorkspace() {
             "Unable to retrieve shift membership.",
           );
         }
-      } finally {
+      }).finally(() => {
         if (
           requestId ===
           memberRequestId.current
         ) {
           setMembersLoading(false);
         }
-      }
+      });
     },
     [],
   );
 
   const loadShifts = useCallback(
-    async (
-      refresh = false,
+    (
     ): Promise<void> => {
       if (
         retrievalInProgress.current
       ) {
-        return;
+        return Promise.resolve();
       }
 
       retrievalInProgress.current =
         true;
 
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      setError(null);
-
-      try {
-        const result =
-          await getShifts();
+      return getShifts().then((result) => {
 
         setShifts(result.shifts);
 
@@ -267,9 +259,11 @@ export function SupervisorShiftWorkspace() {
             );
           },
         );
-      } catch (caughtError) {
+      }).catch((caughtError) => {
         setShifts([]);
         setSelectedShiftId(null);
+        setLoadedMemberShiftId(null);
+        setMembersLoading(false);
         setMembers([]);
         setMembersError(null);
 
@@ -287,13 +281,13 @@ export function SupervisorShiftWorkspace() {
             "Unable to retrieve operational shifts.",
           );
         }
-      } finally {
+      }).finally(() => {
         retrievalInProgress.current =
           false;
 
         setLoading(false);
         setRefreshing(false);
-      }
+      });
     },
     [],
   );
@@ -303,24 +297,30 @@ export function SupervisorShiftWorkspace() {
   }, [loadShifts]);
 
   useEffect(() => {
-    if (!selectedShiftId) {
-      memberRequestId.current += 1;
-      setMembers([]);
-      setMembersError(null);
-      setMembersLoading(false);
-      return;
-    }
-
-    void loadMembers(
-      selectedShiftId,
-    );
+    if (!selectedShiftId) return;
+    void loadMembers(selectedShiftId);
+    return () => { memberRequestId.current += 1; };
   }, [
     selectedShiftId,
     loadMembers,
   ]);
 
-    async function handleRefresh() {
-    await loadShifts(true);
+  async function refreshShifts() {
+    if (retrievalInProgress.current) return;
+    setRefreshing(true);
+    setError(null);
+    await loadShifts();
+  }
+
+  async function refreshMembers(shiftId: string) {
+    setMembersLoading(true);
+    setMembersError(null);
+    setMembers([]);
+    await loadMembers(shiftId);
+  }
+
+  async function handleRefresh() {
+    await refreshShifts();
   }
 
   async function handleBeginHandover() {
@@ -358,8 +358,8 @@ export function SupervisorShiftWorkspace() {
         "Shift handover started successfully.",
       );
 
-      await loadShifts(true);
-      await loadMembers(shiftId);
+      await refreshShifts();
+      await refreshMembers(shiftId);
     } catch (caughtError) {
       if (
         caughtError instanceof
@@ -417,8 +417,8 @@ export function SupervisorShiftWorkspace() {
         "Shift completed successfully.",
       );
 
-      await loadShifts(true);
-      await loadMembers(shiftId);
+      await refreshShifts();
+      await refreshMembers(shiftId);
     } catch (caughtError) {
       if (
         caughtError instanceof
@@ -525,11 +525,14 @@ export function SupervisorShiftWorkspace() {
                 <button
                   key={shift.id}
                   type="button"
-                  onClick={() =>
-                    setSelectedShiftId(
-                      shift.id,
-                    )
-                  }
+                  onClick={() => {
+                    if (shift.id === selectedShiftId) return;
+                    setLoadedMemberShiftId(null);
+                    setMembers([]);
+                    setMembersError(null);
+                    setMembersLoading(false);
+                    setSelectedShiftId(shift.id);
+                  }}
                   className={`w-full rounded-2xl border p-5 text-left shadow-sm transition ${
                     selected
                       ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-950/40"

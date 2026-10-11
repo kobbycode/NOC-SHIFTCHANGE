@@ -168,34 +168,22 @@ export function SupervisorTaskWorkspace() {
    */
 
   const loadTasks = useCallback(
-    async (
-      refresh = false,
-    ): Promise<boolean> => {
+    (): Promise<boolean> => {
       if (
         retrievalInProgress.current
       ) {
-        return false;
+        return Promise.resolve(false);
       }
 
       retrievalInProgress.current =
         true;
 
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      setError(null);
-
-      try {
-        const result =
-          await getTasks();
+      return getTasks().then((result) => {
 
         setTasks(result.tasks);
 
         return true;
-      } catch (caughtError) {
+      }).catch((caughtError) => {
         setTasks([]);
 
         if (
@@ -212,13 +200,13 @@ export function SupervisorTaskWorkspace() {
         }
 
         return false;
-      } finally {
+      }).finally(() => {
         retrievalInProgress.current =
           false;
 
         setLoading(false);
         setRefreshing(false);
-      }
+      });
     },
     [],
   );
@@ -235,6 +223,13 @@ export function SupervisorTaskWorkspace() {
    */
   useEffect(() => {
     void loadTasks();
+  }, [loadTasks]);
+
+  const refreshTasks = useCallback(async () => {
+    if (retrievalInProgress.current) return false;
+    setRefreshing(true);
+    setError(null);
+    return loadTasks();
   }, [loadTasks]);
 
   /*
@@ -307,7 +302,7 @@ export function SupervisorTaskWorkspace() {
            */
 
           const refreshed =
-            await loadTasks(true);
+            await refreshTasks();
 
           if (refreshed) {
             setCompletionMessage(
@@ -330,7 +325,7 @@ export function SupervisorTaskWorkspace() {
            * or authorization failure.
            */
 
-          await loadTasks(true);
+          await refreshTasks();
         } finally {
           lifecycleInProgress.current =
             false;
@@ -338,7 +333,7 @@ export function SupervisorTaskWorkspace() {
           setCompletingTaskId(null);
         }
       },
-      [loadTasks],
+      [refreshTasks],
     );
 
   /*
@@ -518,7 +513,7 @@ export function SupervisorTaskWorkspace() {
            */
 
           const refreshed =
-            await loadTasks(true);
+            await refreshTasks();
 
           if (refreshed) {
             setReturnMessage(
@@ -550,7 +545,7 @@ export function SupervisorTaskWorkspace() {
 
           setReturnReason("");
 
-          await loadTasks(true);
+          await refreshTasks();
         } finally {
           lifecycleInProgress.current =
             false;
@@ -559,7 +554,7 @@ export function SupervisorTaskWorkspace() {
         }
       },
       [
-        loadTasks,
+        refreshTasks,
         returnFormTaskId,
         returnReason,
       ],
@@ -697,7 +692,7 @@ export function SupervisorTaskWorkspace() {
           setCancellationReason("");
 
           const refreshed =
-            await loadTasks(true);
+            await refreshTasks();
 
           if (refreshed) {
             setCancellationMessage(
@@ -719,7 +714,7 @@ export function SupervisorTaskWorkspace() {
 
           setCancellationReason("");
 
-          await loadTasks(true);
+          await refreshTasks();
         } finally {
           lifecycleInProgress.current =
             false;
@@ -730,7 +725,7 @@ export function SupervisorTaskWorkspace() {
       [
         cancellationFormTaskId,
         cancellationReason,
-        loadTasks,
+        refreshTasks,
       ],
     );
 
@@ -764,8 +759,8 @@ export function SupervisorTaskWorkspace() {
 
       setCancellationReason("");
 
-      void loadTasks(true);
-    }, [loadTasks]);
+      void refreshTasks();
+    }, [refreshTasks]);
 
   /*
    * Shared action availability.
@@ -966,7 +961,7 @@ export function SupervisorTaskWorkspace() {
                */
 
               const refreshed =
-                await loadTasks(true);
+                await refreshTasks();
 
               if (!refreshed) {
                 throw new Error(
@@ -1339,9 +1334,7 @@ export function SupervisorTaskWorkspace() {
                     <TaskAssignmentForm
                       item={item}
                       onAssignmentCreated={async () => {
-                        await loadTasks(
-                          true,
-                        );
+                        await refreshTasks();
                       }}
                     />
 

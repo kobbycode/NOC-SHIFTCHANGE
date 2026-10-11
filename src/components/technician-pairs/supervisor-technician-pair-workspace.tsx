@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -124,28 +125,18 @@ export function SupervisorTechnicianPairWorkspace() {
     setDeactivationMessage,
   ] = useState<string | null>(null);
 
+  const workspaceRequestId = useRef(0);
+
   const loadWorkspace =
     useCallback(
-      async (
-        refresh = false
-      ) => {
-        if (refresh) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
-
-        setError(null);
-
-        try {
-          const [
-            pairResult,
-            technicianResult,
-          ] =
-            await Promise.all([
+      () => {
+        const requestId = ++workspaceRequestId.current;
+        return Promise.all([
               getTechnicianPairs(),
               getEligibleTechnicians(),
-            ]);
+            ]).then(([pairResult, technicianResult]) => {
+
+          if (requestId !== workspaceRequestId.current) return;
 
           setPairs(
             pairResult.pairs
@@ -174,7 +165,8 @@ export function SupervisorTechnicianPairWorkspace() {
                 ? current
                 : ""
           );
-        } catch (loadError) {
+        }).catch((loadError) => {
+          if (requestId !== workspaceRequestId.current) return;
           if (
             loadError instanceof
             TechnicianPairApiError
@@ -193,17 +185,26 @@ export function SupervisorTechnicianPairWorkspace() {
               "Unable to load technician pairs."
             );
           }
-        } finally {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        }).finally(() => {
+          if (requestId === workspaceRequestId.current) {
+            setLoading(false);
+            setRefreshing(false);
+          }
+        });
       },
       []
     );
 
   useEffect(() => {
     void loadWorkspace();
+    return () => { workspaceRequestId.current += 1; };
   }, [loadWorkspace]);
+
+  async function refreshWorkspace() {
+    setRefreshing(true);
+    setError(null);
+    await loadWorkspace();
+  }
 
   const availableFirstTechnicians =
     useMemo(
@@ -290,7 +291,7 @@ export function SupervisorTechnicianPairWorkspace() {
       setFirstTechnicianUid("");
       setSecondTechnicianUid("");
 
-      await loadWorkspace(true);
+      await refreshWorkspace();
 
       setCreationMessage(
         result.message
@@ -362,7 +363,7 @@ export function SupervisorTechnicianPairWorkspace() {
         );
       }
 
-      await loadWorkspace(true);
+      await refreshWorkspace();
 
       setDeactivationMessage(
         result.message
@@ -425,7 +426,7 @@ export function SupervisorTechnicianPairWorkspace() {
             setCreationMessage(null);
             setDeactivationError(null);
             setDeactivationMessage(null);
-            void loadWorkspace(true);
+            void refreshWorkspace();
           }}
           disabled={
             refreshing ||
