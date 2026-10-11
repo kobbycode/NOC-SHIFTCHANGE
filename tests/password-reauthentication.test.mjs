@@ -27,7 +27,7 @@ function loadHelper(options = {}) {
   const loaded = { exports: {} };
   const imports = [];
   runInNewContext(compile(helperSource), {
-    exports: loaded.exports, process: { env: { NEXT_PUBLIC_FIREBASE_API_KEY: apiKey } }, fetch,
+    exports: loaded.exports, process: { env: { NEXT_PUBLIC_FIREBASE_API_KEY: apiKey, ...options.env } }, fetch,
     require(specifier) {
       imports.push(specifier);
       if (specifier === "server-only") return {};
@@ -37,6 +37,17 @@ function loadHelper(options = {}) {
   return { ...loaded.exports, imports };
 }
 const helper = loadHelper();
+test("isolated demo reauthentication uses only the explicit loopback emulator", async () => {
+  const env = { FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099", FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080", FIREBASE_PROJECT_ID: "demo-shiftchange-v2", NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-shiftchange-v2", NEXT_PUBLIC_USE_FIREBASE_EMULATORS: "true" };
+  let target;
+  const demo = loadHelper({ env, fetch: async url => { target = url; return response(); } });
+  assert.equal((await demo.reauthenticatePassword(validInput())).uid, expectedUid);
+  assert.equal(target, "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=synthetic-test-key");
+  for (const [key, value] of Object.entries({ FIREBASE_AUTH_EMULATOR_HOST: "remote.test:9099", FIRESTORE_EMULATOR_HOST: "", FIREBASE_PROJECT_ID: "production", NEXT_PUBLIC_FIREBASE_PROJECT_ID: "production", NEXT_PUBLIC_USE_FIREBASE_EMULATORS: "false" })) {
+    const unsafe = loadHelper({ env: { ...env, [key]: value }, fetch: async () => { throw new Error("Network must not be called"); } });
+    await assert.rejects(() => unsafe.reauthenticatePassword(validInput()), error => error.code === "CONFIGURATION_UNAVAILABLE");
+  }
+});
 async function rejected(input = validInput(), deps = {}, code = "INVALID_INPUT", status = 400, boundary = helper) {
   await assert.rejects(() => boundary.reauthenticatePassword(input, deps), (error) => {
     assert.ok(error instanceof boundary.PasswordReauthenticationError);

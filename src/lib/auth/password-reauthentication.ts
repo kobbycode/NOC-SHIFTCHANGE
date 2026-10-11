@@ -98,12 +98,25 @@ export async function reauthenticatePassword(
     throw new PasswordReauthenticationError("CONFIGURATION_UNAVAILABLE");
   }
 
+  let endpoint = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=";
+  if (process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+    // Never send demonstration credentials to production or an arbitrary host.
+    // Emulator authentication still verifies the password and exact Firebase UID.
+    if (process.env.FIREBASE_AUTH_EMULATOR_HOST !== "127.0.0.1:9099" ||
+        process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8080" ||
+        process.env.FIREBASE_PROJECT_ID !== "demo-shiftchange-v2" ||
+        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== "demo-shiftchange-v2" ||
+        process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS !== "true") {
+      throw new PasswordReauthenticationError("CONFIGURATION_UNAVAILABLE");
+    }
+    endpoint = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=";
+  }
+
   let response: Pick<Response, "ok" | "status" | "json">;
   try {
     const fetchPasswordVerification = dependencies.fetch ?? fetch;
     response = await fetchPasswordVerification(
-      "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" +
-        encodeURIComponent(apiKey),
+      endpoint + encodeURIComponent(apiKey),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
