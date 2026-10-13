@@ -5,7 +5,7 @@ import { getFirestore } from "firebase-admin/firestore";
 
 const projectId = "demo-shiftchange-v2", origin = "http://localhost:3100";
 if (process.env.FIREBASE_PROJECT_ID !== projectId || process.env.FIREBASE_AUTH_EMULATOR_HOST !== "127.0.0.1:9099" || process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8080") throw new Error("Refusing non-demo validation.");
-const accounts = JSON.parse(await readFile(".demo/credentials.json", "utf8")), scenario = JSON.parse(await readFile(".demo/presentation.json", "utf8"));
+const accounts = JSON.parse(await readFile(".demo/credentials.json", "utf8")), scenario = JSON.parse(await readFile(process.env.DEMO_PRESENTATION_SCENARIO ?? ".demo/presentation.json", "utf8"));
 const db = getFirestore(initializeApp({ projectId }));
 const sessions = [];
 for (const account of accounts) {
@@ -85,5 +85,5 @@ for (const [index, role] of [[1, "supervisor"], [2, "technician"], [4, "technici
   assert.equal(page.status, 200); const html = await page.text(); for (const text of ["Shift Handover Report", "Transfer receipt", "Authenticated report binding", "Print / Save as PDF"]) assert.ok(html.includes(text), text);
 }
 passed("completed supervisor, outgoing and incoming pages render all report sections, binding and printable receipt");
-await writeFile(".demo/validation.json", JSON.stringify({ validatedAt: new Date().toISOString(), projectId, checks, shiftId: scenario.shiftId, incomingShiftId: incoming.id, receiptId: completed.receipt.id, reportDigest: completed.handover.reportBinding.digest, browserVerified: false }, null, 2));
+await writeFile(process.env.DEMO_PRESENTATION_SCENARIO ? process.env.DEMO_PRESENTATION_SCENARIO.replace(/\.json$/, ".validation.json") : ".demo/validation.json", JSON.stringify({ validatedAt: new Date().toISOString(), projectId, checks, shiftId: scenario.shiftId, incomingShiftId: incoming.id, receiptId: completed.receipt.id, reportDigest: completed.handover.reportBinding.digest, browserVerified: false }, null, 2));
 await db.terminate();

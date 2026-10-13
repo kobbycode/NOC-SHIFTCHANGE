@@ -1,6 +1,8 @@
-param([ValidateSet("emulators", "app", "prepare", "validate", "inspect")][string]$Service = "app", [ValidateSet("current", "ready", "completed")][string]$Checkpoint = "current")
+param([ValidateSet("emulators", "app", "prepare", "fresh", "validate", "inspect")][string]$Service = "app", [ValidateSet("current", "ready", "completed")][string]$Checkpoint = "current", [string]$Scenario = ".demo/presentation.json")
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+if ($Scenario -notmatch '^\.demo/[a-zA-Z0-9_-]+\.json$') { throw "Scenario must be a JSON file directly inside .demo/." }
+$env:DEMO_PRESENTATION_SCENARIO = $Scenario
 $env:FIREBASE_PROJECT_ID = "demo-shiftchange-v2"
 $env:NEXT_PUBLIC_FIREBASE_PROJECT_ID = "demo-shiftchange-v2"
 $env:GCLOUD_PROJECT = "demo-shiftchange-v2"
@@ -18,12 +20,25 @@ if ($Service -eq "emulators") {
   $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
   $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
   $options = @("emulators:start", "--config", "firebase.presentation.json", "--project", "demo-shiftchange-v2", "--only", "auth,firestore", "--export-on-exit=.demo/emulator-data", "--log-verbosity=QUIET")
-  $importDirectory = if ($Checkpoint -eq "ready") { '.demo/ready-export' } elseif ($Checkpoint -eq "completed") { '.demo/completed-export' } elseif (Test-Path -LiteralPath '.demo/emulator-data/firebase-export-metadata.json') { '.demo/emulator-data' } else { '.demo/completed-export' }
-  if (Test-Path -LiteralPath "$importDirectory/firebase-export-metadata.json") { $options += "--import=$importDirectory" }
-  elseif ($Checkpoint -ne "current") { throw "Requested demo checkpoint does not exist." }
+  if ($Checkpoint -eq "ready") {
+    $importDirectory = '.demo/ready-export'
+    if (-not (Test-Path -LiteralPath "$importDirectory/firebase-export-metadata.json")) { throw "Requested ready checkpoint does not exist." }
+  } elseif ($Checkpoint -eq "completed") {
+    $importDirectory = '.demo/completed-export'
+    if (-not (Test-Path -LiteralPath "$importDirectory/firebase-export-metadata.json")) { throw "Requested completed checkpoint does not exist." }
+  } elseif (Test-Path -LiteralPath '.demo/emulator-data/firebase-export-metadata.json') {
+    $importDirectory = '.demo/emulator-data'
+  } elseif (Test-Path -LiteralPath '.demo/ready-export/firebase-export-metadata.json') {
+    $importDirectory = '.demo/ready-export'
+  } else {
+    $importDirectory = $null
+  }
+  if ($importDirectory) { $options += "--import=$importDirectory" }
   & firebase @options
 } elseif ($Service -eq "prepare") {
   & node scripts/prepare-presentation.mjs
+} elseif ($Service -eq "fresh") {
+  & node scripts/fresh-presentation.mjs
 } elseif ($Service -eq "validate") {
   & node scripts/validate-presentation.mjs
 } elseif ($Service -eq "inspect") {

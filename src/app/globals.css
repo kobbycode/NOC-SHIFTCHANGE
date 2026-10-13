@@ -6,11 +6,67 @@
   aside, nav, button, [data-dashboard-header] { display: none !important; }
   main { margin: 0 !important; padding: 0 !important; }
   .handover-print { border: 0; padding: 0; background: white !important; color: black !important; font-size: 10pt; }
+  .handover-print { line-height: 1.1; overflow-wrap: anywhere; }
+  .handover-print > * { margin-block: 0 !important; }
+  .handover-print > * + * { margin-block-start: 0.5mm !important; }
+  .handover-print .handover-final-evidence { break-inside: auto; page-break-inside: auto; }
   .handover-print section { break-inside: auto; }
+  .handover-print section > h2 { margin-bottom: 1.5mm; }
+  .handover-print .confirmation-evidence,
+  .handover-print .binding-evidence,
+  .handover-print .transfer-evidence { break-inside: avoid-page; page-break-inside: avoid; }
+  .handover-print li, .handover-print section > .rounded-lg { break-inside: avoid-page; }
+  .handover-print .participant-evidence-row { margin-block: 1mm; padding: 1mm 2mm; }
+  .handover-print .transfer-evidence dl > div { break-inside: avoid-page; }
+  .handover-print .transfer-evidence dl {
+    display: block;
+    line-height: 1.2;
+  }
+  .handover-print .transfer-evidence dl > div { margin-block: 0.5mm; }
+  .handover-print .transfer-evidence dt,
+  .handover-print .transfer-evidence dd { display: inline; }
+  .handover-print .transfer-evidence dt::after { content: ": "; }
+  .handover-print .space-y-1 > :not([hidden]) ~ :not([hidden]),
+  .handover-print .space-y-2 > :not([hidden]) ~ :not([hidden]),
+  .handover-print .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-block-start: 2px; }
+  .handover-print section > .rounded-lg { padding: 1.25mm; margin-bottom: 0.75mm; }
+  .handover-print p, .handover-print li { orphans: 3; widows: 3; }
+  .handover-print .overflow-x-auto { overflow: visible; }
+  .handover-print table { table-layout: fixed; border-collapse: collapse; }
+  .handover-print thead { display: table-header-group; }
+  .handover-print .attendance-report-table th:nth-child(1),
+  .handover-print .attendance-report-table td:nth-child(1) { width: 24%; }
+  .handover-print .attendance-report-table th:nth-child(2),
+  .handover-print .attendance-report-table td:nth-child(2) { width: 18%; }
+  .handover-print .attendance-report-table th:nth-child(3),
+  .handover-print .attendance-report-table td:nth-child(3),
+  .handover-print .attendance-report-table th:nth-child(4),
+  .handover-print .attendance-report-table td:nth-child(4) { width: 14%; }
+  .handover-print .attendance-report-table th:nth-child(5),
+  .handover-print .attendance-report-table td:nth-child(5) { width: 12%; }
+  .handover-print .attendance-report-table th:nth-child(6),
+  .handover-print .attendance-report-table td:nth-child(6) { width: 18%; }
+  .handover-print .broadcast-report-table th:nth-child(1),
+  .handover-print .broadcast-report-table td:nth-child(1) { width: 12%; }
+  .handover-print .broadcast-report-table th:nth-child(2),
+  .handover-print .broadcast-report-table td:nth-child(2) { width: 12%; }
+  .handover-print .broadcast-report-table th:nth-child(3),
+  .handover-print .broadcast-report-table td:nth-child(3) { width: 18%; }
+  .handover-print .broadcast-report-table th:nth-child(4),
+  .handover-print .broadcast-report-table td:nth-child(4) { width: 32%; }
+  .handover-print .broadcast-report-table th:nth-child(5),
+  .handover-print .broadcast-report-table td:nth-child(5) { width: 26%; }
+  .handover-print th, .handover-print td { padding: 0.75mm; overflow-wrap: anywhere; }
+  .handover-print dd, .handover-print p { overflow-wrap: anywhere; }
+  .handover-print .text-sm { font-size: 10pt; }
+  .handover-print .text-xs { font-size: 9pt; }
+  .handover-print .text-lg { font-size: 12pt; }
+  .handover-print .confirmation-evidence li { padding-block: 1mm; }
+  .handover-print .binding-evidence { word-break: normal; }
   .handover-print tr, .handover-print h2, .handover-print h3 { break-inside: avoid; }
   .handover-print h2, .handover-print h3 { break-after: avoid; }
   .handover-print th, .handover-print td { border-color: #aaa; }
-  @page { size: A4; margin: 14mm; }
+  @page { size: A4; margin: 8mm; }
 }
 
 /* Enable class-based dark mode for next-themes */
