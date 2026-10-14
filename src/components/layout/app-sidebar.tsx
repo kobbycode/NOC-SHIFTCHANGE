@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import Link from "next/link";
 
@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 
 import type { UserRole } from "@/types/auth";
+
+import type {
+  NavigationItem,
+} from "@/config/navigation";
 
 import {
   ROLE_NAVIGATION,
@@ -43,6 +47,52 @@ const AVAILABLE_ROUTES = new Set([
   "/supervisor/handovers",
 ]);
 
+const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
+
+function subscribeDesktopNav(onStoreChange: () => void) {
+  const media = window.matchMedia(DESKTOP_NAV_QUERY);
+
+  media.addEventListener("change", onStoreChange);
+
+  return () => {
+    media.removeEventListener("change", onStoreChange);
+  };
+}
+
+function getDesktopNavSnapshot() {
+  return window.matchMedia(DESKTOP_NAV_QUERY).matches;
+}
+
+function getDesktopNavServerSnapshot() {
+  // Hydration must match SSR. After mount, the client snapshot
+  // updates mobile viewports without throwing a mismatch.
+  return true;
+}
+
+function getMostSpecificMatch(
+  pathname: string,
+  items: NavigationItem[],
+  availableRoutes: Set<string>
+): NavigationItem | null {
+  let bestMatch: NavigationItem | null = null;
+  let bestLength = -1;
+
+  for (const item of items) {
+    if (!availableRoutes.has(item.href)) continue;
+
+    const matches =
+      pathname === item.href ||
+      pathname.startsWith(`${item.href}/`);
+
+    if (matches && item.href.length > bestLength) {
+      bestLength = item.href.length;
+      bestMatch = item;
+    }
+  }
+
+  return bestMatch;
+}
+
 export function AppSidebar({
   role,
   open,
@@ -50,6 +100,12 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const isDesktopNav = useSyncExternalStore(
+    subscribeDesktopNav,
+    getDesktopNavSnapshot,
+    getDesktopNavServerSnapshot
+  );
 
   const [loggingOut, setLoggingOut] =
     useState(false);
@@ -64,6 +120,14 @@ export function AppSidebar({
     supervisor: "Supervisor",
     technician: "Technician",
   }[role];
+
+  const matchedItem = getMostSpecificMatch(
+    pathname,
+    navigation,
+    AVAILABLE_ROUTES
+  );
+
+  const drawerAccessible = open || isDesktopNav;
 
   async function handleLogout() {
     if (loggingOut) {
@@ -104,40 +168,41 @@ export function AppSidebar({
 
   return (
     <>
-      {open && (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          onClick={onClose}
-          className="
-            fixed inset-0 z-40
-            bg-black/50 lg:hidden
-          "
-        />
-      )}
+      <button
+        type="button"
+        aria-label="Close navigation"
+        aria-hidden={!open}
+        tabIndex={open ? 0 : -1}
+        disabled={!open}
+        onClick={onClose}
+        data-open={open ? "true" : "false"}
+        className="
+          sidebar-backdrop
+          fixed inset-0 z-40
+          bg-black/50 lg:hidden
+        "
+      />
 
       <aside
-        className={`
+        id="mobile-navigation"
+        aria-label="Main navigation"
+        aria-hidden={!drawerAccessible}
+        inert={drawerAccessible ? undefined : true}
+        data-open={open ? "true" : "false"}
+        className="
+          sidebar-drawer
           fixed inset-y-0 left-0 z-50
-          flex w-72 flex-col
-          border-r border-slate-200
-          bg-white
-          transition-transform duration-200
-          dark:border-slate-800
-          dark:bg-slate-950
-          lg:translate-x-0
-
-          ${
-            open
-              ? "translate-x-0"
-              : "-translate-x-full"
-          }
-        `}
+          flex w-72 max-w-[85vw] flex-col
+          border-r border-border
+          bg-[var(--surface)]
+          dark:border-border
+          dark:bg-[var(--midnight)]
+        "
       >
         <div
           className="
             flex h-20 items-center justify-between
-            border-b border-slate-200 px-6
+            border-b border-border px-6
             dark:border-slate-800
           "
         >
@@ -146,7 +211,7 @@ export function AppSidebar({
               className="
                 flex h-11 w-11 items-center
                 justify-center rounded-xl
-                bg-blue-600 text-white
+                bg-[var(--accent)] text-[var(--obsidian)]
               "
             >
               <RadioTower size={23} />
@@ -155,14 +220,14 @@ export function AppSidebar({
             <div>
               <h1
                 className="
-                  text-lg font-bold text-slate-900
-                  dark:text-white
+                  text-lg font-bold text-[var(--foreground)]
+                  dark:text-[var(--foreground)]
                 "
               >
                 ShiftChange
               </h1>
 
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted)]">
                 Technical Operations
               </p>
             </div>
@@ -172,10 +237,18 @@ export function AppSidebar({
             type="button"
             onClick={onClose}
             aria-label="Close sidebar"
+            tabIndex={open ? 0 : -1}
             className="
-              rounded-lg p-2 text-slate-500
-              hover:bg-slate-100
-              dark:hover:bg-slate-800
+              flex h-11 w-11 items-center justify-center rounded-lg
+              text-[var(--muted)]
+              transition-[background-color,color,transform] duration-[160ms]
+              ease-atelier
+              hover:bg-[var(--elevated)]
+              active:scale-[0.96]
+              focus-visible:outline-none focus-visible:ring-2
+              focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
+              motion-reduce:transition-none motion-reduce:active:scale-100
+              dark:hover:bg-[var(--elevated)]
               lg:hidden
             "
           >
@@ -187,7 +260,7 @@ export function AppSidebar({
           <p
             className="
               text-xs font-semibold uppercase
-              tracking-wider text-slate-400
+              tracking-wider text-[var(--muted)]
             "
           >
             {roleTitle} Workspace
@@ -200,12 +273,6 @@ export function AppSidebar({
         >
           {navigation.map((item) => {
             const Icon = item.icon;
-
-            const active =
-              pathname === item.href ||
-              pathname.startsWith(
-                `${item.href}/`
-              );
 
             const available =
               AVAILABLE_ROUTES.has(item.href);
@@ -220,8 +287,8 @@ export function AppSidebar({
                     flex cursor-not-allowed
                     items-center gap-3
                     rounded-xl px-4 py-3
-                    text-sm text-slate-400
-                    dark:text-slate-600
+                    text-sm text-[var(--muted)]
+                    dark:text-[var(--muted)]
                   "
                 >
                   <Icon size={19} />
@@ -235,33 +302,54 @@ export function AppSidebar({
               );
             }
 
+            const isActive = matchedItem?.href === item.href;
+
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
-                aria-current={
-                  active ? "page" : undefined
-                }
+                aria-current={isActive ? "page" : undefined}
                 className={`
-                  flex items-center gap-3
+                  relative flex items-center gap-3
                   rounded-xl px-4 py-3
                   text-sm font-medium
-                  transition-colors
-
+                  transition-[color,background-color] duration-[180ms]
+                  ease-atelier
+                  focus-visible:outline-none focus-visible:ring-2
+                  focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
+                  motion-reduce:transition-none
                   ${
-                    active
-                      ? "bg-blue-600 text-white"
+                    isActive
+                      ? "bg-[var(--elevated)] text-[var(--foreground)]"
                       : `
-                        text-slate-600
-                        hover:bg-slate-100
-                        dark:text-slate-300
-                        dark:hover:bg-slate-800
+                        text-[var(--foreground)]
+                        hover:bg-[var(--elevated)]
+                        dark:text-[var(--muted)]
+                        dark:hover:bg-[var(--elevated)]
                       `
                   }
                 `}
               >
-                <Icon size={19} />
+                <span
+                  aria-hidden="true"
+                  className={`
+                    absolute top-1/2 left-0 h-6 w-0.5
+                    -translate-y-1/2 rounded-full
+                    bg-[var(--accent)]
+                    transition-opacity duration-[200ms] ease-atelier
+                    motion-reduce:transition-none
+                    ${isActive ? "opacity-100" : "opacity-0"}
+                  `}
+                />
+
+                <Icon
+                  size={19}
+                  className="
+                    transition-colors duration-[160ms] ease-atelier
+                    motion-reduce:transition-none
+                  "
+                />
 
                 {item.label}
               </Link>
@@ -271,7 +359,7 @@ export function AppSidebar({
 
         <div
           className="
-            border-t border-slate-200
+            border-t border-[var(--border)]
             p-5 dark:border-slate-800
           "
         >
@@ -283,16 +371,19 @@ export function AppSidebar({
               flex w-full items-center
               justify-center gap-2
               rounded-xl border
-              border-slate-200 px-4 py-2.5
+              border-[var(--border)] px-4 py-2.5
               text-sm font-medium
               text-slate-700
-              transition-colors
-              hover:bg-slate-100
+              focus-visible:outline-none focus-visible:ring-2
+              focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
+              transition-colors duration-[160ms] ease-atelier
+              hover:bg-[var(--elevated)]
               disabled:cursor-not-allowed
               disabled:opacity-60
-              dark:border-slate-700
+              motion-reduce:transition-none
+              dark:border-[var(--border)]
               dark:text-slate-200
-              dark:hover:bg-slate-800
+              dark:hover:bg-[var(--midnight)]
             "
           >
             {loggingOut ? (

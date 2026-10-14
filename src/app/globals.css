@@ -1,10 +1,10 @@
-
 @import "tailwindcss";
 
 @media print {
   body { background: white !important; color: black !important; }
   aside, nav, button, [data-dashboard-header] { display: none !important; }
   main { margin: 0 !important; padding: 0 !important; }
+  [data-page-content] { opacity: 1 !important; transform: none !important; }
   .handover-print { border: 0; padding: 0; background: white !important; color: black !important; font-size: 10pt; }
   .handover-print { line-height: 1.1; overflow-wrap: anywhere; }
   .handover-print > * { margin-block: 0 !important; }
@@ -72,16 +72,38 @@
 /* Enable class-based dark mode for next-themes */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme */
+/* Light theme tokens */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #F8F9FA;
+  --foreground: #0F172A;
+  --surface: #FFFFFF;
+  --elevated: #F5F5F5;
+  --muted: #6B7280;
+  --border: #E5E7EB;
+  --accent: #C8AD80;
+  --signal-blue: #3267EF;
+  --obsidian: #0B0D13;
+  --midnight: #151A26;
+  --elevated-dark: #1D2331;
 }
 
-/* Dark theme */
+/* Dark theme tokens */
 :root.dark {
-  --background: #0f172a;
-  --foreground: #f1f5f9;
+  --background: #0B0D13;
+  --foreground: #F5F1E9;
+  --surface: #151A26;
+  --elevated: #1D2331;
+  --muted: #9CA3AF;
+  --border: #374151;
+  --accent: #C8AD80;
+  --signal-blue: #3267EF;
+  --obsidian: #0B0D13;
+  --midnight: #151A26;
+  --elevated-dark: #1D2331;
+  --ease-atelier: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --duration-hover: 160ms;
+  --duration-active: 200ms;
+
 }
 
 /* Tailwind theme configuration */
@@ -91,6 +113,7 @@
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --ease-atelier: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* Global application styles */
@@ -102,6 +125,74 @@ body {
 
   min-height: 100vh;
 }
+
+/* Mobile drawer: transform + delayed visibility so closed controls are not tabbable */
+.sidebar-drawer {
+  pointer-events: none;
+  transform: translateX(-100%);
+  transition:
+    transform var(--duration-drawer) var(--ease-atelier),
+    visibility 0s linear var(--duration-drawer);
+  visibility: hidden;
+}
+
+.sidebar-drawer[data-open="true"] {
+  pointer-events: auto;
+  transform: translateX(0);
+  transition:
+    transform var(--duration-drawer) var(--ease-atelier),
+    visibility 0s linear 0s;
+  visibility: visible;
+}
+
+@media (min-width: 1024px) {
+  .sidebar-drawer,
+  .sidebar-drawer[data-open="true"] {
+    pointer-events: auto;
+    transform: none;
+    transition: none;
+    visibility: visible;
+  }
+}
+
+.sidebar-backdrop {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-drawer) var(--ease-atelier),
+    visibility 0s linear var(--duration-drawer);
+  visibility: hidden;
+}
+
+.sidebar-backdrop[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    opacity var(--duration-drawer) var(--ease-atelier),
+    visibility 0s linear 0s;
+  visibility: visible;
+}
+
+/* Reduced-motion: keep state changes immediate; preserve focus rings */
+
+
+  .sidebar-drawer,
+  .sidebar-drawer[data-open="true"],
+  .sidebar-backdrop,
+  .sidebar-backdrop[data-open="true"] {
+    transition: none !important;
+  }
+
+  .sr-only {
+    transition: none !important;
+  }
+
+  *[class*="transition-"] {
+    transition-property: color, background-color, border-color, outline-color, box-shadow !important;
+    transition-duration: 0.01ms !important;
+    transition-timing-function: linear !important;
+  }
+
 
 /* Consistent box sizing */
 * {

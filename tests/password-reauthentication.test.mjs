@@ -302,6 +302,18 @@ test("change-password preserves reauthentication, both account checks, mutation,
   assert.deepEqual(structuredClone(cookie.args), ["__session", "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 }]);
   for (const secret of [password, idToken, refreshToken]) assert.ok(!JSON.stringify(fixture.writes).includes(secret));
 });
+test("an administrator who must change their password can still use the change-password route", async () => {
+  const fixture = routeFixture({
+    session: { uid: expectedUid, email, mustChangePassword: true },
+  });
+  const result = await fixture.run();
+  assert.equal(result.status, 200);
+  assert.equal(
+    fixture.writes.find(write => write.kind === "profile").data.mustChangePassword,
+    false,
+  );
+  assert.ok(fixture.events.includes("password-update"));
+});
 for (const [label, overrides, status, message] of [
   ["origin", { origin: "https://other.example.test" }, 403, "Invalid request origin."],
   ["expired session", { session: null }, 401, "Your session has expired. Please sign in again."],

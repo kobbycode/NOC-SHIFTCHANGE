@@ -1,8 +1,8 @@
-
 "use client";
 
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -37,6 +37,7 @@ export function DashboardShell({
     useState(false);
 
   const pathname = usePathname();
+  const pageContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Close the mobile drawer when the route changes.
@@ -45,13 +46,60 @@ export function DashboardShell({
     setSidebarOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    const pageContent = pageContentRef.current;
+    const motionPreference = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    );
+
+    if (
+      !pageContent ||
+      motionPreference.matches ||
+      typeof pageContent.animate !== "function"
+    ) {
+      return;
+    }
+
+    const animation = pageContent.animate(
+      [
+        { opacity: 0.94, transform: "translateY(8px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      {
+        duration: 200,
+        easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+      }
+    );
+
+    function handleMotionPreferenceChange(
+      event: MediaQueryListEvent
+    ) {
+      if (event.matches) {
+        animation.cancel();
+      }
+    }
+
+    motionPreference.addEventListener(
+      "change",
+      handleMotionPreferenceChange
+    );
+
+    return () => {
+      motionPreference.removeEventListener(
+        "change",
+        handleMotionPreferenceChange
+      );
+      animation.cancel();
+    };
+  }, [pathname]);
+
   return (
     <div
       className="
-        min-h-screen bg-slate-50
-        text-slate-900
-        dark:bg-slate-900
-        dark:text-slate-100
+        min-h-screen overflow-x-clip bg-[var(--surface)]
+        text-[var(--foreground)]
+        dark:bg-[var(--midnight)]
+        dark:text-[var(--foreground)]
       "
     >
       <AppSidebar
@@ -60,9 +108,10 @@ export function DashboardShell({
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="min-h-screen lg:pl-72 print:pl-0">
+      <div className="min-h-screen overflow-x-clip lg:pl-72 print:pl-0">
         <AppHeader
           role={role}
+          sidebarOpen={sidebarOpen}
           onMenuClick={() => setSidebarOpen(true)}
         />
 
@@ -72,7 +121,9 @@ export function DashboardShell({
             p-4 sm:p-6 lg:p-8
           "
         >
-          {children}
+          <div ref={pageContentRef} data-page-content>
+            {children}
+          </div>
         </main>
       </div>
     </div>

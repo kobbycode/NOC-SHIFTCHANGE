@@ -316,209 +316,216 @@ export function UserManagement() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8 p-4 md:p-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
+      <section aria-labelledby="user-management-title">
+        <h1 id="user-management-title" className="text-3xl font-bold tracking-tight">
+          User Management
+        </h1>
 
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm text-[var(--muted)]">
           Create and manage administrator, supervisor, and technician accounts.
         </p>
-      </div>
+      </section>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <Users className="h-6 w-6 text-blue-600" />
+      <section aria-label="User statistics">
+        <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
+          <div className="h-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-[var(--foreground)]">
+            <div className="flex items-center gap-3">
+              <Users className="h-6 w-6 text-blue-600" />
 
-            <div>
-              <p className="text-sm text-slate-500">Total users</p>
+              <div>
+                <p className="text-sm text-[var(--muted)]">Total users</p>
 
-              <p className="text-3xl font-bold">{users.length}</p>
+                <p className="text-3xl font-bold">{users.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-[var(--foreground)]">
+            <div className="flex items-center gap-3">
+              <UserCheck className="h-6 w-6 text-green-600" />
+
+              <div>
+                <p className="text-sm text-[var(--muted)]">Active users</p>
+
+                <p className="text-3xl font-bold">{activeUsers}</p>
+              </div>
             </div>
           </div>
         </div>
+      </section>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <UserCheck className="h-6 w-6 text-green-600" />
+      <section aria-label="Account management">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+          <section className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-[var(--foreground)] sm:p-6">
+            <div className="mb-6 flex items-center gap-3">
+              <UserPlus className="h-6 w-6 text-blue-600" />
 
-            <div>
-              <p className="text-sm text-slate-500">Active users</p>
-
-              <p className="text-3xl font-bold">{activeUsers}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-6 flex items-center gap-3">
-            <UserPlus className="h-6 w-6 text-blue-600" />
-
-            <h2 className="text-xl font-semibold">Create new user</h2>
-          </div>
-
-          <form onSubmit={handleCreateUser} className="space-y-5">
-            <div>
-              <label
-                htmlFor="fullName"
-                className="mb-2 block text-sm font-medium"
-              >
-                Full name
-              </label>
-
-              <input
-                id="fullName"
-                required
-                maxLength={120}
-                value={form.fullName}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    fullName: event.target.value,
-                  })
-                }
-                placeholder="Employee's full name"
-                className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700"
-              />
+              <h2 className="text-xl font-semibold">Create new user</h2>
             </div>
 
-            <div>
-              <label htmlFor="email" className="mb-2 block text-sm font-medium">
-                Email address
-              </label>
+            <form onSubmit={handleCreateUser} className="space-y-5">
+              <div>
+                <label
+                  htmlFor="fullName"
+                  className="mb-2 block text-sm font-medium"
+                >
+                  Full name
+                </label>
 
-              <input
-                id="email"
-                type="email"
-                required
-                autoComplete="off"
-                value={form.email}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    email: event.target.value,
-                  })
-                }
-                placeholder="employee@company.com"
-                className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="role" className="mb-2 block text-sm font-medium">
-                Account role
-              </label>
-
-              <select
-                id="role"
-                value={form.role}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    role: event.target.value as UserRole,
-                  })
-                }
-                className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700"
-              >
-                <option value="technician">Technician</option>
-
-                <option value="supervisor">Supervisor</option>
-
-                <option value="admin">Administrator</option>
-              </select>
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="mb-2 block text-sm font-medium"
-              >
-                Initial password
-              </label>
-
-              <div className="relative">
                 <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
+                  id="fullName"
                   required
-                  minLength={12}
-                  maxLength={128}
-                  autoComplete="new-password"
-                  value={form.password}
+                  maxLength={120}
+                  value={form.fullName}
                   onChange={(event) =>
                     setForm({
                       ...form,
-                      password: event.target.value,
+                      fullName: event.target.value,
                     })
                   }
-                  placeholder="Enter initial password"
-                  className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 pr-12 dark:border-slate-700"
+                  placeholder="Employee's full name"
+                  className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 />
+              </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+              <div>
+                <label htmlFor="email" className="mb-2 block text-sm font-medium">
+                  Email address
+                </label>
+
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="off"
+                  value={form.email}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      email: event.target.value,
+                    })
+                  }
+                  placeholder="employee@company.com"
+                  className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="role" className="mb-2 block text-sm font-medium">
+                  Account role
+                </label>
+
+                <select
+                  id="role"
+                  value={form.role}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      role: event.target.value as UserRole,
+                    })
+                  }
+                  className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-5 w-5" />
-                  ) : (
-                    <Eye className="h-5 w-5" />
-                  )}
-                </button>
+                  <option value="technician">Technician</option>
+
+                  <option value="supervisor">Supervisor</option>
+
+                  <option value="admin">Administrator</option>
+                </select>
               </div>
 
-              <p className="mt-2 text-xs text-slate-500">
-                Minimum 12 characters. The employee must change this password at
-                first login.
-              </p>
+              <div>
+                <label
+                  htmlFor="password"
+                  className="mb-2 block text-sm font-medium"
+                >
+                  Initial password
+                </label>
+
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={form.password}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        password: event.target.value,
+                      })
+                    }
+                    placeholder="Enter initial password"
+                    className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 pr-12 text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Minimum 12 characters. The employee must change this password at
+                  first login.
+                </p>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+                >
+                  {error}
+                </div>
+              )}
+
+              {success && (
+                <div
+                  role="status"
+                  className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-300"
+                >
+                  {success}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full rounded-lg bg-[var(--signal-blue)] px-4 py-3 font-semibold text-white transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? "Creating account..." : "Create user"}
+              </button>
+            </form>
+          </section>
+
+          <section className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-[var(--foreground)] sm:p-6">
+            <div className="mb-6 flex items-center justify-between gap-3">
+              <h2 className="min-w-0 text-lg font-semibold sm:text-xl">Registered users</h2>
+
+              <button
+                type="button"
+                onClick={() => void loadUsers()}
+                disabled={loading}
+                aria-label="Refresh user list"
+                className="shrink-0 rounded-lg border border-[var(--border)] p-2 transition-colors hover:bg-[var(--elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`h-5 w-5 ${loading ? "animate-spin" : ""}`}
+                />
+              </button>
+
             </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
-              >
-                {error}
-              </div>
-            )}
-
-            {success && (
-              <div
-                role="status"
-                className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950 dark:text-green-300"
-              >
-                {success}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Creating account..." : "Create user"}
-            </button>
-          </form>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-6 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold">Registered users</h2>
-
-            <button
-              type="button"
-              onClick={() => void loadUsers()}
-              disabled={loading}
-              aria-label="Refresh user list"
-              className="rounded-lg border border-slate-300 p-2 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            >
-              <RefreshCw
-                className={`h-5 w-5 ${loading ? "animate-spin" : ""}`}
-              />
-            </button>
 
             {actionSuccess && (
               <div
@@ -537,88 +544,89 @@ export function UserManagement() {
                 {actionError}
               </div>
             )}
-          </div>
 
-          {loading ? (
-            <p className="text-sm text-slate-500">Loading users...</p>
-          ) : users.length === 0 ? (
-            <p className="text-sm text-slate-500">No user accounts found.</p>
-          ) : (
-            <div className="space-y-3">
-              {users.map((user) => (
-                <div
-                  key={user.uid}
-                  className="rounded-xl border border-slate-200 p-4 dark:border-slate-800"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold">{user.fullName}</p>
 
-                      <p className="break-all text-sm text-slate-500">
-                        {user.email}
-                      </p>
+            {loading ? (
+              <p className="text-sm text-[var(--muted)]">Loading users...</p>
+            ) : users.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">No user accounts found.</p>
+            ) : (
+              <div className="space-y-3">
+                {users.map((user) => (
+                  <div
+                    key={user.uid}
+                    className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--elevated)] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-semibold">{user.fullName}</p>
+
+                        <p className="min-w-0 break-words text-sm text-[var(--muted)]">
+                          {user.email}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${
+                          user.status === "active"
+                            ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                        }`}
+                      >
+                        {statusLabel(user.status)}
+                      </span>
                     </div>
 
-                    <span
-                      className={`rounded-full px-2 py-1 text-xs font-medium ${
-                        user.status === "active"
-                          ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
-                          : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                      }`}
-                    >
-                      {statusLabel(user.status)}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs dark:bg-slate-800">
-                      {roleLabels[user.role]}
-                    </span>
-
-                    {user.mustChangePassword && (
-                      <span className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                        Password change required
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)]">
+                        {roleLabels[user.role]}
                       </span>
-                    )}
 
-                    {user.statusOperationPending ? (
-                      <div className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                        An account change is in progress. Administrator review
-                        may be required.
-                      </div>
-                    ) : user.role === "technician" &&
-                      user.accountStatusTestEligible &&
-                      (user.status === "active" ||
-                        user.status === "blocked") ? (
-                      <div className="mt-4 flex justify-end border-t border-slate-200 pt-4 dark:border-slate-800">
-                        {user.status === "active" ? (
-                          <button
-                            type="button"
-                            disabled={actionSubmitting}
-                            onClick={() => openAccountAction(user, "block")}
-                            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Block account
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={actionSubmitting}
-                            onClick={() => openAccountAction(user, "unblock")}
-                            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Unblock account
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
+                      {user.mustChangePassword && (
+                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                          Password change required
+                        </span>
+                      )}
+
+                      {user.statusOperationPending ? (
+                        <div className="mt-4 basis-full rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--foreground)]">
+                          An account change is in progress. Administrator review
+                          may be required.
+                        </div>
+                      ) : user.role === "technician" &&
+                        user.accountStatusTestEligible &&
+                        (user.status === "active" ||
+                          user.status === "blocked") ? (
+                        <div className="mt-4 flex basis-full justify-end border-t border-[var(--border)] pt-4">
+                          {user.status === "active" ? (
+                            <button
+                              type="button"
+                              disabled={actionSubmitting}
+                              onClick={() => openAccountAction(user, "block")}
+                              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Block account
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={actionSubmitting}
+                              onClick={() => openAccountAction(user, "unblock")}
+                              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Unblock account
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
 
       {pendingAction && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -626,7 +634,7 @@ export function UserManagement() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-action-title"
-            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+            className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-2xl"
           >
             <h2 id="account-action-title" className="text-xl font-bold">
               {pendingAction.action === "block"
@@ -640,10 +648,10 @@ export function UserManagement() {
                 : "Unblocking this account will restore the technician's ability to sign in. Previously revoked sessions will remain invalid."}
             </p>
 
-            <div className="mt-4 rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
+            <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3">
               <p className="font-semibold">{pendingAction.user.fullName}</p>
 
-              <p className="mt-1 break-all text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-1 break-all text-sm text-[var(--muted)] dark:text-slate-400">
                 {pendingAction.user.email}
               </p>
             </div>
@@ -666,7 +674,7 @@ export function UserManagement() {
                   value={actionReason}
                   onChange={(event) => setActionReason(event.target.value)}
                   placeholder="Enter the reason for this account change..."
-                  className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700"
+                  className="min-h-28 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 />
 
                 <p className="mt-1 text-xs text-slate-500">

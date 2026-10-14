@@ -27,7 +27,7 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <div className="h-10 w-10" aria-hidden="true" />
+      <div className="h-11 w-11" aria-hidden="true" />
     );
   }
 
@@ -40,13 +40,16 @@ export function ThemeToggle() {
         setTheme(isDark ? "light" : "dark")
       }
       className="
-        flex h-10 w-10 items-center justify-center
-        rounded-xl border border-slate-200
-        bg-white text-slate-700
-        transition-colors hover:bg-slate-100
-        dark:border-slate-700
-        dark:bg-slate-800 dark:text-slate-200
-        dark:hover:bg-slate-700
+        flex h-11 w-11 items-center justify-center
+        rounded-xl border border-[var(--border)]
+        bg-[var(--surface)] text-[var(--foreground)]
+        transition-[background-color,color,border-color,transform]
+        duration-[160ms] ease-atelier
+        hover:bg-[var(--elevated)]
+        active:scale-[0.96]
+        focus-visible:outline-none focus-visible:ring-2
+        focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
+        motion-reduce:transition-none motion-reduce:active:scale-100
       "
       aria-label={
         isDark
