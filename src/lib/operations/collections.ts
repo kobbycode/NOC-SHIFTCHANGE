@@ -36,6 +36,9 @@ export const OPERATIONAL_COLLECTIONS = {
 
   NEXT_SHIFT_AUTHORIZATIONS:
     "next_shift_authorizations",
+
+  HANDOVER_RESERVATION_GUARDS:
+    "handover_reservation_guards",
 } as const;
 
 export const GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID =
@@ -92,6 +95,10 @@ export function getOperationalCollections() {
 
     nextShiftAuthorizations: db.collection(
       OPERATIONAL_COLLECTIONS.NEXT_SHIFT_AUTHORIZATIONS
+    ),
+
+    handoverReservationGuards: db.collection(
+      OPERATIONAL_COLLECTIONS.HANDOVER_RESERVATION_GUARDS
     ),
   };
 }

@@ -123,7 +123,7 @@ test("supervisor is authorized and no extra endpoint exists", async () => {
 // transactional store. Retry discards the first attempt's queued writes.
 const helperSources = Object.fromEntries(await Promise.all([
   "assignment-identity", "assignment-generation-domain", "handover-domain", "handover-work-disposition-domain", "handover-work-snapshot", "operational-shift-control-state",
-  "shift-overlap", "prepare-technician-schedule",
+  "shift-overlap", "prepare-technician-schedule", "handover-reservation-guard-domain",
 ].map(async (name) => [name, await readFile(new URL(`../src/lib/operations/${name}.ts`, import.meta.url), "utf8")])));
 function replacementStore(proposedId = "replacement-id", collision = false) {
   const at = "2020-01-01T00:00:00.000Z";
@@ -207,7 +207,8 @@ function replacementStore(proposedId = "replacement-id", collision = false) {
   dependencies["./collections"] = { GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID: "global", getOperationalCollections: () => ({ db,
     ...Object.fromEntries(Object.entries({ handovers: "handovers", handoverTaskDispositions: "handover_task_dispositions", shifts: "shifts", shiftMembers: "shift_members",
       operationalShiftControl: "operational_shift_control", technicianSchedules: "technician_schedules", technicianPairs: "technician_pairs",
-      technicianPairMemberships: "technician_pair_memberships", tasks: "tasks", taskAssignments: "task_assignments" }).map(([key, value]) => [key, collection(value)])) }) };
+      technicianPairMemberships: "technician_pair_memberships", tasks: "tasks", taskAssignments: "task_assignments",
+      handoverReservationGuards: "handover_reservation_guards" }).map(([key, value]) => [key, collection(value)])) }) };
   dependencies["firebase-admin/firestore"] = { FieldValue: { serverTimestamp: () => "server-time" } };
   dependencies["./next-shift-authorization-domain"] = { readActivePermanentPairTechnicianIds: (value) => value.technicianIds };
   const production = load(null, serviceSource);

@@ -20,6 +20,12 @@ import { finalizeCurrentShiftMemberships, validateShiftCompletionAttendance } fr
 import { createShiftAttendanceRecord } from "./shift-join-domain";
 import { assertShiftActivationWindow } from "./shift-activation-window";
 import { assertNoScheduleConflict, parseShiftTimeRange } from "./shift-overlap";
+import {
+  createHandoverReservationGuardDocumentId,
+  adoptGuardlessLegacyReservation,
+  assertHandoverReservationGuard,
+  transitionGuardForCompletion,
+} from "./handover-reservation-guard-domain";
 
 export interface FormalHandoverTransferBinding { expectedRevision: number; expectedSnapshotHash: string }
 export interface FormalHandoverTransferInput extends FormalHandoverTransferBinding {
@@ -106,13 +112,16 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
   const documentId = createHandoverDocumentId(outgoingShiftId);
   if (actorRole !== "admin" && actorRole !== "supervisor") throw new AssignmentOperationError("Manager authority required.", 403);
   const { db, handovers, shifts, shiftMembers, shiftAttendance, technicianSchedules, operationalShiftControl,
-    handoverTaskTransfers, nextShiftAuthorizations } = getOperationalCollections();
+    handoverTaskTransfers, nextShiftAuthorizations, handoverReservationGuards } = getOperationalCollections();
   const receiptId = createFormalHandoverTransferReceiptId(documentId);
   const receiptRef = db.collection("audit_logs").doc(receiptId);
   const handoverRef = handovers.doc(documentId);
+  const guardDocId = createHandoverReservationGuardDocumentId(outgoingShiftId);
+  const guardRef = handoverReservationGuards.doc(guardDocId);
   return db.runTransaction(async (transaction): Promise<FormalHandoverTransferResult> => {
-    const [actorSnapshot, handoverSnapshot] = await Promise.all([
+    const [actorSnapshot, handoverSnapshot, guardSnapshot] = await Promise.all([
       transaction.get(db.collection("users").doc(actorUid)), transaction.get(handoverRef),
+      transaction.get(guardRef),
     ]);
     const actor = actorSnapshot.data();
     if (!actor || actor.role !== actorRole || actor.status !== "active" || actor.statusOperation !== null || actor.mustChangePassword !== false) {
@@ -127,7 +136,23 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
     const receiptSnapshot = await transaction.get(receiptRef);
     if (aggregate.lifecycleStatus === "completed") {
       await readBoundHandoverReport(transaction,aggregate,false);
-      return { status: "ALREADY_TRANSFERRED", receipt: assertFormalHandoverTransferReceipt(receiptSnapshot.data(), aggregate, documentId) };
+      const receipt = assertFormalHandoverTransferReceipt(receiptSnapshot.data(), aggregate, documentId);
+      if (!guardSnapshot.exists) {
+        const adopted = adoptGuardlessLegacyReservation(aggregate, receiptId);
+        transaction.create(guardRef, adopted);
+      } else {
+        const existingGuard = assertHandoverReservationGuard(guardSnapshot.data());
+        if (existingGuard.ownerLifecycleState !== "completed" || existingGuard.terminalEvidenceRef !== receiptId) {
+          fail("Inconsistent transfer guard state for already completed handover.");
+        }
+      }
+      return { status: "ALREADY_TRANSFERRED", receipt };
+    }
+    if (guardSnapshot.exists) {
+      const existingGuard = assertHandoverReservationGuard(guardSnapshot.data());
+      if (existingGuard.protocolOwner !== "v1") {
+        fail(`The outgoing shift reservation is owned by protocol ${existingGuard.protocolOwner}.`);
+      }
     }
     if (aggregate.lifecycleStatus !== "collecting_confirmations") fail("The handover is closed.");
     if (receiptSnapshot.exists) fail("Transfer receipt already exists for a collecting handover.");
@@ -278,6 +303,36 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
     }
     add(`operational_shift_control/${GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID}`, "set", after);
     add(`handovers/${documentId}`, "set", completed);
+    let completedGuard;
+    if (guardSnapshot.exists) {
+      const existingGuard = assertHandoverReservationGuard(guardSnapshot.data());
+      completedGuard = transitionGuardForCompletion(existingGuard, {
+        outgoingShiftId,
+        protocolOwner: "v1",
+        receiptId,
+        outgoingSlotToken: identity.outgoingSlotToken,
+        outgoingGeneration: identity.outgoingGeneration,
+        successorSlotToken: identity.successorSlotToken,
+        successorGeneration: identity.successorGeneration,
+        recordedAt: now,
+        actorUid,
+      });
+      add(`handover_reservation_guards/${guardDocId}`, "set", completedGuard);
+    } else {
+      const adopted = adoptGuardlessLegacyReservation(aggregate, receiptId);
+      completedGuard = transitionGuardForCompletion(adopted, {
+        outgoingShiftId,
+        protocolOwner: "v1",
+        receiptId,
+        outgoingSlotToken: identity.outgoingSlotToken,
+        outgoingGeneration: identity.outgoingGeneration,
+        successorSlotToken: identity.successorSlotToken,
+        successorGeneration: identity.successorGeneration,
+        recordedAt: now,
+        actorUid,
+      });
+      add(`handover_reservation_guards/${guardDocId}`, "create", completedGuard);
+    }
     for (const uid of attendanceUids) add(`shift_attendance/${incomingId}_${uid}`, "create", createShiftAttendanceRecord({ shiftId: incomingId,
       technicianUid: uid, participationAuthority: "primary", authorizationId: null, recordedAt: now }));
     const releasedIds: string[] = [];
