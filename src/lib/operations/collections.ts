@@ -39,6 +39,12 @@ export const OPERATIONAL_COLLECTIONS = {
 
   HANDOVER_RESERVATION_GUARDS:
     "handover_reservation_guards",
+
+  ATTENDANCE_EVIDENCE_V2:
+    "attendance_evidence_v2",
+
+  ATTENDANCE_EVIDENCE_OPERATIONS_V2:
+    "attendance_evidence_operations_v2",
 } as const;
 
 export const GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID =
@@ -99,6 +105,14 @@ export function getOperationalCollections() {
 
     handoverReservationGuards: db.collection(
       OPERATIONAL_COLLECTIONS.HANDOVER_RESERVATION_GUARDS
+    ),
+
+    attendanceEvidenceV2: db.collection(
+      OPERATIONAL_COLLECTIONS.ATTENDANCE_EVIDENCE_V2
+    ),
+
+    attendanceEvidenceOperationsV2: db.collection(
+      OPERATIONAL_COLLECTIONS.ATTENDANCE_EVIDENCE_OPERATIONS_V2
     ),
   };
 }
