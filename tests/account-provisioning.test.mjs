@@ -9,14 +9,17 @@ function fixture(overrides = {}) {
   const session = overrides.session === undefined
     ? { uid: "administrator", role: "admin", mustChangePassword: false }
     : overrides.session;
-  const adminProfile = overrides.adminProfile ?? {
-    status: "active",
-    role: "admin",
-    mustChangePassword: false,
-  };
+  const adminProfile = "adminProfile" in overrides
+    ? overrides.adminProfile
+    : {
+      status: "active",
+      role: "admin",
+      mustChangePassword: false,
+    };
+  const adminAccount = overrides.adminAccount ?? { disabled: false };
   let listReads = 0;
   const auth = {
-    getUser: async () => ({ disabled: false }),
+    getUser: async () => adminAccount,
     createUser: async input => { authCalls.push(input); provisioningCalls.push("createUser"); return { uid: "new-account" }; },
     setCustomUserClaims: async () => { provisioningCalls.push("setCustomUserClaims"); },
     updateUser: async () => { provisioningCalls.push("updateUser"); },
@@ -30,8 +33,8 @@ function fixture(overrides = {}) {
             path: `${name}/${id}`,
             id,
             get: async () => ({
-              exists: true,
-              data: () => adminProfile,
+              exists: adminProfile !== null,
+              data: () => adminProfile ?? undefined,
             }),
           };
         },
@@ -115,6 +118,36 @@ test("POST rejects the fresh administrator profile if password change is still r
   assert.equal(f.provisioningCalls.length, 0);
   assert.equal(f.writes.length, 0);
 });
+// A session minted while the account was unrestricted must not outrank the profile.
+for (const [label, adminProfile] of [
+  ["blocked", { status: "blocked", role: "admin", mustChangePassword: false }],
+  ["revoked", { status: "revoked", role: "admin", mustChangePassword: false }],
+  ["carrying a pending account-status operation", { status: "active", role: "admin", mustChangePassword: false, statusOperation: "BLOCK_REQUESTED" }],
+  ["no longer an administrator", { status: "active", role: "supervisor", mustChangePassword: false }],
+  ["missing", null],
+]) {
+  test(`POST rejects a fresh administrator profile that is ${label} before any provisioning call`, async () => {
+    const f = fixture({ adminProfile });
+    assert.equal((await f.create("technician")).status, 403);
+    assert.equal(f.provisioningCalls.length, 0);
+    assert.equal(f.authCalls.length, 0);
+    assert.equal(f.writes.length, 0);
+    assert.equal(f.listReads, 0);
+  });
+}
+test("POST rejects a disabled Firebase administrator account before provisioning", async () => {
+  const f = fixture({ adminAccount: { disabled: true } });
+  assert.equal((await f.create("technician")).status, 403);
+  assert.equal(f.provisioningCalls.length, 0);
+  assert.equal(f.writes.length, 0);
+});
+test("POST keeps rejecting a mandatory-password-change administrator after a valid body", async () => {
+  const f = fixture({ session: { uid: "administrator", role: "admin", mustChangePassword: true } });
+  const result = await f.create("admin");
+  assert.equal(result.status, 403);
+  assert.equal(f.provisioningCalls.length, 0);
+  assert.equal(f.writes.length, 0);
+});
 test("GET lists users for an authorized administrator after the password-change flag is cleared", async () => {
   const f = fixture({
     listedUsers: [{
@@ -133,6 +166,7 @@ test("GET lists users for an authorized administrator after the password-change 
 });
 for (const [label, session, status] of [
   ["non-administrator", { uid: "supervisor", role: "supervisor", mustChangePassword: false }, 403],
+  ["technician", { uid: "technician", role: "technician", mustChangePassword: false }, 403],
   ["unauthenticated", null, 401],
 ]) {
   test(`GET denies ${label}`, async () => {

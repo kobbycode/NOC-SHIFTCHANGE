@@ -156,6 +156,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Gate before parsing the body so a restricted
+  // administrator can never reach provisioning.
+  if (administrator.mustChangePassword) {
+    return respond(
+      "Please complete your password change before continuing.",
+      403
+    );
+  }
+
   let body: unknown;
 
   try {
@@ -199,7 +208,9 @@ export async function POST(request: NextRequest) {
       adminAccount.disabled ||
       !adminProfile.exists ||
       adminProfile.data()?.status !== "active" ||
-      adminProfile.data()?.role !== "admin"
+      adminProfile.data()?.role !== "admin" ||
+      adminProfile.data()?.statusOperation != null ||
+      adminProfile.data()?.mustChangePassword === true
     ) {
       return respond(
         getErrorMessage("FORBIDDEN"),
@@ -382,6 +393,17 @@ export async function GET() {
       {
         error:
           "You do not have permission to view user accounts.",
+      },
+      { status: 403 }
+    );
+  }
+
+  // Reject before reading the user collection.
+  if (administrator.mustChangePassword) {
+    return NextResponse.json(
+      {
+        error:
+          "Please complete your password change before continuing.",
       },
       { status: 403 }
     );
