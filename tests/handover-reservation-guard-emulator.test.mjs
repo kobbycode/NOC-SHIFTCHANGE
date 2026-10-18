@@ -6,10 +6,19 @@
  * Safety invariant: all tests use project "demo-shiftchange-guard" on port 8088.
  * The guard at the top of this file refuses to run against any other project or
  * against a non-emulator host, preventing accidental production access.
+ *
+ * Identifier contract under test (authoritative, production-shaped):
+ *   - handovers/<createHandoverDocumentId(outgoingShiftId)> is the stable aggregate location.
+ *   - handover_reservation_guards/<createHandoverReservationGuardDocumentId(outgoingShiftId)>
+ *     is the stable guard location.
+ *   - guard.ownerHandoverDocumentId is that stable aggregate document ID.
+ *   - guard.reservationId is the reservation identity fingerprint
+ *     aggregate.reservation.handoverId === createHandoverId(identity).
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
+import { fixtureRecords, modules } from "./formal-handover-transfer-fixtures.mjs";
 
 const project = "demo-shiftchange-guard";
 const host = process.env.FIRESTORE_EMULATOR_HOST;
@@ -38,6 +47,9 @@ const {
 const { persistFormalHandoverTransfer: transfer } = await import(
   "../src/lib/operations/formal-handover-transfer.ts"
 );
+const { persistFormalHandoverConfirmation: confirm } = await import(
+  "../src/lib/operations/formal-handover-confirmation.ts"
+);
 const {
   resolveOrAcquireReservationGuard,
   replaceReservationGuard,
@@ -49,18 +61,22 @@ const {
 const { createHandoverReservationGuardDocumentId } = await import(
   "../src/lib/operations/handover-reservation-guard-domain.ts"
 );
-const { assertHandoverAggregate } = await import("../src/lib/operations/handover-domain.ts");
+const {
+  assertHandoverAggregate,
+  createHandoverDocumentId,
+  createHandoverSnapshot,
+} = await import("../src/lib/operations/handover-domain.ts");
 const {
   createPendingOperationalShiftControl,
   consumeOperationalShiftSlot,
   transitionOperationalShiftControl,
 } = await import("../src/lib/operations/operational-shift-control-state.ts");
-const { beginShiftHandover } = await import("../src/lib/operations/begin-shift-handover.ts");
-const { createHandoverWorkSnapshot } = await import("../src/lib/operations/handover-work-snapshot.ts");
-const { confirmHandoverParticipant, createHandoverSnapshot } = await import(
-  "../src/lib/operations/handover-domain.ts"
-);
 const { freezeHandoverReport } = await import("../src/lib/operations/freeze-handover-report.ts");
+const { recordShiftOperation } = await import("../src/lib/operations/shift-operations.ts");
+const { createFormalHandoverTransferReceiptId } = await import(
+  "../src/lib/operations/handover-transfer-domain.ts"
+);
+const { AssignmentOperationError } = await import("../src/lib/operations/assignment-transaction.ts");
 
 const db = getAdminFirestore();
 const ref = (collection, id) => db.collection(collection).doc(id);
@@ -69,10 +85,15 @@ const ref = (collection, id) => db.collection(collection).doc(id);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const at = "2020-01-01T00:00:00.000Z";
+// Seeded reference data is historical, so its own metadata may be old. Guard
+// mutations must never be dated before the live records production just wrote.
+const historical = "2020-01-01T00:00:00.000Z";
 const scheduledStart = "2030-01-01T06:00:00.000Z";
 const scheduledEnd = "2030-01-01T14:00:00.000Z";
 let seq = 0;
+
+const liveAt = (...lowerBounds) =>
+  new Date(Math.max(Date.now(), ...lowerBounds.map((value) => Date.parse(value)))).toISOString();
 
 async function clearDb() {
   const cleared = await fetch(
@@ -113,42 +134,42 @@ async function makeShiftFixture(status = "handover_pending", role = "admin") {
   for (const [id, ids] of [[f.outPair, f.out], [f.inPair, f.incoming]]) {
     batch.set(ref("technician_pairs", id), {
       id, technicianIds: ids, status: "active", createdBy: f.actor,
-      createdAt: at, updatedAt: at, deactivatedAt: null, deactivatedBy: null,
+      createdAt: historical, updatedAt: historical, deactivatedAt: null, deactivatedBy: null,
     });
     for (const uid of ids)
-      batch.set(ref("technician_pair_memberships", uid), { technicianUid: uid, pairId: id, createdAt: at, updatedAt: at });
+      batch.set(ref("technician_pair_memberships", uid), { technicianUid: uid, pairId: id, createdAt: historical, updatedAt: historical });
   }
   f.shift = {
     id: f.outgoing, status, permanentPairId: f.outPair, primaryTechnicianIds: f.out,
     operationalSlotToken: f.token, shiftType: "morning",
     scheduledStart: "2020-01-01T06:00:00.000Z",
     scheduledEnd: "2020-01-01T14:00:00.000Z",
-    actualStart: at, actualEnd: null, createdBy: f.actor, createdAt: at, updatedAt: at,
+    actualStart: historical, actualEnd: null, createdBy: f.actor, createdAt: historical, updatedAt: historical,
   };
   batch.set(ref("shifts", f.outgoing), f.shift);
 
-  let control = consumeOperationalShiftSlot(createPendingOperationalShiftControl(f.token, 1, at), f.outgoing, at);
-  control = transitionOperationalShiftControl(control, f.outgoing, "scheduled", "active", at);
+  let control = consumeOperationalShiftSlot(createPendingOperationalShiftControl(f.token, 1, historical), f.outgoing, historical);
+  control = transitionOperationalShiftControl(control, f.outgoing, "scheduled", "active", historical);
   if (status === "handover_pending") {
-    control = transitionOperationalShiftControl(control, f.outgoing, "active", status, at);
+    control = transitionOperationalShiftControl(control, f.outgoing, "active", status, historical);
   }
   batch.set(ref("operational_shift_control", "global"), control);
   f.control = control;
 
   for (const uid of f.out) {
     const memberId = `${f.outgoing}_${uid}`;
-    batch.set(ref("shift_members", memberId), { id: memberId, shiftId: f.outgoing, technicianId: uid, role: "primary", joinedAt: at, leftAt: null });
+    batch.set(ref("shift_members", memberId), { id: memberId, shiftId: f.outgoing, technicianId: uid, role: "primary", joinedAt: historical, leftAt: null });
     batch.set(ref("technician_schedules", uid), {
       technicianUid: uid,
       entries: [{ shiftId: f.outgoing, scheduledStart: f.shift.scheduledStart, scheduledEnd: f.shift.scheduledEnd, status }],
-      updatedAt: at,
+      updatedAt: historical,
     });
   }
   for (const uid of f.incoming) {
     batch.set(ref("technician_schedules", uid), {
       technicianUid: uid,
       entries: [{ shiftId: "unrelated-shift", scheduledStart: "2030-01-03T06:00:00.000Z", scheduledEnd: "2030-01-03T14:00:00.000Z", status: "scheduled" }],
-      updatedAt: at,
+      updatedAt: historical,
     });
   }
   await batch.commit();
@@ -161,12 +182,37 @@ async function getGuard(outgoingShiftId) {
   return snap.exists ? snap.data() : null;
 }
 
-async function getHandover(outgoingShiftId) {
+// The aggregate always persists at its deterministic stable location.
+async function getHandoverDocument(outgoingShiftId) {
+  const snap = await ref("handovers", createHandoverDocumentId(outgoingShiftId)).get();
+  return snap.exists ? snap.data() : null;
+}
+
+async function getHandoverQuery(outgoingShiftId) {
   const snap = await db.collection("handovers")
     .where("identity.outgoingShiftId", "==", outgoingShiftId)
     .limit(1).get();
   if (snap.empty) return null;
-  return snap.docs[0].data();
+  return { id: snap.docs[0].id, data: snap.docs[0].data() };
+}
+
+async function collectionState(name) {
+  const snap = await db.collection(name).get();
+  return snap.docs
+    .map((doc) => [doc.id, doc.data()])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+async function operationalState() {
+  return {
+    handovers: await collectionState("handovers"),
+    shifts: await collectionState("shifts"),
+    technicianSchedules: await collectionState("technician_schedules"),
+    shiftMembers: await collectionState("shift_members"),
+    operationalShiftControl: await collectionState("operational_shift_control"),
+    auditLogs: await collectionState("audit_logs"),
+    guard: await collectionState("handover_reservation_guards"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -177,46 +223,96 @@ async function withTransaction(fn) {
   return db.runTransaction(fn);
 }
 
+// Guard inputs always name the stable aggregate document and the reservation
+// fingerprint of the aggregate that currently owns the reservation.
+function guardAcquireInput(guard, overrides = {}) {
+  return {
+    outgoingShiftId: guard.outgoingShiftId,
+    protocolOwner: guard.protocolOwner,
+    ownerHandoverDocumentId: guard.ownerHandoverDocumentId,
+    outgoingSlotToken: guard.outgoingSlotToken,
+    outgoingGeneration: guard.outgoingGeneration,
+    successorSlotToken: guard.successorSlotToken,
+    successorGeneration: guard.successorGeneration,
+    reservationId: guard.reservationId,
+    reservedIncomingShiftId: guard.reservedIncomingShiftId,
+    reservedAt: guard.reservedAt,
+    reservedBy: guard.reservedBy,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 1. Guard acquisition creates guard document on initialize
 // ---------------------------------------------------------------------------
 
-test("1. V1 initialize creates reservation guard document atomically", async () => {
+test("1. V1 initialize creates the guard at its stable location bound to the stable handover document", async () => {
   await clearDb();
   const f = await makeShiftFixture();
-  const result = await initialize(f.input);
+  await initialize(f.input);
 
   const guard = await getGuard(f.outgoing);
   assert.ok(guard, "Guard document must be created on initialize");
+  assert.equal(guard.id, createHandoverReservationGuardDocumentId(f.outgoing));
   assert.equal(guard.protocolOwner, "v1");
   assert.equal(guard.ownerLifecycleState, "active");
   assert.equal(guard.outgoingShiftId, f.outgoing);
   assert.equal(guard.guardRevision, 1);
   assert.equal(guard.fencingEpoch, 1);
 
-  // Guard references the actual handover aggregate
-  const handover = await getHandover(f.outgoing);
-  assert.ok(handover, "Handover document must be created");
-  assert.equal(guard.ownerHandoverDocumentId, handover.reservation.handoverId);
+  const handover = await getHandoverDocument(f.outgoing);
+  assert.ok(handover, "Handover must persist at the stable document ID");
+  assert.equal(handover.identity.outgoingShiftId, f.outgoing);
+  // The queried aggregate is the same document the writer created.
+  const queried = await getHandoverQuery(f.outgoing);
+  assert.equal(queried.id, createHandoverDocumentId(f.outgoing));
+  assert.deepEqual(queried.data, handover);
+
+  // Stable persistence document, not the reservation identity fingerprint.
+  assert.equal(guard.ownerHandoverDocumentId, createHandoverDocumentId(f.outgoing));
   assert.equal(guard.reservationId, handover.reservation.handoverId);
+  assert.notEqual(guard.ownerHandoverDocumentId, guard.reservationId);
+  assert.equal(guard.reservedIncomingShiftId, handover.reservation.reservedIncomingShiftId);
 });
 
 // ---------------------------------------------------------------------------
-// 2. Same-owner idempotent retry: second initialize returns existing guard
+// 2. Duplicate V1 initialization fails closed; same-owner guard retry is idempotent
 // ---------------------------------------------------------------------------
 
-test("2. V1 initialize is idempotent (same-owner retry returns same guard)", async () => {
+test("2. V1 duplicate initialize fails closed unchanged and a same-owner guard retry is idempotent", async () => {
   await clearDb();
   const f = await makeShiftFixture();
-  const first = await initialize(f.input);
+  await initialize(f.input);
+
   const guardBefore = await getGuard(f.outgoing);
+  const stateBefore = await operationalState();
 
-  // Re-submit the same initialization — should be an exact same-owner retry
-  const second = await initialize(f.input);
+  // The established v1 production API rejects a second initialization outright.
+  await assert.rejects(
+    () => initialize(f.input),
+    (error) => {
+      assert.ok(error instanceof AssignmentOperationError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 409);
+      assert.equal(error.message, "A formal handover already exists for this shift.");
+      return true;
+    },
+  );
+
+  assert.deepEqual(await operationalState(), stateBefore, "Rejected initialize must not mutate any operational state");
+  assert.deepEqual(await getGuard(f.outgoing), guardBefore);
+
+  // Same-owner retry is a guard-adapter concern, and it is idempotent.
+  const retry = await withTransaction(async (tx) => {
+    const state = await readReservationGuardState(tx, f.outgoing);
+    return resolveOrAcquireReservationGuard(tx, guardAcquireInput(guardBefore), state);
+  });
+  assert.equal(retry.isNew, false);
+  assert.deepEqual(retry.guard, guardBefore);
+
   const guardAfter = await getGuard(f.outgoing);
-
-  assert.deepEqual(guardBefore, guardAfter);
-  assert.equal(guardAfter.guardRevision, 1); // unchanged
+  assert.deepEqual(guardAfter, guardBefore);
+  assert.equal(guardAfter.guardRevision, 1);
+  assert.deepEqual(await operationalState(), stateBefore);
 });
 
 // ---------------------------------------------------------------------------
@@ -226,7 +322,7 @@ test("2. V1 initialize is idempotent (same-owner retry returns same guard)", asy
 test("3. V1 replace updates guard: retires old successor, increments revision and fencing epoch", async () => {
   await clearDb();
   const f = await makeShiftFixture();
-  const first = await initialize(f.input);
+  await initialize(f.input);
   const guardBefore = await getGuard(f.outgoing);
   const oldSuccessor = guardBefore.successorSlotToken;
 
@@ -237,27 +333,29 @@ test("3. V1 replace updates guard: retires old successor, increments revision an
   const batch = db.batch();
   batch.set(ref("technician_pairs", newInPair), {
     id: newInPair, technicianIds: newIncoming, status: "active",
-    createdBy: f.actor, createdAt: at, updatedAt: at, deactivatedAt: null, deactivatedBy: null,
+    createdBy: f.actor, createdAt: historical, updatedAt: historical, deactivatedAt: null, deactivatedBy: null,
   });
   for (const uid of newIncoming) {
-    batch.set(ref("technician_pair_memberships", uid), { technicianUid: uid, pairId: newInPair, createdAt: at, updatedAt: at });
+    batch.set(ref("technician_pair_memberships", uid), { technicianUid: uid, pairId: newInPair, createdAt: historical, updatedAt: historical });
     batch.set(ref("users", uid), { uid, role: "technician", status: "active", statusOperation: null, mustChangePassword: false });
     batch.set(ref("technician_schedules", uid), {
       technicianUid: uid,
       entries: [{ shiftId: "unrelated-shift", scheduledStart: "2030-01-03T06:00:00.000Z", scheduledEnd: "2030-01-03T14:00:00.000Z", status: "scheduled" }],
-      updatedAt: at,
+      updatedAt: historical,
     });
   }
   await batch.commit();
 
-  const handover = await getHandover(f.outgoing);
+  const handover = await getHandoverDocument(f.outgoing);
   const aggregate = assertHandoverAggregate(handover);
 
+  // The production replace contract re-selects the incoming pair through the
+  // same selection fields as initialization.
   await replace({
     outgoingShiftId: f.outgoing,
     actorUid: f.actor,
     expectedRole: f.role,
-    newIncomingPermanentPairId: newInPair,
+    incomingPermanentPairId: newInPair,
     expectedRevision: aggregate.revision,
     expectedSnapshotHash: createHandoverSnapshot(aggregate).snapshotHash,
     shiftType: "morning",
@@ -270,6 +368,16 @@ test("3. V1 replace updates guard: retires old successor, increments revision an
   assert.equal(guardAfter.fencingEpoch, 2);
   assert.ok(guardAfter.retiredSuccessorSlotTokens.includes(oldSuccessor));
   assert.notEqual(guardAfter.successorSlotToken, oldSuccessor);
+  assert.equal(guardAfter.ownerHandoverDocumentId, createHandoverDocumentId(f.outgoing));
+  assert.equal(guardAfter.ownerLifecycleState, "active");
+
+  const replaced = assertHandoverAggregate(await getHandoverDocument(f.outgoing));
+  assert.equal(replaced.revision, 2);
+  assert.equal(replaced.identity.incomingPermanentPairId, newInPair);
+  // The replacement is a new reservation fingerprint at the same stable document.
+  assert.equal(guardAfter.reservationId, replaced.reservation.handoverId);
+  assert.notEqual(guardAfter.reservationId, guardBefore.reservationId);
+  assert.notEqual(guardAfter.reservedIncomingShiftId, guardBefore.reservedIncomingShiftId);
 });
 
 // ---------------------------------------------------------------------------
@@ -281,7 +389,7 @@ test("4. V1 cancel transitions guard to cancelled state", async () => {
   const f = await makeShiftFixture();
   await initialize(f.input);
 
-  const handover = await getHandover(f.outgoing);
+  const handover = await getHandoverDocument(f.outgoing);
   const aggregate = assertHandoverAggregate(handover);
   const snapshot = createHandoverSnapshot(aggregate);
 
@@ -296,85 +404,152 @@ test("4. V1 cancel transitions guard to cancelled state", async () => {
   const guard = await getGuard(f.outgoing);
   assert.equal(guard.ownerLifecycleState, "cancelled");
   assert.equal(guard.guardRevision, 2);
+  assert.equal(guard.ownerHandoverDocumentId, createHandoverDocumentId(f.outgoing));
+  assert.equal(guard.reservationId, aggregate.reservation.handoverId);
 });
 
 // ---------------------------------------------------------------------------
 // 5. V1 transfer (full) completes the guard with receipt ID
 // ---------------------------------------------------------------------------
 
-test("5. V1 transfer completion sets guard ownerLifecycleState to completed with receipt", async () => {
-  await clearDb();
-  const f = await makeShiftFixture();
-  const initResult = await initialize(f.input);
+const managerUser = {
+  uid: "manager", role: "admin", status: "active", statusOperation: null,
+  mustChangePassword: false, fullName: "manager", email: "manager@demo.invalid",
+};
+const technicianUser = (uid) => ({
+  uid, role: "technician", status: "active", statusOperation: null,
+  mustChangePassword: false, fullName: uid, email: `${uid}@demo.invalid`,
+});
+const broadcastObservation = (stationId) => ({
+  kind: "broadcast", stationId, status: "on_air", occurredAt: new Date().toISOString(),
+  remarks: "Verified actual audio",
+});
+const outsideBroadcast = () => ({
+  kind: "outside_broadcast", title: "Community event", location: "Accra",
+  occurredAt: new Date().toISOString(), runningStatus: "running",
+  technicalIssues: "Backup uplink required", actionTaken: "Backup enabled",
+  status: "monitoring", remarks: "Producer notified", linkedTaskId: null,
+});
 
-  // Confirm all four participants so the handover is ready
-  let handoverDoc = await getHandover(f.outgoing);
-  let aggregate = assertHandoverAggregate(handoverDoc);
-
-  // Freeze the handover report first
-  const workSnapshot = createHandoverWorkSnapshot({ outgoingShiftId: f.outgoing, tasks: [], assignments: [] });
-  const snap0 = createHandoverSnapshot(aggregate);
-  const frozenResult = await freezeHandoverReport({
-    outgoingShiftId: f.outgoing,
-    actorUid: f.actor,
-    expectedRole: f.role,
+async function reviewed(outgoingShiftId) {
+  const aggregate = assertHandoverAggregate(await getHandoverDocument(outgoingShiftId));
+  return {
+    aggregate,
     expectedRevision: aggregate.revision,
-    expectedSnapshotHash: snap0.snapshotHash,
-    workSnapshot,
-    reportItems: [],
-    faultItems: [],
-    outsideBroadcastItems: [],
-  });
+    expectedSnapshotHash: createHandoverSnapshot(aggregate).snapshotHash,
+  };
+}
 
-  // Re-fetch and confirm all 4 participants
-  handoverDoc = await getHandover(f.outgoing);
-  aggregate = assertHandoverAggregate(handoverDoc);
+// Builds the real v1 precondition chain: an operational shift with verified
+// broadcast evidence, then a live reservation created by the production
+// initialize writer. The transfer writer owns the incoming Shift document.
+async function makeTransferReadyFixture() {
+  const load = modules();
+  const f = structuredClone(fixtureRecords(load, { count: 0 }));
+  // Operations are only writable while the shift is active, and the reserved
+  // incoming schedule entries are created by the production initialize writer.
+  f.shift.status = "active";
+  delete f.shift.handoverStartedAt;
+  f.records.set("shifts/outgoing", f.shift);
+  f.records.get("operational_shift_control/global").shiftStatus = "active";
+  f.records.delete("handovers/handover_outgoing");
+  for (const [path, record] of f.records) {
+    if (path.startsWith("users/")) record.fullName = record.uid;
+    if (path.startsWith("technician_schedules/")) {
+      for (const entry of record.entries) if (entry.shiftId === "outgoing") entry.status = "active";
+      if (f.incoming.includes(record.technicianUid)) record.entries = [];
+    }
+  }
+  for (const uid of f.out) {
+    f.records.set(`shift_attendance/outgoing_${uid}`, load("lib/operations/shift-join-domain").createShiftAttendanceRecord({
+      shiftId: "outgoing", technicianUid: uid, participationAuthority: "primary", authorizationId: null,
+      recordedAt: f.shift.actualStart,
+    }));
+  }
+  let batch = db.batch();
+  for (const [path, record] of f.records) batch.set(db.doc(path), record);
+  await batch.commit();
 
-  for (const uid of [...f.out, ...f.incoming]) {
-    const snap = createHandoverSnapshot(aggregate);
-    aggregate = confirmHandoverParticipant(aggregate, {
-      actorUid: uid,
-      technicianUid: uid,
-      revision: aggregate.revision,
-      snapshotHash: snap.snapshotHash,
-      confirmedAt: at,
-    });
-    // Persist confirmation
-    const snap2 = createHandoverSnapshot(aggregate);
-    await db.collection("handovers").doc(handoverDoc.reservation.handoverId).update({
-      confirmations: aggregate.confirmations,
-      revision: aggregate.revision,
-      updatedAt: at,
+  for (const stationId of ["joy-fm", "adom-fm", "asempa-fm", "hitz-fm"]) {
+    await recordShiftOperation(technicianUser("out-a"), "outgoing", { details: broadcastObservation(stationId) });
+  }
+  await recordShiftOperation(technicianUser("out-b"), "outgoing", { details: outsideBroadcast() });
+
+  const handoverStartedAt = liveAt(f.shift.actualStart);
+  batch = db.batch();
+  batch.update(db.doc("shifts/outgoing"), { status: "handover_pending", handoverStartedAt });
+  batch.update(db.doc("operational_shift_control/global"), { shiftStatus: "handover_pending" });
+  for (const uid of f.out) {
+    const schedule = (await db.doc(`technician_schedules/${uid}`).get()).data();
+    batch.set(db.doc(`technician_schedules/${uid}`), {
+      ...schedule,
+      entries: schedule.entries.map((entry) => (entry.shiftId === "outgoing" ? { ...entry, status: "handover_pending" } : entry)),
     });
   }
+  await batch.commit();
 
-  // Re-fetch aggregate for transfer
-  handoverDoc = await getHandover(f.outgoing);
-  aggregate = assertHandoverAggregate(handoverDoc);
-  const finalSnap = createHandoverSnapshot(aggregate);
+  f.identity = f.aggregate.identity;
+  return f;
+}
 
-  // Create incoming shift document for transfer
-  const incomingShiftId = aggregate.identity.incomingShiftId;
-  await ref("shifts", incomingShiftId).set({
-    id: incomingShiftId, status: "scheduled", permanentPairId: f.inPair,
-    primaryTechnicianIds: f.incoming, operationalSlotToken: randomUUID(),
-    shiftType: "morning", scheduledStart, scheduledEnd,
-    actualStart: null, actualEnd: null, createdBy: f.actor, createdAt: at, updatedAt: at,
+test("5. V1 end-to-end transfer completes the guard with the transfer receipt", async () => {
+  await clearDb();
+  const f = await makeTransferReadyFixture();
+
+  // The reservation is created through the production v1 writer, so the guard
+  // starts as an active revision-1 owner of the stable handover document.
+  await initialize({
+    outgoingShiftId: "outgoing",
+    actorUid: "manager",
+    expectedRole: "admin",
+    incomingPermanentPairId: "in-pair",
+    shiftType: f.identity.shiftType,
+    scheduledStart: f.identity.scheduledStart,
+    scheduledEnd: f.identity.scheduledEnd,
   });
 
-  await transfer({
-    outgoingShiftId: f.outgoing,
-    actorUid: f.actor,
-    expectedRole: f.role,
-    expectedRevision: aggregate.revision,
-    expectedSnapshotHash: finalSnap.snapshotHash,
-    transferAt: at,
+  const reserved = await getHandoverDocument("outgoing");
+  const incomingShiftId = reserved.reservation.reservedIncomingShiftId;
+  assert.equal((await getGuard("outgoing")).guardRevision, 1);
+  // The test never fabricates the reserved incoming Shift; the transfer owns it.
+  assert.equal((await ref("shifts", incomingShiftId).get()).exists, false);
+
+  // Report freeze binds every later confirmation and the transfer itself.
+  const first = await reviewed("outgoing");
+  await freezeHandoverReport(managerUser, "outgoing", {
+    expectedRevision: first.expectedRevision,
+    expectedSnapshotHash: first.expectedSnapshotHash,
+    reason: "Reviewed outgoing report before transfer",
   });
 
-  const guard = await getGuard(f.outgoing);
+  for (const uid of ["out-a", "out-b", "in-a", "in-b"]) {
+    const { expectedRevision, expectedSnapshotHash } = await reviewed("outgoing");
+    const outcome = await confirm({ outgoingShiftId: "outgoing", actorUid: uid, expectedRevision, expectedSnapshotHash });
+    assert.equal(outcome.status, "CONFIRMED");
+  }
+
+  const { expectedRevision, expectedSnapshotHash } = await reviewed("outgoing");
+  const result = await transfer({
+    outgoingShiftId: "outgoing", actorUid: "manager", actorRole: "admin", expectedRevision, expectedSnapshotHash,
+  });
+  assert.equal(result.status, "TRANSFERRED");
+
+  const guard = await getGuard("outgoing");
+  assert.equal(guard.protocolOwner, "v1");
   assert.equal(guard.ownerLifecycleState, "completed");
-  assert.ok(guard.terminalEvidenceRef, "Guard must have terminal evidence receipt");
+  assert.equal(guard.terminalEvidenceRef, createFormalHandoverTransferReceiptId(createHandoverDocumentId("outgoing")));
   assert.equal(guard.guardRevision, 2);
+  assert.equal(guard.ownerHandoverDocumentId, createHandoverDocumentId("outgoing"));
+  const completed = assertHandoverAggregate(await getHandoverDocument("outgoing"));
+  assert.equal(completed.lifecycleStatus, "completed");
+  assert.equal(guard.reservationId, completed.reservation.handoverId);
+  assert.equal(guard.terminalEvidenceRef, result.receipt.id);
+  assert.equal((await collectionState("audit_logs")).filter(([id]) => id === result.receipt.id).length, 1);
+
+  // The transfer writer created the incoming shift linked to the stable document.
+  const incoming = await ref("shifts", incomingShiftId).get();
+  assert.ok(incoming.exists, "Transfer must create the reserved incoming shift");
+  assert.equal(incoming.data().handoverDocumentId, createHandoverDocumentId("outgoing"));
 });
 
 // ---------------------------------------------------------------------------
@@ -384,11 +559,11 @@ test("5. V1 transfer completion sets guard ownerLifecycleState to completed with
 test("6. V2 acquisition is blocked by existing active V1 guard", async () => {
   await clearDb();
   const f = await makeShiftFixture();
-  const initResult = await initialize(f.input);
+  await initialize(f.input);
 
   // Attempt to acquire with V2 protocol — should fail
-  const handoverDoc = await getHandover(f.outgoing);
-  const aggregate = assertHandoverAggregate(handoverDoc);
+  const handover = await getHandoverDocument(f.outgoing);
+  const aggregate = assertHandoverAggregate(handover);
 
   await assert.rejects(
     () =>
@@ -403,17 +578,18 @@ test("6. V2 acquisition is blocked by existing active V1 guard", async () => {
             outgoingSlotToken: aggregate.identity.outgoingSlotToken,
             outgoingGeneration: aggregate.identity.outgoingGeneration,
             successorSlotToken: randomUUID(),
-            successorGeneration: aggregate.identity.outgoingGeneration + 1,
+            successorGeneration: aggregate.identity.successorGeneration,
             reservationId: randomUUID(),
             reservedIncomingShiftId: aggregate.identity.incomingShiftId,
-            reservedAt: at,
+            reservedAt: historical,
             reservedBy: f.actor,
           },
           state,
         );
       }),
-    (err) => {
-      assert.ok(err instanceof HandoverReservationGuardError || err.status === 409);
+    (error) => {
+      assert.ok(error instanceof HandoverReservationGuardError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 409);
       return true;
     },
   );
@@ -433,10 +609,9 @@ test("7. Guardless legacy V1 adoption: active legacy blocks V2 and is adopted by
   await clearDb();
   const f = await makeShiftFixture();
 
-  // Create a V1 handover without guard (simulate pre-guard legacy state)
-  const initResult = await initialize(f.input);
-  const handoverDoc = await getHandover(f.outgoing);
-  const aggregate = assertHandoverAggregate(handoverDoc);
+  // Create a V1 handover, then drop the guard to simulate a pre-guard legacy shift.
+  await initialize(f.input);
+  const aggregate = assertHandoverAggregate(await getHandoverDocument(f.outgoing));
 
   // Delete the guard document to simulate guardless legacy
   const guardDocId = createHandoverReservationGuardDocumentId(f.outgoing);
@@ -457,17 +632,18 @@ test("7. Guardless legacy V1 adoption: active legacy blocks V2 and is adopted by
             outgoingSlotToken: aggregate.identity.outgoingSlotToken,
             outgoingGeneration: aggregate.identity.outgoingGeneration,
             successorSlotToken: randomUUID(),
-            successorGeneration: aggregate.identity.outgoingGeneration + 1,
+            successorGeneration: aggregate.identity.successorGeneration,
             reservationId: randomUUID(),
             reservedIncomingShiftId: aggregate.identity.incomingShiftId,
-            reservedAt: at,
+            reservedAt: historical,
             reservedBy: f.actor,
           },
           state,
         );
       }),
-    (err) => {
-      assert.ok(err instanceof HandoverReservationGuardError || err.status === 409);
+    (error) => {
+      assert.ok(error instanceof HandoverReservationGuardError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 409);
       return true;
     },
   );
@@ -481,7 +657,7 @@ test("7. Guardless legacy V1 adoption: active legacy blocks V2 and is adopted by
       {
         outgoingShiftId: f.outgoing,
         protocolOwner: "v1",
-        ownerHandoverDocumentId: aggregate.reservation.handoverId,
+        ownerHandoverDocumentId: createHandoverDocumentId(f.outgoing),
         outgoingSlotToken: aggregate.identity.outgoingSlotToken,
         outgoingGeneration: aggregate.identity.outgoingGeneration,
         successorSlotToken: aggregate.identity.successorSlotToken,
@@ -500,6 +676,10 @@ test("7. Guardless legacy V1 adoption: active legacy blocks V2 and is adopted by
   assert.ok(guard, "Guard must be created by V1 legacy adoption");
   assert.equal(guard.protocolOwner, "v1");
   assert.equal(guard.ownerLifecycleState, "active");
+  assert.equal(guard.guardRevision, 1);
+  assert.equal(guard.ownerHandoverDocumentId, createHandoverDocumentId(f.outgoing));
+  assert.equal(guard.reservationId, aggregate.reservation.handoverId);
+  assert.deepEqual(adopted, guard);
 });
 
 // ---------------------------------------------------------------------------
@@ -509,27 +689,28 @@ test("7. Guardless legacy V1 adoption: active legacy blocks V2 and is adopted by
 test("8. Concurrent acquisition racing: losing writer fails closed without partial writes", async () => {
   await clearDb();
   const f = await makeShiftFixture();
+  const stateBefore = await operationalState();
 
-  // Prepare two competing acquire inputs that claim the same outgoing shift with different reservations
+  // Both writers claim the same stable handover document with different reservations.
   const incomingA = randomUUID();
   const incomingB = randomUUID();
+  const ownerDocumentId = createHandoverDocumentId(f.outgoing);
 
   const inputA = {
     outgoingShiftId: f.outgoing,
     protocolOwner: "v1",
-    ownerHandoverDocumentId: `handover_${f.outgoing}_a`,
+    ownerHandoverDocumentId: ownerDocumentId,
     outgoingSlotToken: f.token,
     outgoingGeneration: 1,
     successorSlotToken: randomUUID(),
     successorGeneration: 2,
     reservationId: `res-${incomingA}`,
     reservedIncomingShiftId: incomingA,
-    reservedAt: at,
+    reservedAt: historical,
     reservedBy: f.actor,
   };
   const inputB = {
     ...inputA,
-    ownerHandoverDocumentId: `handover_${f.outgoing}_b`,
     successorSlotToken: randomUUID(),
     reservationId: `res-${incomingB}`,
     reservedIncomingShiftId: incomingB,
@@ -550,19 +731,25 @@ test("8. Concurrent acquisition racing: losing writer fails closed without parti
   const succeeded = results.filter((r) => r.status === "fulfilled");
   const failed = results.filter((r) => r.status === "rejected");
 
-  // Exactly one must succeed (the other aborts with transaction conflict or guard conflict)
-  assert.ok(succeeded.length >= 1, "At least one acquisition must succeed");
-  // If both somehow succeeded (extreme race), both reservations must agree (same winner)
-  if (succeeded.length === 2) {
-    // Both wrote — they must have written the same guard (idempotent retry)
-    const [g1, g2] = [succeeded[0].value.guard, succeeded[1].value.guard];
-    assert.equal(g1.reservedIncomingShiftId, g2.reservedIncomingShiftId);
-  }
+  // Exactly one acquisition may own the guard; the loser fails closed.
+  assert.equal(succeeded.length, 1, "exactly one acquisition must succeed");
+  assert.equal(failed.length, 1);
+  const loser = failed[0].reason;
+  assert.ok(
+    loser instanceof HandoverReservationGuardError || loser.status === 409 || loser.code === 10 || loser.code === 4,
+    `${loser.constructor.name}: ${loser.message}`,
+  );
 
   const guard = await getGuard(f.outgoing);
   assert.ok(guard, "Guard must exist after race");
   assert.equal(guard.ownerLifecycleState, "active");
   assert.equal(guard.guardRevision, 1); // Only one write round
+  assert.equal(guard.reservationId, succeeded[0].value.guard.reservationId);
+
+  // The losing writer left no partial operational writes behind.
+  const stateAfter = await operationalState();
+  assert.deepEqual({ ...stateAfter, guard: undefined }, { ...stateBefore, guard: undefined });
+  assert.equal(stateAfter.guard.length, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -573,18 +760,17 @@ test("9. completeReservationGuard adopts completed guardless legacy and creates 
   await clearDb();
   const f = await makeShiftFixture();
   await initialize(f.input);
-  const handoverDoc = await getHandover(f.outgoing);
-  const aggregate = assertHandoverAggregate(handoverDoc);
+  const documentId = createHandoverDocumentId(f.outgoing);
+  const aggregate = assertHandoverAggregate(await getHandoverDocument(f.outgoing));
 
-  // Manually mark the handover as completed in Firestore (simulate transfer already done pre-guard)
-  await db.collection("handovers").doc(aggregate.reservation.handoverId).update({
-    lifecycleStatus: "completed",
-    updatedAt: at,
-  });
+  // Simulate a real pre-guard completed legacy at its stable Firestore location.
+  const completedAt = liveAt(aggregate.updatedAt);
+  await ref("handovers", documentId).update({ lifecycleStatus: "completed", updatedAt: completedAt });
+  const legacy = assertHandoverAggregate(await getHandoverDocument(f.outgoing));
+  assert.equal(legacy.lifecycleStatus, "completed");
 
   // Delete guard to simulate legacy
-  const guardDocId = createHandoverReservationGuardDocumentId(f.outgoing);
-  await ref("handover_reservation_guards", guardDocId).delete();
+  await ref("handover_reservation_guards", createHandoverReservationGuardDocumentId(f.outgoing)).delete();
 
   const receiptId = `receipt-${randomUUID()}`;
 
@@ -596,11 +782,11 @@ test("9. completeReservationGuard adopts completed guardless legacy and creates 
         outgoingShiftId: f.outgoing,
         protocolOwner: "v1",
         receiptId,
-        outgoingSlotToken: aggregate.identity.outgoingSlotToken,
-        outgoingGeneration: aggregate.identity.outgoingGeneration,
-        successorSlotToken: aggregate.identity.successorSlotToken,
-        successorGeneration: aggregate.identity.successorGeneration,
-        recordedAt: at,
+        outgoingSlotToken: legacy.identity.outgoingSlotToken,
+        outgoingGeneration: legacy.identity.outgoingGeneration,
+        successorSlotToken: legacy.identity.successorSlotToken,
+        successorGeneration: legacy.identity.successorGeneration,
+        recordedAt: completedAt,
         actorUid: f.actor,
       },
       state,
@@ -609,8 +795,11 @@ test("9. completeReservationGuard adopts completed guardless legacy and creates 
 
   const guard = await getGuard(f.outgoing);
   assert.ok(guard, "Guard must be created for guardless completed legacy");
+  assert.equal(guard.protocolOwner, "v1");
   assert.equal(guard.ownerLifecycleState, "completed");
   assert.equal(guard.terminalEvidenceRef, receiptId);
+  assert.equal(guard.ownerHandoverDocumentId, documentId);
+  assert.equal(guard.reservationId, legacy.reservation.handoverId);
 });
 
 // ---------------------------------------------------------------------------
@@ -621,12 +810,14 @@ test("10. cancelReservationGuard adopts guardless active legacy and transitions 
   await clearDb();
   const f = await makeShiftFixture();
   await initialize(f.input);
-  const handoverDoc = await getHandover(f.outgoing);
-  const aggregate = assertHandoverAggregate(handoverDoc);
+  const aggregate = assertHandoverAggregate(await getHandoverDocument(f.outgoing));
 
   // Delete guard to simulate legacy
-  const guardDocId = createHandoverReservationGuardDocumentId(f.outgoing);
-  await ref("handover_reservation_guards", guardDocId).delete();
+  await ref("handover_reservation_guards", createHandoverReservationGuardDocumentId(f.outgoing)).delete();
+
+  // Terminal evidence is recorded at the live server time, never before the
+  // reservation it fences.
+  const recordedAt = liveAt(aggregate.updatedAt);
 
   await withTransaction(async (tx) => {
     const state = await readReservationGuardState(tx, f.outgoing);
@@ -638,7 +829,7 @@ test("10. cancelReservationGuard adopts guardless active legacy and transitions 
         expectedGuardRevision: 1,
         expectedFencingEpoch: 1,
         terminalEvidenceRef: "cancellation-ref-001",
-        recordedAt: at,
+        recordedAt,
         actorUid: f.actor,
       },
       state,
@@ -649,4 +840,89 @@ test("10. cancelReservationGuard adopts guardless active legacy and transitions 
   assert.ok(guard);
   assert.equal(guard.ownerLifecycleState, "cancelled");
   assert.equal(guard.terminalEvidenceRef, "cancellation-ref-001");
+  assert.equal(guard.guardRevision, 2);
+  assert.equal(guard.ownerHandoverDocumentId, createHandoverDocumentId(f.outgoing));
+  assert.equal(guard.reservationId, aggregate.reservation.handoverId);
+});
+
+// ---------------------------------------------------------------------------
+// 11. Stale guard revision and fencing epoch fail closed at the Firestore boundary
+// ---------------------------------------------------------------------------
+
+test("11. A writer holding a stale guard revision or fencing epoch is rejected without writes", async () => {
+  await clearDb();
+  const f = await makeShiftFixture();
+  await initialize(f.input);
+  const guardV1 = await getGuard(f.outgoing);
+
+  const replacementInput = {
+    outgoingShiftId: f.outgoing,
+    protocolOwner: "v1",
+    outgoingSlotToken: guardV1.outgoingSlotToken,
+    outgoingGeneration: guardV1.outgoingGeneration,
+    successorSlotToken: randomUUID(),
+    successorGeneration: guardV1.successorGeneration,
+    reservationId: `res-${randomUUID()}`,
+    reservedIncomingShiftId: `incoming-${randomUUID()}`,
+    recordedAt: liveAt(guardV1.updatedAt),
+    actorUid: f.actor,
+    expectedGuardRevision: guardV1.guardRevision,
+    expectedFencingEpoch: guardV1.fencingEpoch,
+  };
+
+  // Advance the guard through the real replacement boundary to revision 2.
+  const advanced = await withTransaction(async (tx) =>
+    replaceReservationGuard(tx, replacementInput, await readReservationGuardState(tx, f.outgoing)));
+  assert.equal(advanced.guardRevision, 2);
+  assert.equal(advanced.fencingEpoch, 2);
+  const stateBefore = await operationalState();
+
+  // Replace with the stale revision.
+  await assert.rejects(
+    () =>
+      withTransaction(async (tx) =>
+        replaceReservationGuard(
+          tx,
+          { ...replacementInput, expectedGuardRevision: 1, successorSlotToken: randomUUID() },
+          await readReservationGuardState(tx, f.outgoing),
+        )),
+    (error) => {
+      assert.ok(error instanceof HandoverReservationGuardError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 409);
+      assert.match(error.message, /Stale guard revision/);
+      return true;
+    },
+  );
+
+  // Cancel with the stale fencing epoch.
+  await assert.rejects(
+    () =>
+      withTransaction(async (tx) =>
+        cancelReservationGuard(
+          tx,
+          {
+            outgoingShiftId: f.outgoing,
+            protocolOwner: "v1",
+            expectedGuardRevision: advanced.guardRevision,
+            expectedFencingEpoch: 1,
+            terminalEvidenceRef: "stale-cancellation-ref",
+            recordedAt: liveAt(advanced.updatedAt),
+            actorUid: f.actor,
+          },
+          await readReservationGuardState(tx, f.outgoing),
+        )),
+    (error) => {
+      assert.ok(error instanceof HandoverReservationGuardError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 409);
+      assert.match(error.message, /Stale guard fencing epoch/);
+      return true;
+    },
+  );
+
+  assert.deepEqual(await getGuard(f.outgoing), advanced);
+  assert.deepEqual(await operationalState(), stateBefore);
+});
+
+test.after(async () => {
+  await db.terminate();
 });
