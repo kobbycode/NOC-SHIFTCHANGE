@@ -123,6 +123,14 @@ export function parseAbsenceClearBody(body: unknown) {
   return { technicianUid: requireUid(data.technicianUid, "technician UID"), ...parseBinding(data) };
 }
 
+// A confirmation carries only the concurrency binding. The confirming
+// participant is the authenticated session actor; the request body must never
+// name a technician, a role or a timestamp.
+export function parseConfirmBody(body: unknown) {
+  const data = exactBody(body, bindingFields);
+  return parseBinding(data);
+}
+
 export function parseFreezeBody(body: unknown) {
   const data = exactBody(body, [
     ...bindingFields, "expectedGuardRevision", "expectedFencingEpoch", "preparationRevision",

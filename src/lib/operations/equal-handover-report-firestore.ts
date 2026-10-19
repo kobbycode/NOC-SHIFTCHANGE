@@ -31,8 +31,10 @@ import {
   createEqualHandoverDocumentId,
   createEqualHandoverSnapshot,
   clearEqualHandoverAbsence,
+  confirmEqualHandoverParticipant,
   getEqualHandoverPositions,
   recordEqualHandoverAbsence,
+  resolveEqualHandoverParticipants,
   reviseEqualHandoverReport,
 } from "./equal-technician-handover-domain";
 import {
@@ -50,6 +52,10 @@ import {
   EqualHandoverReportDomainError,
 } from "./equal-handover-report-domain";
 import { readAuthoritativeHandoverWorkState } from "./formal-handover";
+import {
+  evaluateEqualHandoverReadiness,
+  type EqualHandoverReadiness,
+} from "./equal-handover-readiness-domain";
 import { assertHandoverReservationGuard } from "./handover-reservation-guard-domain";
 import { readReservationGuardState } from "./handover-reservation-guard";
 import { estimateTransferDocumentBytes } from "./handover-transfer-domain";
@@ -488,6 +494,34 @@ function equalHandoverReportAuditId(material: unknown, prefix: string): string {
   return `${prefix}${createHash("sha256").update(canonical(material)).digest("hex").slice(0, 40)}`;
 }
 
+/**
+ * Every aggregate write re-stamps the mutable `revision` carried by each
+ * standing declaration, so a raw content digest changes even when the reviewed
+ * evidence did not. Comparing declarations at their immutable recorded revision
+ * keeps drift detection honest: it flags only the substantive evidence a
+ * technician must re-review, exactly like the freeze authority.
+ */
+function digestAtRecordedRevisions(content: EqualHandoverReportV2Content): string {
+  return digestEqualHandoverReportV2Content({
+    ...content,
+    absences: content.absences.map((item) => ({ ...item, revision: item.recordedRevision })),
+  });
+}
+
+// Confirmation authority: any of the four reserved technicians may confirm for
+// self; the domain then enforces actor == subject. Incoming technicians never
+// gain outgoing prepare/declare/freeze authority.
+function requireReservedTechnician(
+  profile: Record<string, unknown> | undefined,
+  actorUid: string,
+  aggregate: EqualHandoverAggregate,
+) {
+  authorizeTechnicianProfile(profile, actorUid);
+  if (!getEqualHandoverPositions(aggregate.identity).some((item) => item.technicianUid === actorUid)) {
+    fail("Only a reserved handover participant may confirm for self.", 403);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Read view (GET) — outgoing technicians full, incoming reserved technicians
 // read-only, administrators/supervisors read-only. No mutation, no activity
@@ -502,6 +536,7 @@ export interface EqualHandoverReportState {
   frozenReport: FrozenEqualHandoverReportV2 | null;
   live: LiveReportEvidence;
   preparationDrifted: boolean;
+  readiness: EqualHandoverReadiness;
 }
 
 export async function readEqualHandoverReportState(
@@ -545,12 +580,22 @@ export async function readEqualHandoverReportState(
       : null;
 
     let frozenReport: FrozenEqualHandoverReportV2 | null = null;
+    let newestReportVersion = 0;
     if (aggregate.reportBinding !== null) {
       const reportSnapshot = await transaction.get(handoverReportsV2.doc(aggregate.reportBinding.id));
       if (!reportSnapshot.exists) fail("Frozen report evidence is missing; administrator review required.", 409);
       frozenReport = assertFrozenEqualHandoverReportV2(hydrateTimestamps(reportSnapshot.data()));
       if (canonical(frozenReport.binding) !== canonical(aggregate.reportBinding)) {
         fail("Frozen report binding does not match the reservation; administrator review required.", 409);
+      }
+      // The whole reservation chain is read so readiness can prove the bound
+      // report is still the newest version rather than a superseded one.
+      const chain = await transaction.get(
+        handoverReportsV2.where("reservationId", "==", aggregate.reservation.handoverId),
+      );
+      for (const document of chain.docs) {
+        const version = assertFrozenEqualHandoverReportV2(hydrateTimestamps(document.data())).version;
+        if (version > newestReportVersion) newestReportVersion = version;
       }
     }
 
@@ -563,15 +608,30 @@ export async function readEqualHandoverReportState(
       frozenReport.preparationId === preparation.id &&
       frozenReport.preparationRevision === preparation.preparationRevision &&
       frozenReport.digest === preparation.contentDigest;
-    // Every aggregate write re-stamps the mutable `revision` carried by each
-    // standing declaration, so a raw content digest changes even when the
-    // reviewed evidence did not. Comparing declarations at their immutable
-    // recorded revision keeps this read view honest: it flags the substantive
-    // evidence a technician must re-review, exactly like the freeze authority.
-    const reviewedDigest = (content: EqualHandoverReportV2Content) => digestEqualHandoverReportV2Content({
-      ...content,
-      absences: content.absences.map((item) => ({ ...item, revision: item.recordedRevision })),
+    const preparationDrifted = preparation === null ? false :
+      digestAtRecordedRevisions(preparation.content) !== digestAtRecordedRevisions(live.content) ||
+      preparation.evidenceSnapshotHash !== live.evidenceSnapshotHash ||
+      (!reviewConsumedByFreeze && preparation.aggregateSnapshotHash !== snapshotHash);
+    // The bound frozen report is immutable, but its underlying authoritative
+    // sources can still move. Recomputing them at recorded-revision parity
+    // flags genuine evidence drift without the benign declaration re-stamp.
+    const boundReportEvidenceDrifted = frozenReport !== null && (
+      digestAtRecordedRevisions(frozenReport.content) !== digestAtRecordedRevisions(live.content) ||
+      frozenReport.evidenceSnapshotHash !== live.evidenceSnapshotHash
+    );
+
+    const readiness = evaluateEqualHandoverReadiness({
+      lifecycleStatus: aggregate.lifecycleStatus,
+      reportBinding: aggregate.reportBinding,
+      participants: resolveEqualHandoverParticipants(aggregate),
+      absences: aggregate.absences,
+      boundReportId: frozenReport?.id ?? null,
+      boundReportVersion: frozenReport?.version ?? null,
+      newestReportVersion,
+      boundReportEvidenceDrifted,
+      preparationDrifted,
     });
+
     return {
       aggregate,
       snapshotHash,
@@ -579,12 +639,8 @@ export async function readEqualHandoverReportState(
       preparation,
       frozenReport,
       live,
-      // Nothing has been reviewed yet, so nothing can have drifted; drift
-      // describes reviewed evidence the live sources have since overtaken.
-      preparationDrifted: preparation === null ? false :
-        reviewedDigest(preparation.content) !== reviewedDigest(live.content) ||
-        preparation.evidenceSnapshotHash !== live.evidenceSnapshotHash ||
-        (!reviewConsumedByFreeze && preparation.aggregateSnapshotHash !== snapshotHash),
+      preparationDrifted,
+      readiness,
     };
   });
 }
@@ -927,6 +983,100 @@ export async function clearEqualHandoverAbsenceV2(
       handoverDocumentId: documentId,
       reservationId: aggregate.reservation.handoverId,
       clearedDeclaration: previous,
+      revision: next.revision,
+      snapshotHash,
+      recordedAt: now,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    transaction.update(actorRef, { lastOperationalActivityAt: FieldValue.serverTimestamp() });
+    return { aggregate: next, snapshotHash, replayed: false };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Participant confirmations (§4): a dedicated v2 writer, separate from the v1
+// confirmation path. Identity is strictly session-derived — the confirming
+// technician is always the authenticated actor, never a request-body field.
+// The confirmation binds the exact reservation, the current immutable frozen
+// report (id, digest, evidence snapshot hash, work snapshot version,
+// preparation revision) and the aggregate snapshot at server-recorded timing.
+// An identical replay of an already-standing personal confirmation is a no-op:
+// no second confirmation entry, no second audit event, no frozen-report or V1
+// mutation. Rejected requests leave Firestore byte-unchanged because every
+// guard runs before the first buffered write.
+// ---------------------------------------------------------------------------
+
+export interface EqualHandoverConfirmInput {
+  outgoingShiftId: string;
+  actorUid: string;
+  expectedRevision: number;
+  expectedSnapshotHash: string;
+}
+
+export async function confirmEqualHandoverParticipantV2(
+  input: EqualHandoverConfirmInput,
+): Promise<{ aggregate: EqualHandoverAggregate; snapshotHash: string; replayed: boolean }> {
+  identifier(input.outgoingShiftId);
+  identifier(input.actorUid, 128);
+  const binding = parseBindingInput(input as unknown as Record<string, unknown>);
+  const { db, equalHandoversV2 } = getOperationalCollections();
+  const documentId = createEqualHandoverDocumentId(input.outgoingShiftId);
+  const aggregateRef = equalHandoversV2.doc(documentId);
+  const actorRef = db.collection("users").doc(input.actorUid);
+
+  return db.runTransaction(async (transaction) => {
+    const [profileSnapshot, aggregateSnapshot, guardState] = await Promise.all([
+      transaction.get(actorRef),
+      transaction.get(aggregateRef),
+      readReservationGuardState(transaction, input.outgoingShiftId),
+    ]);
+    if (!aggregateSnapshot.exists) fail("The equal handover reservation was not found.", 404);
+    const aggregate = readV2Aggregate(aggregateSnapshot.data(), input.outgoingShiftId);
+    // Self-only: the confirming technician is the authenticated actor.
+    requireReservedTechnician(profileSnapshot.data() as Record<string, unknown> | undefined, input.actorUid, aggregate);
+    requireV2GuardBinding(guardState.guardSnapshot.exists, guardState.guardSnapshot.data(), documentId, aggregate);
+
+    const position = getEqualHandoverPositions(aggregate.identity)
+      .find((item) => item.technicianUid === input.actorUid)?.position;
+    // Retry safety runs before the revision guard so a retried confirmation
+    // cannot be turned into a stale-write rejection.
+    if (position && aggregate.confirmations.some((item) => item.position === position)) {
+      return { aggregate, snapshotHash: createEqualHandoverSnapshot(aggregate).snapshotHash, replayed: true };
+    }
+
+    const now = new Date().toISOString();
+    const next = confirmEqualHandoverParticipant(aggregate, {
+      revision: binding.expectedRevision,
+      snapshotHash: binding.expectedSnapshotHash,
+      recordedAt: now,
+      actorUid: input.actorUid,
+      technicianUid: input.actorUid,
+    });
+    if (canonical(next) === canonical(aggregate)) {
+      return { aggregate, snapshotHash: binding.expectedSnapshotHash, replayed: true };
+    }
+
+    const confirmation = next.confirmations.find((item) => item.position === position) ?? null;
+    if (!confirmation) fail("The confirmation was not recorded; administrator review required.", 409);
+    const snapshotHash = createEqualHandoverSnapshot(next).snapshotHash;
+    transaction.set(aggregateRef, next);
+    const auditId = equalHandoverReportAuditId({
+      namespace: "equal-handover-confirm-audit-v2",
+      documentId,
+      revision: next.revision,
+      technicianUid: input.actorUid,
+    }, "audit_confirm_v2_");
+    transaction.create(db.collection("audit_logs").doc(auditId), {
+      id: auditId,
+      action: "EQUAL_HANDOVER_CONFIRMED_V2",
+      protocol: "equal-handover-v2",
+      actorUid: input.actorUid,
+      outgoingShiftId: input.outgoingShiftId,
+      handoverDocumentId: documentId,
+      reservationId: aggregate.reservation.handoverId,
+      confirmation,
+      reportId: confirmation.reportBinding.id,
+      preparationRevision: confirmation.reportBinding.preparationRevision,
       revision: next.revision,
       snapshotHash,
       recordedAt: now,

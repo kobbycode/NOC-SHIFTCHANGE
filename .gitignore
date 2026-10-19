@@ -13,6 +13,8 @@
 # testing
 /coverage
 /firebase.handover-v2-emulator.generated.json
+/firebase.handover-v2-report-emulator.generated.json
+/firebase.handover-v2-confirmation-emulator.generated.json
 
 # next.js
 /.next/

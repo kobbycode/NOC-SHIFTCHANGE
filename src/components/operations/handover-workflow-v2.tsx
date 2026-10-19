@@ -6,6 +6,13 @@ import type { EqualHandoverReportV2Content } from "@/types/handover-report-v2";
 
 const field = "block w-full rounded-lg border bg-transparent p-2";
 
+const POSITION_LABELS: { position: string; side: "outgoing" | "incoming"; label: string }[] = [
+  { position: "outgoing_tech_a", side: "outgoing", label: "Outgoing technician A" },
+  { position: "outgoing_tech_b", side: "outgoing", label: "Outgoing technician B" },
+  { position: "incoming_tech_a", side: "incoming", label: "Incoming technician A" },
+  { position: "incoming_tech_b", side: "incoming", label: "Incoming technician B" },
+];
+
 function accra(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString("en-GB", { timeZone: "Africa/Accra" });
 }
@@ -22,7 +29,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
   const [notice, setNotice] = useState("");
   const lock = useRef(false);
 
-  const { aggregate, guard, preparation, frozenReport, live, preparationDrifted } = state;
+  const { aggregate, guard, preparation, frozenReport, live, preparationDrifted, readiness } = state;
   const isOutgoing = aggregate.identity.outgoingTechnicianIds.includes(uid);
   const isIncoming = aggregate.identity.incomingTechnicianIds.includes(uid);
   const content: EqualHandoverReportV2Content = (frozenReport?.content ?? preparation?.content ?? live.content);
@@ -96,7 +103,34 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     }, frozenReport ? "Corrected report frozen as a new immutable version." : "Report frozen. It is now immutable.");
   };
 
+  const confirmSelf = () => run("/confirmation", "POST", {
+    expectedRevision: aggregate.revision,
+    expectedSnapshotHash: state.snapshotHash,
+  }, "Your personal confirmation has been recorded.");
+
   const absence = aggregate.absences[0] ?? null;
+  // A position is the participant's exact slot, not just their side: index 0 of
+  // the outgoing pair is outgoing_tech_a and index 1 is outgoing_tech_b (and the
+  // same for the incoming pair), so each technician maps to exactly one position.
+  const outgoingIds = aggregate.identity.outgoingTechnicianIds;
+  const incomingIds = aggregate.identity.incomingTechnicianIds;
+  const myPosition =
+    outgoingIds[0] === uid ? "outgoing_tech_a"
+      : outgoingIds[1] === uid ? "outgoing_tech_b"
+        : incomingIds[0] === uid ? "incoming_tech_a"
+          : incomingIds[1] === uid ? "incoming_tech_b"
+            : null;
+  const myConfirmation = myPosition ? aggregate.confirmations.find((c) => c.position === myPosition) : undefined;
+  const myAbsence = myPosition ? aggregate.absences.find((a) => a.position === myPosition) : undefined;
+
+  const participantState = (position: string) => {
+    if (aggregate.confirmations.some((c) => c.position === position)) return "confirmed";
+    if (aggregate.absences.some((a) => a.position === position)) return "absent";
+    return "awaiting_confirmation";
+  };
+
+  const canConfirm = myPosition !== null && !myConfirmation && !myAbsence &&
+    aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null;
 
   return <div className="space-y-6">
     <header className="space-y-1">
@@ -104,6 +138,42 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <p className="text-sm">{aggregate.identity.outgoingShiftId} → {aggregate.reservation.reservedIncomingShiftId} · {aggregate.lifecycleStatus.replaceAll("_", " ")} · Revision {aggregate.revision} · Guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}</p>
       <p className="text-sm">Scheduled {accra(aggregate.reservation.scheduledStart)} – {accra(aggregate.reservation.scheduledEnd)} (Africa/Accra)</p>
     </header>
+
+    <section aria-label="Handover readiness" className={`rounded-xl border p-4 text-sm ${readiness.ready ? "border-green-600" : "border-neutral-500"}`}>
+      <h2 className="font-semibold">Readiness: {readiness.ready ? "all confirmations and permitted exceptions satisfied" : "not ready"}</h2>
+      <p className="mt-1">Confirmed {readiness.confirmedCount} of {readiness.requiredConfirmations} · absences {readiness.absenceCount} of {readiness.supportedAbsences} supported · report {readiness.boundReportId ? `v${readiness.boundReportVersion} (newest v${readiness.newestReportVersion})` : "not frozen"}.</p>
+      {!readiness.ready && <ul className="mt-2 space-y-0.5 text-red-700">{readiness.reasons.map((reason) => <li key={reason}>• {reason.replaceAll("_", " ")}</li>)}</ul>}
+      <p className="mt-2 italic">Readiness is derived from authoritative evidence and is not a completed handover or a transfer authorization.</p>
+    </section>
+
+    {myPosition && <section className="rounded-xl border p-5 space-y-2 text-sm">
+      <h2 className="text-lg font-semibold">Your confirmation</h2>
+      <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
+      {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against report {short(myConfirmation.reportBinding.id)} (digest {short(myConfirmation.reportBinding.digest)}).</p>}
+      {myAbsence && <p>A colleague recorded you as {myAbsence.absenceType.replaceAll("_", " ")}; an absence is not a personal confirmation.</p>}
+      {canConfirm && <button disabled={busy} onClick={() => void confirmSelf()} className="rounded-lg bg-blue-700 p-2 text-white">{busy ? "Working…" : "Confirm this handover for myself"}</button>}
+      {aggregate.reportBinding === null && <p>Confirmation is available only after the consolidated report is frozen.</p>}
+    </section>}
+
+    <section aria-label="Participant confirmations" className="rounded-xl border p-5 space-y-2 text-sm overflow-x-auto">
+      <h2 className="text-lg font-semibold">Participant confirmations</h2>
+      <table className="w-full text-left">
+        <thead><tr><th>Participant</th><th>Side</th><th>Technician</th><th>State</th><th>Report</th></tr></thead>
+        <tbody>{POSITION_LABELS.map((item) => {
+          const confirmation = aggregate.confirmations.find((c) => c.position === item.position);
+          const positionAbsence = aggregate.absences.find((a) => a.position === item.position);
+          const uidFor = item.side === "outgoing" ? aggregate.identity.outgoingTechnicianIds : aggregate.identity.incomingTechnicianIds;
+          const technicianUid = (item.position === "outgoing_tech_a" || item.position === "incoming_tech_a") ? uidFor[0] : uidFor[1];
+          return <tr key={item.position}>
+            <td>{item.label}</td>
+            <td>{item.side}</td>
+            <td>{technicianUid === uid ? `${technicianUid} (you)` : technicianUid}</td>
+            <td>{participantState(item.position).replaceAll("_", " ")}</td>
+            <td>{confirmation ? short(confirmation.reportBinding.id) : positionAbsence ? positionAbsence.absenceType.replaceAll("_", " ") : "—"}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </section>
 
     {frozenReport && <div className="rounded-xl border p-4 text-sm">Frozen report <strong>{frozenReport.id}</strong> (version {frozenReport.version}{frozenReport.supersedesReportId ? `, supersedes ${frozenReport.supersedesReportId}` : ""}) frozen by {frozenReport.frozenBy} at {accra(frozenReport.frozenAt)} · digest {short(frozenReport.digest)}.</div>}
     {preparationDrifted && <div className="rounded-xl border border-amber-500 p-4 text-sm">The authoritative sources changed since the last preparation. Re-prepare and review the consolidated report before freezing.</div>}
@@ -134,9 +204,9 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
         {frozenReport && <label className="text-sm">Correction note (required for a later version)<input className={field} name="correctionNote" required maxLength={4000}/></label>}
         <button disabled={busy || !preparation || preparationDrifted || !guard || aggregate.lifecycleStatus !== "collecting_confirmations"} className="w-fit rounded-lg bg-blue-700 p-2 text-white">Review complete — freeze report</button>
       </form>
-      <p className="text-sm">Participant confirmations and the final shift transfer arrive in a later milestone; no confirmation or transfer action is available here.</p>
+      <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above. The final shift transfer, late acceptance and attendance finalization arrive in a later milestone and are not available here.</p>
     </section>}
-    {!isOutgoing && isIncoming && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. This view is read-only until your shift begins.</div>}
+    {!isOutgoing && isIncoming && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only, but you can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen.</div>}
 
     <section className="space-y-4">
       <h2 className="text-lg font-semibold">{frozenReport ? "Frozen report content (immutable)" : preparation && !preparationDrifted ? "Prepared report (awaiting review)" : "Live consolidated evidence"}</h2>
