@@ -324,7 +324,10 @@ export async function finalizeAttendanceEvidenceOperation(
   if (!isCanonicalTimestamp(input.serverAuthenticationTime)) {
     throw new AttendanceEvidenceDomainError("Invalid canonical server authentication time.", 400);
   }
-  const { db, attendanceEvidenceV2, attendanceEvidenceOperationsV2, handovers } =
+  // v2 attendance evidence binds the v2 equal-handover aggregate, which lives
+  // in `equal_handovers_v2` under the same `handover_v2_<outgoingShiftId>`
+  // document id the request carries — never the v1 `handovers` collection.
+  const { db, attendanceEvidenceV2, attendanceEvidenceOperationsV2, equalHandoversV2 } =
     getOperationalCollections();
 
   await db.runTransaction(async (transaction) => {
@@ -364,10 +367,10 @@ export async function finalizeAttendanceEvidenceOperation(
       expectedFencingEpoch: request.expectedFencingEpoch,
     });
 
-    // The live handover document must still carry the exact identity the
-    // coordinator supplies; a superseded/cancelled handover or a stale
+    // The live v2 equal-handover aggregate must still carry the exact identity
+    // the coordinator supplies; a superseded/cancelled handover or a stale
     // handover identity blocks finalization.
-    const handoverSnapshot = await transaction.get(handovers.doc(request.handoverDocumentId));
+    const handoverSnapshot = await transaction.get(equalHandoversV2.doc(request.handoverDocumentId));
     if (!handoverSnapshot.exists) {
       throw new AttendanceEvidenceDomainError(
         "The v2 handover document is missing; refusing to finalize attendance evidence.",

@@ -415,7 +415,7 @@ export function assertEqualHandoverAggregate(value: unknown): EqualHandoverAggre
   }
 
   if (
-    !["collecting_confirmations", "completed", "cancelled", "superseded"].includes(
+    !["collecting_confirmations", "awaiting_incoming_acceptance", "completed", "cancelled", "superseded"].includes(
       data.lifecycleStatus as string,
     )
   ) {
@@ -863,6 +863,82 @@ export function completeEqualHandoverTransfer(
   const aggregate = mutation(value, input);
   identifier(input.actorUid, "transferring actor UID", 128);
   assertEqualHandoverReadyForTransfer(aggregate, input);
+  return assertEqualHandoverAggregate({
+    ...aggregate,
+    lifecycleStatus: "completed",
+    updatedAt: input.recordedAt,
+  });
+}
+
+/**
+ * Stage 1 — the outgoing side's final-transfer commitment. The reviewed report,
+ * the four-person confirmation/absence obligation and the immutable frozen
+ * binding are all still satisfied exactly as a transfer would require, but the
+ * handover does not become complete here: it enters `awaiting_incoming_acceptance`
+ * and waits for an incoming technician to accept with their own password. Only
+ * `updatedAt` moves; `revision` and the reviewed snapshot are unchanged, so an
+ * incoming participant's already-reviewed evidence stays valid across the commit.
+ */
+export function commitEqualHandoverOutgoingTransfer(
+  value: EqualHandoverAggregate,
+  input: MutationContext & {
+    actorUid: string;
+  },
+): EqualHandoverAggregate {
+  const aggregate = mutation(value, input);
+  identifier(input.actorUid, "committing actor UID", 128);
+  assertEqualHandoverReadyForTransfer(aggregate, input);
+  const actor = resolveEqualHandoverParticipants(aggregate).find(
+    (item) => item.technicianUid === input.actorUid,
+  );
+  if (!actor || actor.side !== "outgoing" || actor.state !== "confirmed") {
+    fail("Only a personally confirmed outgoing technician may commit this handover.", 403);
+  }
+  return assertEqualHandoverAggregate({
+    ...aggregate,
+    lifecycleStatus: "awaiting_incoming_acceptance",
+    updatedAt: input.recordedAt,
+  });
+}
+
+/**
+ * Stage 2 — the first authorized incoming technician's password acceptance
+ * completes the handover and is the point at which the reserved incoming shift
+ * is activated (by the persistence service, in the same transaction). The
+ * actor must be a reserved incoming participant who has personally confirmed;
+ * the terminal `completed` state then freezes the aggregate so the second
+ * partner can only late-join the already-active shift, never re-open it.
+ */
+export function activateEqualHandoverIncomingTransfer(
+  value: EqualHandoverAggregate,
+  input: {
+    revision: number;
+    snapshotHash: string;
+    recordedAt: string;
+    actorUid: string;
+  },
+): EqualHandoverAggregate {
+  const aggregate = assertEqualHandoverAggregate(value);
+  identifier(input.actorUid, "accepting actor UID", 128);
+  if (aggregate.lifecycleStatus !== "awaiting_incoming_acceptance") {
+    fail("The handover does not permit incoming acceptance in its current lifecycle.", 409);
+  }
+  if (input.revision !== aggregate.revision) {
+    fail("Stale handover revision.");
+  }
+  if (input.snapshotHash !== createEqualHandoverSnapshot(aggregate).snapshotHash) {
+    fail("Stale handover snapshot.");
+  }
+  timestamp(input.recordedAt);
+  if (Date.parse(input.recordedAt) < Date.parse(aggregate.updatedAt)) {
+    fail("Stale acceptance timestamp.");
+  }
+  const actor = resolveEqualHandoverParticipants(aggregate).find(
+    (item) => item.technicianUid === input.actorUid,
+  );
+  if (!actor || actor.side !== "incoming" || actor.state !== "confirmed") {
+    fail("Only a personally confirmed incoming technician may accept and activate this handover.", 403);
+  }
   return assertEqualHandoverAggregate({
     ...aggregate,
     lifecycleStatus: "completed",

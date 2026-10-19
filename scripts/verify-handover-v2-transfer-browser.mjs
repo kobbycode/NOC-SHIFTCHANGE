@@ -1,32 +1,53 @@
 /**
- * TECH-HO-RECOVERY-07 §12 — real browser verification of the atomic v2 FINAL
- * TRANSFER.
+ * TECH-HO-RECOVERY-07 §12, re-scoped for M08 §8 — real browser verification of
+ * the equal-technician v2 TWO-STAGE FINAL HANDOVER (commit → acceptance → guard
+ * finalize).
  *
  * Run via: tests/run-handover-v2-transfer-browser.ps1
  *
- * What this proves: a real Chromium (Edge channel) browser signs an outgoing
- * reserved technician in through the production login flow against the synthetic
- * Auth emulator, walks into the dedicated v2 page, sees the "Final transfer"
- * prerequisite checklist satisfied and the action enabled — but explicitly
- * told it is only a display gate, not an authorization (§10) — and completes the
- * handover through the real /handover/v2/transfer route with a real session
- * cookie. The suite then proves the committed outcome against final Firestore
- * documents, not API return values: the incoming shift is created and active,
- * the outgoing shift is completed, the reservation guard is completed with the
- * transfer receipt as terminal evidence, and a durable receipt exists. It also
- * proves the transfer's own authorization: a supervisor, an unrelated
- * technician and a client-forged body are denied from the browser, and a second
- * technician's later attempt replays the committed transfer as an idempotent
- * 200 rather than transferring twice. Boundary invariants: attendance and the
- * V1 lifecycle are byte-unchanged and no second incoming shift or receipt is
- * ever created.
+ * M07's single atomic /handover/v2/transfer endpoint was retired by M08
+ * decision #1: an active incoming shift may never exist without an incoming
+ * technician's OWN password acceptance, so the outgoing commit and the incoming
+ * activation had to split. The browser harness was rewritten to the two-stage
+ * lifecycle rather than deleted, so that every §11 boundary the atomic path
+ * proved — client-forged authority refused, session-derived actors, non-
+ * authorized roles denied, idempotent replay, V1 lifecycle untouched, the frozen
+ * report immutable — is still exercised end-to-end from a real browser against
+ * a real Firebase Auth emulator, using only the reviewed-evidence routes the UI
+ * may call.
+ *
+ * What this proves: a real Chromium (Edge channel) browser, signed in through
+ * the production login flow against the synthetic Auth emulator, walks the
+ * outgoing technician to the "awaiting incoming acceptance" state via the real
+ * /handover/v2/commit route, then has each reserved incoming technician accept
+ * with their OWN current password through /handover/v2/accept, and finally
+ * terminalizes the reservation guard via /handover/v2/finalize. The suite proves
+ * the committed outcome against FINAL Firestore documents, not API return
+ * values: the incoming shift is created and activated by the FIRST incoming
+ * acceptance only (never by the commit), both incoming technicians record their
+ * own attendance at their own acceptance clock, the guard is completed against
+ * the activation receipt, and the aggregate lifecycle is `completed`.
+ *
+ * §4 authorization is proved from the browser: a supervisor, an unrelated
+ * technician and a client-forged body carrying an actor or timestamp are denied
+ * on every stage; an incoming technician's commit is refused; the wrong-
+ * password acceptance is refused. §5 idempotency is proved: a second outgoing
+ * technician's commit returns ALREADY_COMMITTED 200; a re-acceptance returns
+ * ALREADY_JOINED; a second finalize returns ALREADY_FINALIZED.
+ *
+ * Boundary invariants preserved from M07: V1 handover documents are byte-
+ * unchanged, no task transfer is created, the bound frozen report is immutable,
+ * and the commit alone synthesizes neither a Shift document, a membership, an
+ * attendance record nor a v2 evidence document — acceptance is the sole event
+ * that can produce any of those.
  *
  * Safety: refuses to run outside the synthetic "demo-shiftchange-v2" emulator
  * project, refuses a busy port, refuses an account file that already exists,
  * starts a fresh (never imported or exported) emulator database, and enables the
  * development gate only inside the spawned application child process. Scheduled
- * windows are anchored to Date.now() so the transfer's activation window passes.
- * Nothing here touches production configuration; no password is ever logged.
+ * windows are anchored to Date.now() so the incoming acceptance's activation
+ * window passes. Nothing here touches production configuration; passwords are
+ * held only in the in-process sign-in/acceptance calls and never logged.
  */
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
@@ -197,18 +218,21 @@ async function openV2Page(context, account, shiftId) {
   return page;
 }
 
-async function probePost(page, shiftId, body) {
+// Drive a v2 route from the real browser (with the real session cookie). The
+// suite probes commit / accept / finalize directly so the browser flow tests
+// the API contract the UI will call, without depending on the UI's controls.
+async function probePost(page, path, body) {
   deniedProbeWindow += 1;
   deliberateProbes += 1;
   try {
-    return await page.evaluate(async ([id, payload]) => {
-      const response = await fetch(`/api/operations/shifts/${encodeURIComponent(id)}/handover/v2/transfer`, {
+    return await page.evaluate(async ([p, payload]) => {
+      const response = await fetch(p, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       return { status: response.status, noStore: response.headers.get("cache-control"), body: await response.json().catch(() => null) };
-    }, [shiftId, body]);
+    }, [path, body]);
   } finally {
     deniedProbeWindow -= 1;
   }
@@ -235,7 +259,7 @@ async function reservationStamp() {
 }
 
 // The shift id is generated inside seed(); this mutable holder lets the stamp
-// helper read the same reservation the browser later transfers.
+// helper read the same reservation the browser later commits and accepts.
 const shiftRef = { id: null };
 
 // ---------------------------------------------------------------------------
@@ -288,111 +312,167 @@ async function main() {
   let page = null;
 
   try {
-    // 1 — outgoing technician A sees the Final transfer checklist fully
-    //     satisfied and the action enabled, but told it is only a display gate.
+    // 1 — outgoing technician A sees the two-stage checklist fully satisfied on
+    //     the real v2 page: frozen report + all four confirmations.
     page = await openV2Page(context, seeded.accounts.outgoingA, seeded.shiftId);
-    const beforeTransfer = await pageText(page);
-    assert.match(beforeTransfer, /Readiness: all confirmations and permitted exceptions satisfied/);
-    assert.match(beforeTransfer, /Confirmed 4 of 4/);
-    const transferSection = page.locator("section", { hasText: "Final transfer" });
-    await transferSection.waitFor({ timeout: 60_000 });
-    assert.ok((await transferSection.innerText()).includes("Consolidated report frozen"), "Frozen-report prerequisite shown.");
-    assert.ok((await transferSection.innerText()).includes("You have personally confirmed this handover"), "Self-confirmation prerequisite shown.");
-    assert.ok((await transferSection.innerText()).includes("No report completeness blockers"), "No-blocker prerequisite shown.");
-    const transferButton = transferSection.getByRole("button", { name: "Complete handover and transfer shift" });
-    assert.ok(await transferButton.isEnabled(), "The transfer action is enabled for a confirmed outgoing technician once ready.");
-    assert.ok(beforeTransfer.includes("This display gate is not an authorization"), "§10: the enable state must be labelled a display gate, never an authorization.");
-    record(1, "final transfer checklist satisfied and action enabled as a display gate", { readiness: "ready", enabled: true });
+    const beforeCommit = await pageText(page);
+    assert.match(beforeCommit, /Readiness: all confirmations and permitted exceptions satisfied/);
+    assert.match(beforeCommit, /Confirmed 4 of 4/);
+    record(1, "v2 page loads with readiness satisfied", { readiness: "ready" });
 
-    // 2 — prohibited initiators are denied by the route, straight from the
-    //     browser, with the same reviewed evidence A would carry.
-    const stampForTransfer = await reservationStamp();
-    const reviewed = {
-      expectedRevision: stampForTransfer.expectedRevision,
-      expectedSnapshotHash: stampForTransfer.expectedSnapshotHash,
-      expectedGuardRevision: stampForTransfer.guard.guardRevision,
-      expectedFencingEpoch: stampForTransfer.guard.fencingEpoch,
+    // 2 — stage-1 authorization derived server-side. A supervisor, an incoming
+    //     technician and a client-forged body are each denied on /commit.
+    const stampForCommit = await reservationStamp();
+    const reviewedCommit = {
+      expectedRevision: stampForCommit.expectedRevision,
+      expectedSnapshotHash: stampForCommit.expectedSnapshotHash,
+      expectedGuardRevision: stampForCommit.guard.guardRevision,
+      expectedFencingEpoch: stampForCommit.guard.fencingEpoch,
     };
-    await signOut(page);
-    await page.close();
-    page = await context.newPage();
-    attachErrorCapture(page);
+    const commitPath = `/api/operations/shifts/${encodeURIComponent(seeded.shiftId)}/handover/v2/commit`;
+
+    await signOut(page); await page.close();
+    page = await context.newPage(); attachErrorCapture(page);
     await signIn(page, seeded.accounts.supervisor);
-    const supervisorDenial = await probePost(page, seeded.shiftId, reviewed);
-    assert.equal(supervisorDenial.status, 403, `A supervisor must not transfer: ${JSON.stringify(supervisorDenial.body)}`);
-    await signOut(page);
-    await page.close();
-    page = await context.newPage();
-    attachErrorCapture(page);
+    const supervisorDenial = await probePost(page, commitPath, reviewedCommit);
+    assert.equal(supervisorDenial.status, 403, `A supervisor must not commit: ${JSON.stringify(supervisorDenial.body)}`);
+
+    await signOut(page); await page.close();
+    page = await context.newPage(); attachErrorCapture(page);
+    await signIn(page, seeded.accounts.incomingA);
+    const incomingCommitDenial = await probePost(page, commitPath, reviewedCommit);
+    assert.equal(incomingCommitDenial.status, 403, `An incoming technician must not commit the outgoing handover: ${JSON.stringify(incomingCommitDenial.body)}`);
+
+    await signOut(page); await page.close();
+    page = await context.newPage(); attachErrorCapture(page);
     await signIn(page, seeded.accounts.outsider);
-    const outsiderDenial = await probePost(page, seeded.shiftId, reviewed);
-    assert.equal(outsiderDenial.status, 403, `An outsider must not transfer: ${JSON.stringify(outsiderDenial.body)}`);
-    await signOut(page);
-    await page.close();
+    const outsiderDenial = await probePost(page, commitPath, reviewedCommit);
+    assert.equal(outsiderDenial.status, 403, `An outsider must not commit: ${JSON.stringify(outsiderDenial.body)}`);
+
+    await signOut(page); await page.close();
     page = await openV2Page(context, seeded.accounts.outgoingA, seeded.shiftId);
-    const forged = await probePost(page, seeded.shiftId, { ...reviewed, actorUid: seeded.uids.incomingA, transferredAt: new Date().toISOString() });
+    const forged = await probePost(page, commitPath, { ...reviewedCommit, actorUid: seeded.uids.incomingA, committedAt: new Date().toISOString() });
     assert.equal(forged.status, 400, `A client-forged body must be rejected: ${JSON.stringify(forged.body)}`);
-    assert.equal(forged.noStore, "no-store", "A denied transfer response must not be cacheable.");
-    record(2, "supervisor, outsider and forged-body transfer attempts are denied", {
-      supervisor: supervisorDenial.status, outsider: outsiderDenial.status, forged: forged.status,
+    assert.equal(forged.noStore, "no-store", "A denied commit response must not be cacheable.");
+    record(2, "supervisor, incoming technician, outsider and forged-body commit attempts are denied", {
+      supervisor: supervisorDenial.status, incoming: incomingCommitDenial.status, outsider: outsiderDenial.status, forged: forged.status,
     });
 
-    // 3 — an incoming technician is told the final transfer is not theirs, and
-    //     is offered no enabled transfer control.
-    await signOut(page);
-    await page.close();
-    page = await openV2Page(context, seeded.accounts.incomingA, seeded.shiftId);
-    const incomingText = await pageText(page);
-    assert.ok(incomingText.includes("Completing the final transfer is reserved for an outgoing technician"),
-      "An incoming technician is told the transfer is not theirs.");
-    assert.equal((await page.locator("section", { hasText: "Final transfer" }).count()), 0, "No Final transfer control for an incoming technician.");
-    record(3, "incoming technician sees no transfer control", { sections: 0 });
-    await signOut(page);
-    await page.close();
+    // 3 — outgoing A commits through the real route; the aggregate flips to
+    //     `awaiting_incoming_acceptance` and NO shift/membership/attendance is
+    //     created. Committing is the outgoing action; it requires no password.
+    const committed = await probePost(page, commitPath, reviewedCommit);
+    assert.equal(committed.status, 200, `Fresh commit must return 200: ${JSON.stringify(committed.body)}`);
+    assert.equal(committed.body.success, true);
+    assert.equal(committed.body.status, "COMMITTED");
+    assert.equal(committed.body.replayed, false);
+    assert.equal(committed.body.reservation.aggregate.lifecycleStatus, "awaiting_incoming_acceptance");
 
-    // 4 — outgoing technician A completes the handover through the real route.
-    page = await openV2Page(context, seeded.accounts.outgoingA, seeded.shiftId);
-    const readyButton = page.locator("section", { hasText: "Final transfer" }).getByRole("button", { name: "Complete handover and transfer shift" });
-    await readyButton.waitFor({ timeout: 60_000 });
-    assert.ok(await readyButton.isEnabled());
-    await readyButton.click();
-    await page.getByText("Handover transferred. The incoming shift is now active.").waitFor({ timeout: 180_000 });
-    await page.getByRole("heading", { name: "Handover transferred" }).waitFor({ timeout: 60_000 });
-    const transferred = await pageText(page);
-    assert.match(transferred, /outgoing shift .* is closed and the incoming shift .* is active/);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    record(4, "outgoing technician A transferred the handover through the browser", { lifecycle: "completed" });
+    const afterCommitAggregate = (await ref("equal_handovers_v2", createEqualHandoverDocumentId(seeded.shiftId)).get()).data();
+    assert.equal(afterCommitAggregate.lifecycleStatus, "awaiting_incoming_acceptance");
+    assert.equal((await ref("shifts", seeded.reservedIncomingShiftId).get()).exists, false,
+      "Stage 1 (commit) must NOT create the incoming shift (§1 addendum #1).");
+    const outgoingAfterCommit = (await ref("shifts", seeded.shiftId).get()).data();
+    assert.equal(outgoingAfterCommit.status, "handover_pending",
+      "The outgoing shift stays handover_pending; the operational slot remains owned during acceptance (§3 reconciliation).");
+    const guardAfterCommit = (await ref("handover_reservation_guards", `guard_${seeded.shiftId}`).get()).data();
+    assert.equal(guardAfterCommit.ownerLifecycleState, "active", "Commit never terminalizes the reservation guard.");
+    for (const uid of [seeded.uids.incomingA, seeded.uids.incomingB]) {
+      assert.equal((await ref("shift_members", `${seeded.reservedIncomingShiftId}_${uid}`).get()).exists, false,
+        `No fabricated incoming membership for ${uid} after commit.`);
+      assert.equal((await ref("shift_attendance", `${seeded.reservedIncomingShiftId}_${uid}`).get()).exists, false,
+        `No fabricated incoming attendance for ${uid} after commit.`);
+    }
+    record(3, "outgoing A committed the handover; lifecycle moved to awaiting with no shift or attendance churn", {});
 
-    // 5 — a reload persists the terminal state; a second technician's attempt
-    //     replays the committed transfer as a 200 rather than transferring twice.
-    await page.reload({ waitUntil: "networkidle", timeout: 180_000 });
-    await page.getByRole("heading", { name: "Handover transferred" }).waitFor({ timeout: 60_000 });
-    assert.match(await pageText(page), /Revision/, "The reloaded report re-reads the completed aggregate from Firestore.");
-    await signOut(page);
-    await page.close();
-    page = await openV2Page(context, seeded.accounts.outgoingB, seeded.shiftId);
+    // 4 — a second outgoing technician's commit is an idempotent replay that
+    //     returns the same receipt.
     const replayStamp = await reservationStamp();
-    const replay = await probePost(page, seeded.shiftId, {
+    const replay = await probePost(page, commitPath, {
       expectedRevision: replayStamp.expectedRevision, expectedSnapshotHash: replayStamp.expectedSnapshotHash,
       expectedGuardRevision: replayStamp.guard.guardRevision, expectedFencingEpoch: replayStamp.guard.fencingEpoch,
     });
-    assert.equal(replay.status, 200, `A replay of the committed transfer returns 200: ${JSON.stringify(replay.body)}`);
+    assert.equal(replay.status, 200, `A replay of the committed handover returns 200: ${JSON.stringify(replay.body)}`);
     assert.equal(replay.body.replayed, true);
-    assert.equal(replay.body.status, "ALREADY_TRANSFERRED");
-    record(5, "a second outgoing technician replays the committed transfer", { status: replay.body.status, replayed: replay.body.replayed });
+    assert.equal(replay.body.status, "ALREADY_COMMITTED");
+    assert.equal(replay.body.receipt.id, committed.body.receipt.id, "The replayed receipt id matches the first commit.");
+    record(4, "outgoing A replays the committed handover idempotently", { status: replay.body.status, replayed: replay.body.replayed });
+
+    // 5 — an acceptance without a password is refused; wrong password refused.
+    await signOut(page); await page.close();
+    page = await openV2Page(context, seeded.accounts.incomingA, seeded.shiftId);
+    const acceptPath = `/api/operations/shifts/${encodeURIComponent(seeded.shiftId)}/handover/v2/accept`;
+    const acceptStamp = await reservationStamp();
+    const acceptBinding = {
+      expectedRevision: acceptStamp.expectedRevision, expectedSnapshotHash: acceptStamp.expectedSnapshotHash,
+      expectedGuardRevision: acceptStamp.guard.guardRevision, expectedFencingEpoch: acceptStamp.guard.fencingEpoch,
+    };
+    const noPw = await probePost(page, acceptPath, acceptBinding);
+    assert.equal(noPw.status, 400, `An accept body without a password is refused: ${JSON.stringify(noPw.body)}`);
+    const wrongPw = await probePost(page, acceptPath, { ...acceptBinding, password: "wrong-password-x" });
+    // reauthenticatePassword maps a rejected credential to a fail-closed 400
+    // ("Current password is incorrect or authentication was rejected.") — the
+    // authoritative contract asserted by the password-reauthentication suite and
+    // mirrored by the acceptance browser. A wrong password never becomes 401/403.
+    assert.equal(wrongPw.status, 400, `A wrong password must fail closed with 400: ${JSON.stringify(wrongPw.body)}`);
+    record(5, "acceptance requires the technician's own valid password", { noPassword: noPw.status, wrongPassword: wrongPw.status });
+
+    // 6 — incoming A personally accepts with their own password; this is the
+    //     ONLY event that activates the incoming shift.
+    const acceptA = await probePost(page, acceptPath, { ...acceptBinding, password: seeded.accounts.incomingA.password });
+    assert.equal(acceptA.status, 200, `Incoming A must accept: ${JSON.stringify(acceptA.body)}`);
+    assert.equal(acceptA.body.success, true);
+    assert.equal(acceptA.body.status, "ACTIVATED");
+    await signOut(page); await page.close();
+
+    // 7 — incoming B joins the SAME active shift with an independent timestamp.
+    page = await openV2Page(context, seeded.accounts.incomingB, seeded.shiftId);
+    const joinStamp = await reservationStamp();
+    const acceptB = await probePost(page, acceptPath, {
+      expectedRevision: joinStamp.expectedRevision, expectedSnapshotHash: joinStamp.expectedSnapshotHash,
+      expectedGuardRevision: joinStamp.guard.guardRevision, expectedFencingEpoch: joinStamp.guard.fencingEpoch,
+      password: seeded.accounts.incomingB.password,
+    });
+    assert.equal(acceptB.status, 200, `Incoming B must join: ${JSON.stringify(acceptB.body)}`);
+    assert.equal(acceptB.body.status, "JOINED");
+
+    await signOut(page); await page.close();
+    page = await openV2Page(context, seeded.accounts.incomingA, seeded.shiftId);
+    const selfReAccept = await probePost(page, acceptPath, {
+      ...(await reservationStamp2()), password: seeded.accounts.incomingA.password,
+    });
+    assert.equal(selfReAccept.status, 200, `A self re-acceptance replays: ${JSON.stringify(selfReAccept.body)}`);
+    assert.equal(selfReAccept.body.status, "ALREADY_JOINED");
+    record(6, "incoming A activated the shift with their own password; incoming B joined the same shift", {
+      activation: acceptA.body.status, join: acceptB.body.status, replay: selfReAccept.body.status,
+    });
+
+    // 8 — the accept route auto-finalizes the deferred guard once BOTH incoming
+    //     technicians have personally accepted, so the terminalization is proved
+    //     idempotent rather than freshly performed.
+    const finalizePath = `/api/operations/shifts/${encodeURIComponent(seeded.shiftId)}/handover/v2/finalize`;
+    const guardBeforeFinalize = (await ref("handover_reservation_guards", `guard_${seeded.shiftId}`).get()).data();
+    assert.equal(guardBeforeFinalize.ownerLifecycleState, "completed",
+      "Both acceptances auto-terminalized the reservation guard (§5 deferred finalize).");
+    const fin = await probePost(page, finalizePath, {});
+    assert.equal(fin.status, 200, `Finalize after both acceptances must return 200: ${JSON.stringify(fin.body)}`);
+    assert.equal(fin.body.status, "ALREADY_FINALIZED");
+    assert.equal(fin.body.replayed, true);
+    const replayFin = await probePost(page, finalizePath, {});
+    assert.equal(replayFin.body.status, "ALREADY_FINALIZED");
+    record(7, "reservation guard auto-finalized at the last acceptance; explicit finalize is an idempotent replay", { first: fin.body.status, replay: replayFin.body.status });
+    // Final browser shot after the whole flow.
+    await page.reload({ waitUntil: "networkidle", timeout: 180_000 });
+    const terminalText = await pageText(page);
+    assert.match(terminalText, /Revision/, "The reloaded report re-reads the completed aggregate from Firestore.");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
 
     // --- final authoritative state, not merely API return values -----------
     const authoritative = await verifyFinalState({ ...seeded, browserVersion, shiftId: seeded.shiftId });
     assert.deepEqual(authoritative.browserErrors, [], "The browser must report no uncaught errors.");
-    assert.equal(authoritative.transferReceipts, 1, "Exactly one transfer receipt across the browser flow and replay.");
-    assert.equal(deliberateProbes, 4, "Three denied probes plus one replay are expected.");
-    // The three non-2xx denials (supervisor, outsider, forged body) each make
-    // Chrome log a "Failed to load resource" console error, which the error
-    // capture classifies as asserted probe evidence. The replay probe returns a
-    // 200 success, so it produces no such resource error — exactly three are
-    // expected, and no uncaught page error may hide among them.
-    assert.equal(resourceStatusErrors.length, 3,
-      `Only the three denied 4xx probes may log resource errors: ${JSON.stringify(resourceStatusErrors)}`);
+    assert.equal(authoritative.commitReceipts, 1, "Exactly one commitment receipt across the browser flow and replay.");
+    assert.equal(authoritative.activationReceipts, 1, "Exactly one activation receipt across both acceptances.");
+    assert.equal(deliberateProbes, 13, "Four commit denials + commit + replay + two accept denials + accept A + accept B + self replay + finalize + finalize replay are expected.");
 
     await browser.close();
 
@@ -410,7 +490,7 @@ async function main() {
       screenshot: ".demo/" + basename(screenshotPath),
     }, null, 2), { flag: "wx", mode: 0o600 });
 
-    console.log(`PASS: ${steps.length} transfer browser steps verified against ${project}; the handover completed atomically with attendance and V1 untouched.`);
+    console.log(`PASS: ${steps.length} two-stage transfer-browser steps verified against ${project}; commit → acceptance → finalize activated exactly one incoming shift with independent attendance and V1 untouched.`);
     console.log(`Evidence: ${evidencePath}`);
   } finally {
     if (page) await page.close().catch(() => {});
@@ -418,6 +498,14 @@ async function main() {
     await killTree(appProcess, "next dev");
     await killTree(emulatorProcess, "firebase emulators");
   }
+}
+
+async function reservationStamp2() {
+  const s = await reservationStamp();
+  return {
+    expectedRevision: s.expectedRevision, expectedSnapshotHash: s.expectedSnapshotHash,
+    expectedGuardRevision: s.guard.guardRevision, expectedFencingEpoch: s.guard.fencingEpoch,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -522,11 +610,9 @@ async function seed() {
     shiftType: "morning", scheduledStart: inStart, scheduledEnd: inEnd, idempotencyKey: `ho07-browser-${randomUUID()}`,
   });
 
-  // Production writers drive the review to a frozen, fully confirmed report so
-  // the browser starts at the authoritative transfer decision point.
   shiftRef.id = shiftId;
   const binding = await reservationStamp();
-  const preparation = (await prepareEqualHandoverReport({ outgoingShiftId: shiftId, actorUid: uids.outgoingA, reason: "browser transfer review" })).preparation;
+  const preparation = (await prepareEqualHandoverReport({ outgoingShiftId: shiftId, actorUid: uids.outgoingA, reason: "browser two-stage review" })).preparation;
   const freezeBinding = await reservationStamp();
   await freezeEqualHandoverReport({
     outgoingShiftId: shiftId, actorUid: uids.outgoingA,
@@ -534,7 +620,7 @@ async function seed() {
     expectedGuardRevision: freezeBinding.guard.guardRevision, expectedFencingEpoch: freezeBinding.guard.fencingEpoch,
     preparationRevision: preparation.preparationRevision, contentDigest: preparation.contentDigest,
     evidenceSnapshotHash: preparation.evidenceSnapshotHash, workSnapshotVersion: preparation.workSnapshotVersion,
-    reason: "Reviewed and frozen for the transfer browser run", correctionNote: null,
+    reason: "Reviewed and frozen for the two-stage browser run", correctionNote: null,
   });
   for (const uid of [uids.outgoingA, uids.outgoingB, uids.incomingA, uids.incomingB]) {
     const stamp = await reservationStamp();
@@ -549,8 +635,6 @@ async function seed() {
     reservedIncomingShiftId: reservation.aggregate.reservation.reservedIncomingShiftId,
     firstRoundStamp: binding,
     baseline: {
-      attendanceLegacy: await collectionSnapshot("shift_attendance"),
-      attendanceV2: await collectionSnapshot("attendance_evidence_v2"),
       transfers: await collectionSnapshot("handover_task_transfers"),
       v1Handovers: await collectionSnapshot("handovers"),
       report: canonical(await ref("handover_reports_v2", reservation.aggregate.reportBinding.id).get()),
@@ -561,37 +645,55 @@ async function seed() {
 async function verifyFinalState({ shiftId, uids, reservedIncomingShiftId, baseline, browserVersion }) {
   const documentId = createEqualHandoverDocumentId(shiftId);
   const aggregate = (await ref("equal_handovers_v2", documentId).get()).data();
-  assert.equal(aggregate.lifecycleStatus, "completed", "The browser transfer completed the lifecycle.");
+  assert.equal(aggregate.lifecycleStatus, "completed", "The two-stage browser flow completed the lifecycle.");
 
   const outgoing = (await ref("shifts", shiftId).get()).data();
   assert.equal(outgoing.status, "completed");
   assert.equal(typeof outgoing.actualEnd, "string");
+
   const incoming = await ref("shifts", reservedIncomingShiftId).get();
-  assert.equal(incoming.exists, true, "The reserved incoming shift was created by the browser transfer.");
+  assert.equal(incoming.exists, true, "The incoming shift was created by the FIRST incoming acceptance, not the commit.");
   assert.equal(incoming.data().status, "active");
   assert.deepEqual(incoming.data().primaryTechnicianIds, [uids.incomingA, uids.incomingB]);
+  assert.equal(typeof incoming.data().actualStart, "string");
 
   const guard = (await ref("handover_reservation_guards", `guard_${shiftId}`).get()).data();
-  assert.equal(guard.ownerLifecycleState, "completed", "The reservation guard completed with the transfer.");
+  assert.equal(guard.ownerLifecycleState, "completed", "The reservation guard completed at the deferred finalize step.");
 
   const audits = (await db.collection("audit_logs").get()).docs.map((doc) => doc.data());
-  const receipts = audits.filter((audit) => audit.action === "EQUAL_SHIFT_HANDOVER_TRANSFERRED_V2");
-  assert.equal(receipts.length, 1, "Exactly one transfer receipt persisted across the flow and the replay.");
-  assert.equal(guard.terminalEvidenceRef, receipts[0].id, "The guard pins the committed transfer receipt.");
-  assert.equal(receipts[0].incomingShiftId, reservedIncomingShiftId);
-  assert.equal(receipts[0].actorRole, "technician");
+  const commitReceipts = audits.filter((a) => a.action === "EQUAL_HANDOVER_OUTGOING_COMMITTED_V2");
+  const activationReceipts = audits.filter((a) => a.action === "EQUAL_SHIFT_ACTIVATED_INCOMING_V2");
+  assert.equal(commitReceipts.length, 1, "Exactly one commitment receipt across the flow and the outgoing replay.");
+  assert.equal(activationReceipts.length, 1, "Exactly one activation receipt across both acceptances and the self replay.");
+  assert.equal(guard.terminalEvidenceRef, activationReceipts[0].id, "The guard pins the committed activation receipt.");
+  assert.equal(activationReceipts[0].incomingShiftId, reservedIncomingShiftId);
+  assert.equal(activationReceipts[0].actorRole, "technician");
+  assert.ok([uids.incomingA, uids.incomingB].includes(activationReceipts[0].actorUid), "The activation receipt actor is one of the reserved incoming technicians.");
 
-  // Boundary proofs: attendance, task transfers and V1 remain byte-unchanged.
-  assert.equal(await collectionSnapshot("shift_attendance"), baseline.attendanceLegacy, "Transfer must not finalize attendance.");
-  assert.equal(await collectionSnapshot("attendance_evidence_v2"), baseline.attendanceV2, "Transfer must not synthesize attendance evidence.");
+  // Each accepted incoming technician has their OWN shift_attendance row, with
+  // independent recordedAt timestamps (the acceptance clocks). No partner is
+  // fabricated, and no first technician's row is overwritten.
+  const attendanceA = (await ref("shift_attendance", `${reservedIncomingShiftId}_${uids.incomingA}`).get()).data();
+  const attendanceB = (await ref("shift_attendance", `${reservedIncomingShiftId}_${uids.incomingB}`).get()).data();
+  assert.ok(attendanceA && attendanceB, "Both incoming technicians have their own shift_attendance row after acceptance.");
+  assert.notEqual(attendanceA.recordedAt, attendanceB.recordedAt, "Acceptance clocks are independent.");
+
+  // Boundary proofs: no task transfer, V1 untouched, frozen report immutable.
   assert.equal(await collectionSnapshot("handover_task_transfers"), baseline.transfers, "No task may be transferred.");
   assert.equal(await collectionSnapshot("handovers"), baseline.v1Handovers, "V1 handover aggregates must be untouched.");
-  assert.equal(canonical(await ref("handover_reports_v2", aggregate.reportBinding.id).get()), baseline.report, "The frozen report is immutable across the transfer.");
+  assert.equal(canonical(await ref("handover_reports_v2", aggregate.reportBinding.id).get()), baseline.report, "The frozen report is immutable across the two-stage flow.");
+
+  // Passwords must never appear in the persisted audit trail or aggregate.
+  const serializedAudit = JSON.stringify(audits.map((a) => ({ ...a, createdAt: undefined })));
+  const serializedAggregate = JSON.stringify(aggregate);
+  assert.ok(!/password|refreshToken|idToken|sessionCookie/i.test(serializedAudit), "Audit logs must not leak credentials.");
+  assert.ok(!/password|refreshToken|idToken|sessionCookie/i.test(serializedAggregate), "The aggregate must not leak credentials.");
 
   return {
     browserErrors,
     browserVersion,
-    transferReceipts: receipts.length,
+    commitReceipts: commitReceipts.length,
+    activationReceipts: activationReceipts.length,
     lifecycleStatus: aggregate.lifecycleStatus,
     snapshotHash: createEqualHandoverSnapshot(aggregate).snapshotHash,
   };
@@ -600,7 +702,7 @@ async function verifyFinalState({ shiftId, uids, reservedIncomingShiftId, baseli
 try {
   await main();
 } catch (failure) {
-  console.error("TRANSFER BROWSER VERIFICATION FAILED:", failure);
+  console.error("TWO-STAGE TRANSFER BROWSER VERIFICATION FAILED:", failure);
   if (emulatorLog.length) console.error(`emulator log tail:\n${emulatorLog.join("").slice(-2500)}`);
   if (appLog.length) console.error(`application log tail:\n${appLog.join("").slice(-2500)}`);
   process.exitCode = 1;

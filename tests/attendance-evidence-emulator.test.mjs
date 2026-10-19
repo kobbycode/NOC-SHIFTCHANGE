@@ -134,7 +134,7 @@ async function makeHandoverFixture() {
   });
 
   const batch = db.batch();
-  batch.set(collections.handovers.doc(handoverDocumentId), aggregate);
+  batch.set(collections.equalHandoversV2.doc(handoverDocumentId), aggregate);
   batch.set(
     collections.handoverReservationGuards.doc(guard.id),
     guardDomain.assertHandoverReservationGuard(guard),
@@ -544,7 +544,7 @@ test("14. late acceptance stores the acceptance time and keeps the receipt untou
   assert.equal(onTime.result.evidence.clockIn, atMin(5));
 
   // The handover receipt/aggregate is not rewritten by attendance evidence.
-  const handover = await collections.handovers.doc(f.handoverDocumentId).get();
+  const handover = await collections.equalHandoversV2.doc(f.handoverDocumentId).get();
   assert.equal(handover.data().revision, f.aggregate.revision);
   assert.deepEqual(
     handoverDomain.assertEqualHandoverAggregate(handover.data()).confirmations,
@@ -793,7 +793,7 @@ test("20. reservation guard inconsistencies fail closed", async () => {
   // A missing handover document blocks finalization.
   const fourth = await makeHandoverFixture();
   const fourthBegun = await beginAttendanceEvidenceOperation({ request: makeRequest(fourth) });
-  await collections.handovers.doc(fourth.handoverDocumentId).delete();
+  await collections.equalHandoversV2.doc(fourth.handoverDocumentId).delete();
   await assert.rejects(
     () => finalizeAttendanceEvidenceOperation({
       operationId: fourthBegun.operation.id,

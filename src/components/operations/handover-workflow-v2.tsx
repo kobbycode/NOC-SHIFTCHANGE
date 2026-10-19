@@ -33,7 +33,6 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
   const isIncoming = aggregate.identity.incomingTechnicianIds.includes(uid);
   const content: EqualHandoverReportV2Content = (frozenReport?.content ?? preparation?.content ?? live.content);
   const base = `/api/operations/shifts/${encodeURIComponent(aggregate.identity.outgoingShiftId)}/handover/v2`;
-
   const run = async (path: string, method: "POST" | "DELETE", body: Record<string, unknown>, success: string) => {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError(""); setNotice("");
@@ -107,35 +106,82 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     expectedSnapshotHash: state.snapshotHash,
   }, "Your personal confirmation has been recorded.");
 
-  // The transfer is the only action whose button cannot be trusted to a
-  // client-side flag: enabling it here is a display convenience, while the
+  // The two-stage lifecycle (§1 addendum) replaces M07's atomic transfer. The
+  // outgoing commit closes the reviewed handover into `awaiting_incoming_acceptance`
+  // without creating any shift, membership or attendance; the incoming
+  // acceptance is what activates the reserved shift with the technician's own
+  // password. The button enable state below is only a display convenience — the
   // server re-derives every authority and prerequisite inside its own
-  // transaction (§10).
-  const transfer = async () => {
+  // transaction (§10), so a client-forged flag cannot bypass either step.
+  const reviewedBinding = () => ({
+    expectedRevision: aggregate.revision,
+    expectedSnapshotHash: state.snapshotHash,
+    expectedGuardRevision: guard?.guardRevision ?? 0,
+    expectedFencingEpoch: guard?.fencingEpoch ?? 0,
+  });
+
+  const commitOutgoing = async () => {
     if (lock.current || !guard) return;
     lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`${base}/transfer`, {
+      const response = await fetch(`${base}/commit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedRevision: aggregate.revision,
-          expectedSnapshotHash: state.snapshotHash,
-          expectedGuardRevision: guard.guardRevision,
-          expectedFencingEpoch: guard.fencingEpoch,
-        }),
+        body: JSON.stringify(reviewedBinding()),
       });
       const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover transfer failed.");
+      if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover commit failed.");
       setNotice(result.replayed
-        ? "This handover was already transferred — the incoming shift is active."
-        : "Handover transferred. The incoming shift is now active.");
+        ? "This handover was already committed — an incoming technician must now accept with their own password."
+        : "Committed for incoming acceptance. The incoming shift activates only when a reserved incoming technician accepts with their own password.");
       const refreshed = await fetch(`${base}/report`, { headers: { Accept: "application/json" } });
       const refreshResult = await refreshed.json();
       if (refreshed.ok && refreshResult.success) setState(refreshResult.report);
       router.refresh();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "The v2 handover transfer failed.");
+      setError(failure instanceof Error ? failure.message : "The v2 handover commit failed.");
+    } finally {
+      lock.current = false; setBusy(false);
+    }
+  };
+
+  // §4 — the accept button submits the technician's OWN current password,
+  // verified server-side outside any transaction. The password is never stored
+  // by this component beyond the transient form field and never logged; the
+  // session cookie alone is not enough to accept a personal handover.
+  const acceptIncoming = async (form: HTMLFormElement) => {
+    if (lock.current || !guard) return;
+    const values = new FormData(form);
+    const password = String(values.get("password") ?? "");
+    if (!password) { setError("Your password is required to accept this handover."); return; }
+    lock.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${base}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...reviewedBinding(), password }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover acceptance failed.");
+      // §12 — the notice NEVER claims an activated shift until the server has
+      // confirmed the committed operation; the status below is the authoritative
+      // outcome returned by the accept route.
+      if (result.status === "ACTIVATED") {
+        setNotice(`Handover accepted. The incoming shift ${result.incomingShiftId} is now active from ${accra(result.receipt?.activatedAt ?? null)}.`);
+      } else if (result.status === "JOINED") {
+        setNotice(`Joined the active incoming shift ${result.incomingShiftId}. Your attendance is recorded independently at the acceptance clock.`);
+      } else if (result.status === "ALREADY_JOINED") {
+        setNotice("Your earlier acceptance is already recorded — no duplicate shift or attendance was created.");
+      } else {
+        setNotice("Handover acceptance succeeded.");
+      }
+      form.reset();
+      const refreshed = await fetch(`${base}/report`, { headers: { Accept: "application/json" } });
+      const refreshResult = await refreshed.json();
+      if (refreshed.ok && refreshResult.success) setState(refreshResult.report);
+      router.refresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "The v2 handover acceptance failed.");
     } finally {
       lock.current = false; setBusy(false);
     }
@@ -165,15 +211,20 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
   const canConfirm = myPosition !== null && !myConfirmation && !myAbsence &&
     aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null;
 
-  const isTransferred = aggregate.lifecycleStatus === "completed";
+  const isAwaitingAcceptance = aggregate.lifecycleStatus === "awaiting_incoming_acceptance";
+  const isCompleted = aggregate.lifecycleStatus === "completed";
   const isConfirmedOutgoing = isOutgoing && myConfirmation !== undefined;
   const blockers = content.completeness.blockers;
   // Display prerequisite only — never a substitute for the server's own
   // authorization: a personally confirmed outgoing technician, a bound and
   // current frozen report, satisfied readiness and no visible blockers.
-  const canTransfer = isConfirmedOutgoing && !isTransferred && guard !== null &&
+  const canCommit = isConfirmedOutgoing && guard !== null &&
     aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null &&
     readiness.ready && blockers.length === 0 && !preparationDrifted;
+  // An incoming technician may accept once the outgoing commit has opened the
+  // acceptance window; a later acceptance after completion is a JOIN on the same
+  // active shift. The server decides which branch fires and re-derives authority.
+  const canAccept = isIncoming && guard !== null && (isAwaitingAcceptance || isCompleted);
 
   return <div className="space-y-6">
     <header className="space-y-1">
@@ -182,10 +233,16 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <p className="text-sm">Scheduled {accra(aggregate.reservation.scheduledStart)} – {accra(aggregate.reservation.scheduledEnd)} (Africa/Accra)</p>
     </header>
 
-    {isTransferred && <section aria-label="Handover transferred" className="rounded-xl border border-green-600 p-4 text-sm space-y-1">
-      <h2 className="font-semibold text-green-800">Handover transferred</h2>
-      <p>This equal-technician handover is complete. The outgoing shift {aggregate.identity.outgoingShiftId} is closed and the incoming shift {aggregate.identity.incomingShiftId} is active.</p>
-      <p>Frozen report {frozenReport ? `v${frozenReport.version} (${short(frozenReport.id)})` : "unavailable"} · guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}. This record is immutable; a later transfer attempt replays this result.</p>
+    {isCompleted && <section aria-label="Handover activated" className="rounded-xl border border-green-600 p-4 text-sm space-y-1">
+      <h2 className="font-semibold text-green-800">Handover activated</h2>
+      <p>This equal-technician handover is complete. The outgoing shift {aggregate.identity.outgoingShiftId} is closed and the incoming shift {aggregate.identity.incomingShiftId} was activated by the first reserved incoming technician&rsquo;s password acceptance. Every subsequent incoming acceptance joins the same active shift with its own independent attendance clock.</p>
+      <p>Frozen report {frozenReport ? `v${frozenReport.version} (${short(frozenReport.id)})` : "unavailable"} · guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}. This record is immutable; further acceptance attempts replay this result.</p>
+    </section>}
+
+    {isAwaitingAcceptance && <section aria-label="Awaiting incoming acceptance" className="rounded-xl border border-amber-500 p-4 text-sm space-y-1">
+      <h2 className="font-semibold text-amber-800">Awaiting incoming acceptance</h2>
+      <p>The outgoing pair has committed this handover. The reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} has NOT been created yet — an incoming technician must now accept with their OWN current password, and that first authorized acceptance is what activates the shift exactly once.</p>
+      <p>The outgoing shift remains handover_pending and continues to own the operational slot until acceptance; no shift, membership or attendance is fabricated while acceptance is pending.</p>
     </section>}
 
     <section aria-label="Handover readiness" className={`rounded-xl border p-4 text-sm ${readiness.ready ? "border-green-600" : "border-neutral-500"}`}>
@@ -195,7 +252,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <p className="mt-2 italic">Readiness is derived from authoritative evidence and is not a completed handover or a transfer authorization.</p>
     </section>
 
-    {myPosition && !isTransferred && <section className="rounded-xl border p-5 space-y-2 text-sm">
+    {myPosition && !isCompleted && !isAwaitingAcceptance && <section className="rounded-xl border p-5 space-y-2 text-sm">
       <h2 className="text-lg font-semibold">Your confirmation</h2>
       <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
       {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against report {short(myConfirmation.reportBinding.id)} (digest {short(myConfirmation.reportBinding.digest)}).</p>}
@@ -230,7 +287,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     {notice && <p className="text-sm text-green-700">{notice}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-    {isOutgoing && !isTransferred && <section className="space-y-3 rounded-xl border p-5">
+    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section className="space-y-3 rounded-xl border p-5">
       <h2 className="text-lg font-semibold">Outgoing technician actions</h2>
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void prepare(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Optional preparation note<input className={field} name="reason" maxLength={2000} placeholder="Why this revision is being prepared"/></label>
@@ -256,8 +313,8 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above.</p>
     </section>}
 
-    {isOutgoing && !isTransferred && <section aria-label="Final transfer" className="space-y-3 rounded-xl border p-5">
-      <h2 className="text-lg font-semibold">Final transfer</h2>
+    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section aria-label="Commit for incoming acceptance" className="space-y-3 rounded-xl border p-5">
+      <h2 className="text-lg font-semibold">Commit for incoming acceptance</h2>
       <ul className="space-y-1 text-sm">
         <li>{aggregate.reportBinding !== null ? "• Consolidated report frozen" : "• Consolidated report not frozen yet"}</li>
         <li>{myConfirmation ? "• You have personally confirmed this handover" : "• You must personally confirm this handover first"}</li>
@@ -265,17 +322,34 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
         <li>{blockers.length === 0 ? "• No report completeness blockers" : `• ${blockers.length} blocker(s) must be resolved`}</li>
         <li>{preparationDrifted ? "• Sources changed since review — re-prepare and freeze" : "• Review is current"}</li>
       </ul>
-      {!isConfirmedOutgoing && <p className="text-sm">Only an outgoing technician who has personally confirmed (not declared absent) can complete this handover.</p>}
+      {!isConfirmedOutgoing && <p className="text-sm">Only an outgoing technician who has personally confirmed (not declared absent) can commit this handover for incoming acceptance.</p>}
       <button
-        disabled={!canTransfer || busy}
-        onClick={() => void transfer()}
+        disabled={!canCommit || busy}
+        onClick={() => void commitOutgoing()}
         className="w-fit rounded-lg bg-green-700 p-2 text-white"
-      >{busy ? "Working…" : "Complete handover and transfer shift"}</button>
-      {!canTransfer && !busy && <p className="text-sm text-neutral-600">The transfer action is available only when every prerequisite above is satisfied.</p>}
-      <p className="text-sm text-neutral-600">This display gate is not an authorization: the server re-derives your authority, the reviewed evidence, readiness and completeness inside its own transaction and can still reject the request even when this button is enabled.</p>
+      >{busy ? "Working…" : "Commit handover — await incoming acceptance"}</button>
+      {!canCommit && !busy && <p className="text-sm text-neutral-600">Committing is available only when every prerequisite above is satisfied.</p>}
+      <p className="text-sm text-neutral-600">This display gate is not an authorization: the server re-derives your authority, the reviewed evidence, readiness and completeness inside its own transaction and can still reject the request even when this button is enabled. Committing does NOT create the incoming shift — that only happens on a reserved incoming technician&rsquo;s own password acceptance.</p>
       {!isConfirmedOutgoing && !myConfirmation && !myAbsence && myPosition && <p className="text-sm">You have not confirmed yet — use the confirmation section above.</p>}
     </section>}
-    {!isOutgoing && isIncoming && !isTransferred && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only, but you can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen. Completing the final transfer is reserved for an outgoing technician.</div>}
+
+    {isIncoming && (isAwaitingAcceptance || isCompleted) && <section aria-label="Accept handover" className="space-y-3 rounded-xl border border-green-600 p-5">
+      <h2 className="text-lg font-semibold">Accept handover with your password</h2>
+      <p className="text-sm">
+        {isAwaitingAcceptance
+          ? <>You are a reserved incoming technician. Accepting with <strong>your own current password</strong> will activate the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and record <em>your</em> attendance at the authoritative acceptance clock. Your partner will join the same active shift when they accept later.</>
+          : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with your own independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
+      </p>
+      <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for you (§10).</p>
+      {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
+        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+        <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
+      </form>}
+      {!canAccept && <p className="text-sm text-neutral-600">Acceptance is available only to a reserved incoming technician on an active reservation.</p>}
+    </section>}
+
+    {!isOutgoing && !isIncoming && <div className="rounded-xl border p-4 text-sm">You are not a participant in this reserved pair. This report is read-only for you.</div>}
+    {isIncoming && aggregate.lifecycleStatus === "collecting_confirmations" && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only until the outgoing pair commits the handover. You can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen; accepting and activating the incoming shift becomes available only after the commit.</div>}
 
 
     <section className="space-y-4">

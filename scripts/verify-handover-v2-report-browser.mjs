@@ -406,8 +406,10 @@ async function main() {
     await signIn(page, seeded.accounts.incomingA);
     await page.goto(`${origin}/technician/handovers/v2/${seeded.shiftId}`, { waitUntil: "networkidle", timeout: 180_000 });
     const incomingText = await pageText(page);
-    assert.ok(incomingText.includes("Your report view is read-only, but you can confirm this handover for yourself"),
-      "An incoming technician sees a read-only review with self-confirmation, not outgoing review authority.");
+    assert.ok(incomingText.includes("Your report view is read-only until the outgoing pair commits the handover"),
+      "An incoming technician sees a read-only review, not outgoing review authority.");
+    assert.ok(incomingText.includes("You can confirm this handover for yourself"),
+      "An incoming technician retains personal self-confirmation.");
     assert.ok(!incomingText.includes("Outgoing technician actions"));
     const incomingDenial = await prohibitedPost(page, seeded.shiftId, "/report", { reason: "prohibited incoming preparation" });
     assert.equal(incomingDenial.status, 403, `Incoming preparation must be denied: ${JSON.stringify(incomingDenial.body)}`);

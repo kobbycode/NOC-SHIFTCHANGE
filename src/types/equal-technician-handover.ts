@@ -29,6 +29,7 @@ export type EqualHandoverParticipantState =
 
 export const EQUAL_HANDOVER_LIFECYCLE_STATUSES = {
   COLLECTING_CONFIRMATIONS: "collecting_confirmations",
+  AWAITING_INCOMING_ACCEPTANCE: "awaiting_incoming_acceptance",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
   SUPERSEDED: "superseded",

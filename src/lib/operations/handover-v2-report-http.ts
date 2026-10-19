@@ -131,6 +131,41 @@ export function parseConfirmBody(body: unknown) {
   return parseBinding(data);
 }
 
+// The final transfer, outgoing commit and incoming acceptance all bind to the
+// same four concurrency values the reviewed evidence carried. They carry no
+// actor, role, technician UID, evidence kind or timestamp — those are derived
+// strictly from the verified session inside the service (§4).
+const transferBindingFields = [
+  ...bindingFields, "expectedGuardRevision", "expectedFencingEpoch",
+] as const;
+
+function parseTransferBinding(data: Record<string, unknown>) {
+  return {
+    ...parseBinding(data),
+    expectedGuardRevision: requireRevision(data.expectedGuardRevision, "expected guard revision"),
+    expectedFencingEpoch: requireRevision(data.expectedFencingEpoch, "expected fencing epoch"),
+  };
+}
+
+// Outgoing commit: a personally confirmed outgoing technician closes the
+// handover into `awaiting_incoming_acceptance`. Parity with the M07 outgoing
+// action means no password is required here — only the reviewed binding.
+export function parseCommitBody(body: unknown) {
+  return parseTransferBinding(exactBody(body, transferBindingFields));
+}
+
+// Incoming acceptance: the technician personally reauthenticates with their own
+// current password (verified server-side before the transaction, never stored
+// or logged) plus the reviewed binding. The body must never name a technician,
+// a role, an evidence kind or a timestamp.
+export function parseAcceptBody(body: unknown) {
+  const data = exactBody(body, [...transferBindingFields, "password"]);
+  if (typeof data.password !== "string" || data.password.length === 0) {
+    routeFail("Your password is required to accept this handover.", 400);
+  }
+  return { password: data.password, ...parseTransferBinding(data) };
+}
+
 export function parseFreezeBody(body: unknown) {
   const data = exactBody(body, [
     ...bindingFields, "expectedGuardRevision", "expectedFencingEpoch", "preparationRevision",

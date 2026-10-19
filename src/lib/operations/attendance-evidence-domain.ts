@@ -198,6 +198,20 @@ export function isAttendanceClockInEvidenceKind(kind: AttendanceEvidenceKind): b
   return ATTENDANCE_CLOCK_IN_EVIDENCE_KINDS.includes(kind);
 }
 
+// The single authentication method a trusted coordinator must present to
+// finalize a given evidence kind. Exposed so acceptance coordinators derive the
+// method from the evidence kind instead of hardcoding a pairing that this table
+// alone is allowed to define.
+export function attendanceAuthenticationMethodForKind(
+  kind: AttendanceEvidenceKind,
+): AttendanceAuthenticationMethod {
+  const methods = allowedKindMethods[kind];
+  if (!methods || methods.length !== 1) {
+    fail("Evidence kind has no single authoritative authentication method.", 400);
+  }
+  return methods[0];
+}
+
 export function isPersonallyAuthenticatedMethod(
   method: AttendanceAuthenticationMethod,
 ): boolean {
