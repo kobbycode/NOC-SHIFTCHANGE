@@ -1,10 +1,11 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { FieldValue, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, type DocumentData, type Transaction } from "firebase-admin/firestore";
 import type { Attendance } from "@/types/attendance";
 import type { Task, TaskAssignment } from "@/types/task";
 import type { Shift } from "@/types/shift";
+import type { TechnicianScheduleEntry } from "@/types/technician-schedule";
 import type { EqualHandoverAggregate, EqualHandoverAbsence } from "@/types/equal-technician-handover";
 import type { HandoverReservationGuard } from "@/types/handover-reservation-guard";
 import type {
@@ -18,7 +19,7 @@ import type {
   FrozenEqualHandoverReportV2,
 } from "@/types/handover-report-v2";
 import { AssignmentOperationError } from "./assignment-transaction";
-import { getOperationalCollections } from "./collections";
+import { getOperationalCollections, GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID } from "./collections";
 import { readAttendanceRecord } from "./attendance-read-domain";
 import {
   assertAttendanceEvidence,
@@ -31,6 +32,7 @@ import {
   createEqualHandoverDocumentId,
   createEqualHandoverSnapshot,
   clearEqualHandoverAbsence,
+  completeEqualHandoverTransfer,
   confirmEqualHandoverParticipant,
   getEqualHandoverPositions,
   recordEqualHandoverAbsence,
@@ -57,8 +59,17 @@ import {
   type EqualHandoverReadiness,
 } from "./equal-handover-readiness-domain";
 import { assertHandoverReservationGuard } from "./handover-reservation-guard-domain";
-import { readReservationGuardState } from "./handover-reservation-guard";
+import { completeReservationGuard, readReservationGuardState } from "./handover-reservation-guard";
 import { estimateTransferDocumentBytes } from "./handover-transfer-domain";
+import {
+  assertOperationalShiftControl,
+  assertShiftOwnsOperationalSlot,
+  transferOperationalShiftControl,
+} from "./operational-shift-control-state";
+import { assertShiftActivationWindow } from "./shift-activation-window";
+import { finalizeCurrentShiftMemberships } from "./shift-completion-domain";
+import { readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
+import { assertNoScheduleConflict, parseShiftTimeRange } from "./shift-overlap";
 import { createHandoverWorkSnapshot, resolveHandoverWorkReadiness } from "./handover-work-snapshot";
 import { assembleShiftOperations } from "./shift-operations-domain";
 import { readOperationStations, readShiftOperationEvents } from "./shift-operations";
@@ -539,13 +550,108 @@ export interface EqualHandoverReportState {
   readiness: EqualHandoverReadiness;
 }
 
+/**
+ * The single authoritative recomputation of review, report-drift and readiness
+ * evidence inside a transaction. Both the readiness read and the final
+ * transfer re-derive exactly this from live sources — no parallel rules (§8).
+ */
+interface ReservationEvidence {
+  snapshotHash: string;
+  preparationId: string;
+  preparation: EqualHandoverReportPreparationV2 | null;
+  frozenReport: FrozenEqualHandoverReportV2 | null;
+  newestReportVersion: number;
+  live: LiveReportEvidence;
+  preparationDrifted: boolean;
+  boundReportEvidenceDrifted: boolean;
+  readiness: EqualHandoverReadiness;
+}
+
+async function readReservationEvidence(
+  transaction: Transaction,
+  aggregate: EqualHandoverAggregate,
+): Promise<ReservationEvidence> {
+  const { handoverReportPreparationsV2, handoverReportsV2 } = getOperationalCollections();
+  const snapshotHash = createEqualHandoverSnapshot(aggregate).snapshotHash;
+  const preparationId = createEqualHandoverPreparationDocumentId(aggregate.reservation.handoverId);
+  const preparationSnapshot = await transaction.get(handoverReportPreparationsV2.doc(preparationId));
+  const preparation = preparationSnapshot.exists
+    ? assertEqualHandoverReportPreparationV2(hydrateTimestamps(preparationSnapshot.data()))
+    : null;
+
+  let frozenReport: FrozenEqualHandoverReportV2 | null = null;
+  let newestReportVersion = 0;
+  if (aggregate.reportBinding !== null) {
+    const reportSnapshot = await transaction.get(handoverReportsV2.doc(aggregate.reportBinding.id));
+    if (!reportSnapshot.exists) fail("Frozen report evidence is missing; administrator review required.", 409);
+    frozenReport = assertFrozenEqualHandoverReportV2(hydrateTimestamps(reportSnapshot.data()));
+    if (canonical(frozenReport.binding) !== canonical(aggregate.reportBinding)) {
+      fail("Frozen report binding does not match the reservation; administrator review required.", 409);
+    }
+    // The whole reservation chain is read so readiness can prove the bound
+    // report is still the newest version rather than a superseded one.
+    const chain = await transaction.get(
+      handoverReportsV2.where("reservationId", "==", aggregate.reservation.handoverId),
+    );
+    for (const document of chain.docs) {
+      const version = assertFrozenEqualHandoverReportV2(hydrateTimestamps(document.data())).version;
+      if (version > newestReportVersion) newestReportVersion = version;
+    }
+  }
+
+  const live = await buildLiveReportEvidence(transaction, aggregate);
+  // A successful freeze consumes the reviewed preparation: the bound report
+  // carries exactly this preparation's revision and digest, and the aggregate
+  // snapshot legitimately moves on when the binding is recorded. Drift only
+  // means the review behind the frozen report has since been superseded.
+  const reviewConsumedByFreeze = frozenReport !== null && preparation !== null &&
+    frozenReport.preparationId === preparation.id &&
+    frozenReport.preparationRevision === preparation.preparationRevision &&
+    frozenReport.digest === preparation.contentDigest;
+  const preparationDrifted = preparation === null ? false :
+    digestAtRecordedRevisions(preparation.content) !== digestAtRecordedRevisions(live.content) ||
+    preparation.evidenceSnapshotHash !== live.evidenceSnapshotHash ||
+    (!reviewConsumedByFreeze && preparation.aggregateSnapshotHash !== snapshotHash);
+  // The bound frozen report is immutable, but its underlying authoritative
+  // sources can still move. Recomputing them at recorded-revision parity
+  // flags genuine evidence drift without the benign declaration re-stamp.
+  const boundReportEvidenceDrifted = frozenReport !== null && (
+    digestAtRecordedRevisions(frozenReport.content) !== digestAtRecordedRevisions(live.content) ||
+    frozenReport.evidenceSnapshotHash !== live.evidenceSnapshotHash
+  );
+
+  const readiness = evaluateEqualHandoverReadiness({
+    lifecycleStatus: aggregate.lifecycleStatus,
+    reportBinding: aggregate.reportBinding,
+    participants: resolveEqualHandoverParticipants(aggregate),
+    absences: aggregate.absences,
+    boundReportId: frozenReport?.id ?? null,
+    boundReportVersion: frozenReport?.version ?? null,
+    newestReportVersion,
+    boundReportEvidenceDrifted,
+    preparationDrifted,
+  });
+
+  return {
+    snapshotHash,
+    preparationId,
+    preparation,
+    frozenReport,
+    newestReportVersion,
+    live,
+    preparationDrifted,
+    boundReportEvidenceDrifted,
+    readiness,
+  };
+}
+
 export async function readEqualHandoverReportState(
   outgoingShiftId: string,
   actorUid: string,
 ): Promise<EqualHandoverReportState> {
   identifier(outgoingShiftId);
   identifier(actorUid, 128);
-  const { db, equalHandoversV2, handoverReportPreparationsV2, handoverReportsV2 } = getOperationalCollections();
+  const { db, equalHandoversV2 } = getOperationalCollections();
   const documentId = createEqualHandoverDocumentId(outgoingShiftId);
   return db.runTransaction(async (transaction) => {
     const [profileSnapshot, aggregateSnapshot, guardState] = await Promise.all([
@@ -560,7 +666,6 @@ export async function readEqualHandoverReportState(
     }
     if (!aggregateSnapshot.exists) fail("The equal handover reservation was not found.", 404);
     const aggregate = readV2Aggregate(aggregateSnapshot.data(), outgoingShiftId);
-    const snapshotHash = createEqualHandoverSnapshot(aggregate).snapshotHash;
 
     let guard: HandoverReservationGuard | null = null;
     if (profile.role === "technician") {
@@ -573,74 +678,63 @@ export async function readEqualHandoverReportState(
       guard = assertHandoverReservationGuard(guardState.guardSnapshot.data());
     }
 
-    const preparationId = createEqualHandoverPreparationDocumentId(aggregate.reservation.handoverId);
-    const preparationSnapshot = await transaction.get(handoverReportPreparationsV2.doc(preparationId));
-    const preparation = preparationSnapshot.exists
-      ? assertEqualHandoverReportPreparationV2(hydrateTimestamps(preparationSnapshot.data()))
-      : null;
-
-    let frozenReport: FrozenEqualHandoverReportV2 | null = null;
-    let newestReportVersion = 0;
-    if (aggregate.reportBinding !== null) {
+    // A transferred handover is terminal: its outgoing Shift is completed and
+    // the live report sources are no longer reachable, so the immutable bound
+    // frozen report is the authoritative content. Readiness reports the closed
+    // lifecycle; no live re-derivation or drift signal applies.
+    if (aggregate.lifecycleStatus === "completed") {
+      const { handoverReportsV2 } = getOperationalCollections();
+      if (aggregate.reportBinding === null) fail("A completed v2 handover has no bound report; administrator review required.", 409);
       const reportSnapshot = await transaction.get(handoverReportsV2.doc(aggregate.reportBinding.id));
       if (!reportSnapshot.exists) fail("Frozen report evidence is missing; administrator review required.", 409);
-      frozenReport = assertFrozenEqualHandoverReportV2(hydrateTimestamps(reportSnapshot.data()));
+      const frozenReport = assertFrozenEqualHandoverReportV2(hydrateTimestamps(reportSnapshot.data()));
       if (canonical(frozenReport.binding) !== canonical(aggregate.reportBinding)) {
         fail("Frozen report binding does not match the reservation; administrator review required.", 409);
       }
-      // The whole reservation chain is read so readiness can prove the bound
-      // report is still the newest version rather than a superseded one.
-      const chain = await transaction.get(
-        handoverReportsV2.where("reservationId", "==", aggregate.reservation.handoverId),
-      );
+      const chain = await transaction.get(handoverReportsV2.where("reservationId", "==", aggregate.reservation.handoverId));
+      let newestReportVersion = frozenReport.version;
       for (const document of chain.docs) {
         const version = assertFrozenEqualHandoverReportV2(hydrateTimestamps(document.data())).version;
         if (version > newestReportVersion) newestReportVersion = version;
       }
+      const readiness = evaluateEqualHandoverReadiness({
+        lifecycleStatus: aggregate.lifecycleStatus,
+        reportBinding: aggregate.reportBinding,
+        participants: resolveEqualHandoverParticipants(aggregate),
+        absences: aggregate.absences,
+        boundReportId: frozenReport.id,
+        boundReportVersion: frozenReport.version,
+        newestReportVersion,
+        boundReportEvidenceDrifted: false,
+        preparationDrifted: false,
+      });
+      return {
+        aggregate,
+        snapshotHash: createEqualHandoverSnapshot(aggregate).snapshotHash,
+        guard,
+        preparation: null,
+        frozenReport,
+        live: {
+          content: frozenReport.content,
+          contentDigest: frozenReport.digest,
+          evidenceSnapshotHash: frozenReport.evidenceSnapshotHash,
+          workSnapshotVersion: frozenReport.workSnapshotVersion,
+        },
+        preparationDrifted: false,
+        readiness,
+      };
     }
 
-    const live = await buildLiveReportEvidence(transaction, aggregate);
-    // A successful freeze consumes the reviewed preparation: the bound report
-    // carries exactly this preparation's revision and digest, and the aggregate
-    // snapshot legitimately moves on when the binding is recorded. Drift only
-    // means the review behind the frozen report has since been superseded.
-    const reviewConsumedByFreeze = frozenReport !== null && preparation !== null &&
-      frozenReport.preparationId === preparation.id &&
-      frozenReport.preparationRevision === preparation.preparationRevision &&
-      frozenReport.digest === preparation.contentDigest;
-    const preparationDrifted = preparation === null ? false :
-      digestAtRecordedRevisions(preparation.content) !== digestAtRecordedRevisions(live.content) ||
-      preparation.evidenceSnapshotHash !== live.evidenceSnapshotHash ||
-      (!reviewConsumedByFreeze && preparation.aggregateSnapshotHash !== snapshotHash);
-    // The bound frozen report is immutable, but its underlying authoritative
-    // sources can still move. Recomputing them at recorded-revision parity
-    // flags genuine evidence drift without the benign declaration re-stamp.
-    const boundReportEvidenceDrifted = frozenReport !== null && (
-      digestAtRecordedRevisions(frozenReport.content) !== digestAtRecordedRevisions(live.content) ||
-      frozenReport.evidenceSnapshotHash !== live.evidenceSnapshotHash
-    );
-
-    const readiness = evaluateEqualHandoverReadiness({
-      lifecycleStatus: aggregate.lifecycleStatus,
-      reportBinding: aggregate.reportBinding,
-      participants: resolveEqualHandoverParticipants(aggregate),
-      absences: aggregate.absences,
-      boundReportId: frozenReport?.id ?? null,
-      boundReportVersion: frozenReport?.version ?? null,
-      newestReportVersion,
-      boundReportEvidenceDrifted,
-      preparationDrifted,
-    });
-
+    const evidence = await readReservationEvidence(transaction, aggregate);
     return {
       aggregate,
-      snapshotHash,
+      snapshotHash: evidence.snapshotHash,
       guard,
-      preparation,
-      frozenReport,
-      live,
-      preparationDrifted,
-      readiness,
+      preparation: evidence.preparation,
+      frozenReport: evidence.frozenReport,
+      live: evidence.live,
+      preparationDrifted: evidence.preparationDrifted,
+      readiness: evidence.readiness,
     };
   });
 }
@@ -1321,5 +1415,441 @@ export async function freezeEqualHandoverReport(
     });
     transaction.update(actorRef, { lastOperationalActivityAt: FieldValue.serverTimestamp() });
     return { report, aggregate: nextAggregate, snapshotHash: createEqualHandoverSnapshot(nextAggregate).snapshotHash, replayed: false };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Final transfer (§4-§6) — the single authoritative, atomic transfer of a
+// completed v2 equal-technician handover. Authorization is derived entirely
+// inside this transaction; a prior GET /readiness result and its
+// hard-coded `transferAuthorized:false` are never treated as proof of
+// authority (§4). The initiator must be an outgoing reserved technician who
+// is themselves a personal-confirmed, non-absent participant. Every reviewed
+// evidence relationship, the live operational sources and the authoritative
+// domain readiness gate are re-derived here; the immutable frozen report is
+// never mutated (§8). The transfer writes no attendance and carries no tasks:
+// a station/outside-broadcast/pending-task blocker is enforced through the
+// same freeze gating the report used, so nothing unfinished is silently lost.
+// A deterministic receipt, created as the last write, fences every concurrent
+// attempt: the loser's retry observes the completed lifecycle and replays the
+// committed result instead of double-transferring (§5).
+// ---------------------------------------------------------------------------
+
+export interface EqualHandoverTransferInput {
+  outgoingShiftId: string;
+  actorUid: string;
+  expectedRevision: number;
+  expectedSnapshotHash: string;
+  expectedGuardRevision: number;
+  expectedFencingEpoch: number;
+}
+
+export interface EqualHandoverTransferReceipt {
+  id: string;
+  schema: "equal-handover-transfer-v2";
+  action: "EQUAL_SHIFT_HANDOVER_TRANSFERRED_V2";
+  outcome: "TRANSFERRED";
+  protocol: "equal-handover-v2";
+  handoverDocumentId: string;
+  outgoingShiftId: string;
+  incomingShiftId: string;
+  finalRevision: number;
+  finalSnapshotHash: string;
+  boundReportId: string;
+  boundReportVersion: number;
+  actorUid: string;
+  actorRole: "technician";
+  transferredAt: string;
+  receiptHash: string;
+  operationalControlBefore: unknown;
+  operationalControlAfter: unknown;
+}
+
+export interface EqualHandoverTransferResult {
+  status: "TRANSFERRED" | "ALREADY_TRANSFERRED";
+  replayed: boolean;
+  receipt: EqualHandoverTransferReceipt;
+  aggregate: EqualHandoverAggregate;
+  snapshotHash: string;
+  outgoingShiftId: string;
+  incomingShiftId: string;
+}
+
+function equalHandoverTransferReceiptId(documentId: string): string {
+  return `handover-transfer-v2-${createHash("sha256")
+    .update(canonical({ namespace: "equal-handover-transfer-v2", handoverDocumentId: documentId }))
+    .digest("hex")}`;
+}
+
+function transferReceiptMaterial(receipt: Omit<EqualHandoverTransferReceipt, "receiptHash">): string {
+  return canonical({
+    namespace: "equal-handover-transfer-receipt-v2",
+    id: receipt.id,
+    handoverDocumentId: receipt.handoverDocumentId,
+    outgoingShiftId: receipt.outgoingShiftId,
+    incomingShiftId: receipt.incomingShiftId,
+    finalRevision: receipt.finalRevision,
+    finalSnapshotHash: receipt.finalSnapshotHash,
+    boundReportId: receipt.boundReportId,
+    boundReportVersion: receipt.boundReportVersion,
+    actorUid: receipt.actorUid,
+    actorRole: receipt.actorRole,
+    transferredAt: receipt.transferredAt,
+  });
+}
+
+// Replay re-derives every deterministic field from the stored receipt and the
+// now-completed aggregate; anything inconsistent is an administrator-review
+// condition, never a silent success.
+function assertEqualHandoverTransferReceipt(
+  value: unknown,
+  aggregate: EqualHandoverAggregate,
+  documentId: string,
+  receiptId: string,
+): EqualHandoverTransferReceipt {
+  const receipt = hydrateTimestamps(value) as EqualHandoverTransferReceipt | undefined;
+  const inconsistent = "Existing v2 transfer receipt is inconsistent; administrator review required.";
+  if (!receipt || receipt.id !== receiptId || receipt.schema !== "equal-handover-transfer-v2" ||
+      receipt.action !== "EQUAL_SHIFT_HANDOVER_TRANSFERRED_V2" || receipt.outcome !== "TRANSFERRED" ||
+      receipt.protocol !== "equal-handover-v2" || receipt.handoverDocumentId !== documentId ||
+      receipt.outgoingShiftId !== aggregate.identity.outgoingShiftId ||
+      receipt.incomingShiftId !== aggregate.identity.incomingShiftId ||
+      receipt.finalRevision !== aggregate.revision ||
+      receipt.finalSnapshotHash !== createEqualHandoverSnapshot(aggregate).snapshotHash ||
+      receipt.actorRole !== "technician" ||
+      typeof receipt.transferredAt !== "string" || !Number.isFinite(Date.parse(receipt.transferredAt))) {
+    fail(inconsistent, 409);
+  }
+  if (aggregate.reportBinding === null || receipt.boundReportId !== aggregate.reportBinding.id) {
+    fail(inconsistent, 409);
+  }
+  const { receiptHash, ...material } = receipt;
+  if (receiptHash !== createHash("sha256").update(transferReceiptMaterial(material)).digest("hex")) {
+    fail(inconsistent, 409);
+  }
+  return receipt;
+}
+
+async function validateEqualHandoverPair(
+  transaction: Transaction,
+  pairId: string,
+  expected: readonly string[],
+): Promise<void> {
+  const { technicianPairs, technicianPairMemberships } = getOperationalCollections();
+  let ids: readonly string[];
+  try {
+    identifier(pairId);
+    ids = readActivePermanentPairTechnicianIds((await transaction.get(technicianPairs.doc(pairId))).data(), pairId);
+  } catch { fail("The permanent pair binding is invalid."); }
+  if (ids.length !== expected.length || ids.some((uid, index) => uid !== expected[index])) {
+    fail("The permanent pair binding changed.");
+  }
+  for (const uid of ids) {
+    const member = (await transaction.get(technicianPairMemberships.doc(uid))).data() as DocumentData | undefined;
+    if (!member || member.technicianUid !== uid || member.pairId !== pairId) fail("Invalid permanent pair membership.");
+  }
+}
+
+function readEqualHandoverParticipantSchedule(
+  data: DocumentData | undefined,
+  uid: string,
+  target: { shiftId: string; status: string; scheduledStart: string; scheduledEnd: string },
+): TechnicianScheduleEntry[] {
+  if (!data || data.technicianUid !== uid || !Array.isArray(data.entries)) fail("Missing or invalid technician schedule.");
+  const entries = data.entries as TechnicianScheduleEntry[];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("Invalid schedule entry.");
+    identifier(entry.shiftId);
+    if (seen.has(entry.shiftId) || !["scheduled", "active", "handover_pending"].includes(entry.status) ||
+        typeof entry.scheduledStart !== "string" || typeof entry.scheduledEnd !== "string") fail("Invalid schedule entry.");
+    parseShiftTimeRange(entry.scheduledStart, entry.scheduledEnd);
+    seen.add(entry.shiftId);
+  }
+  const matches = entries.filter((entry) => entry.shiftId === target.shiftId);
+  if (matches.length !== 1 || matches[0].status !== target.status ||
+      matches[0].scheduledStart !== target.scheduledStart || matches[0].scheduledEnd !== target.scheduledEnd) {
+    fail("The handover schedule binding changed.");
+  }
+  assertNoScheduleConflict(target.scheduledStart, target.scheduledEnd, entries.filter((entry) => entry.shiftId !== target.shiftId));
+  return entries;
+}
+
+export function parseEqualHandoverTransferRequest(value: unknown): Omit<EqualHandoverTransferInput, "outgoingShiftId" | "actorUid"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("Invalid transfer request.", 400);
+  const data = value as Record<string, unknown>;
+  const fields = ["expectedRevision", "expectedSnapshotHash", "expectedGuardRevision", "expectedFencingEpoch"];
+  if (Object.keys(data).some((key) => !fields.includes(key)) || fields.some((key) => !Object.hasOwn(data, key))) {
+    fail("Provide only the reviewed revision, snapshot hash and guard evidence.", 400);
+  }
+  if (!Number.isSafeInteger(data.expectedRevision) || (data.expectedRevision as number) < 1 ||
+      typeof data.expectedSnapshotHash !== "string" || !/^[0-9a-f]{64}$/.test(data.expectedSnapshotHash) ||
+      !Number.isSafeInteger(data.expectedGuardRevision) || (data.expectedGuardRevision as number) < 1 ||
+      !Number.isSafeInteger(data.expectedFencingEpoch) || (data.expectedFencingEpoch as number) < 1) {
+    fail("Invalid transfer revision, snapshot hash or guard evidence.", 400);
+  }
+  return {
+    expectedRevision: data.expectedRevision as number,
+    expectedSnapshotHash: data.expectedSnapshotHash,
+    expectedGuardRevision: data.expectedGuardRevision as number,
+    expectedFencingEpoch: data.expectedFencingEpoch as number,
+  };
+}
+
+export async function transferEqualHandoverV2(
+  input: EqualHandoverTransferInput,
+): Promise<EqualHandoverTransferResult> {
+  identifier(input.outgoingShiftId);
+  identifier(input.actorUid, 128);
+  // The strict reviewed-evidence parser guards the HTTP body at the route; the
+  // service validates only its own typed contract fields here, never the actor
+  // or shift identity the caller already controls server-side.
+  const binding = parseEqualHandoverTransferRequest({
+    expectedRevision: input.expectedRevision,
+    expectedSnapshotHash: input.expectedSnapshotHash,
+    expectedGuardRevision: input.expectedGuardRevision,
+    expectedFencingEpoch: input.expectedFencingEpoch,
+  });
+  const { db, shifts, shiftMembers, technicianSchedules, equalHandoversV2, operationalShiftControl } = getOperationalCollections();
+  const documentId = createEqualHandoverDocumentId(input.outgoingShiftId);
+  const aggregateRef = equalHandoversV2.doc(documentId);
+  const receiptId = equalHandoverTransferReceiptId(documentId);
+  const receiptRef = db.collection("audit_logs").doc(receiptId);
+
+  return db.runTransaction(async (transaction): Promise<EqualHandoverTransferResult> => {
+    // Steps 1-2: every read is issued before the first buffered write.
+    const [profileSnapshot, aggregateSnapshot, guardState, receiptSnapshot] = await Promise.all([
+      transaction.get(db.collection("users").doc(input.actorUid)),
+      transaction.get(aggregateRef),
+      readReservationGuardState(transaction, input.outgoingShiftId),
+      transaction.get(receiptRef),
+    ]);
+    if (!aggregateSnapshot.exists) fail("The equal handover reservation was not found.", 404);
+    const aggregate = readV2Aggregate(aggregateSnapshot.data(), input.outgoingShiftId);
+    const identity = aggregate.identity;
+    const incomingId = identity.incomingShiftId;
+
+    // §4/§5: authorization is derived here, never inherited from a readiness
+    // read. The actor is an outgoing reserved technician...
+    requireOutgoingTechnician(profileSnapshot.data() as Record<string, unknown> | undefined, input.actorUid, aggregate);
+    // ...and must be a personally-confirmed, non-absent participant (§11).
+    const actorPosition = resolveEqualHandoverParticipants(aggregate).find((item) => item.technicianUid === input.actorUid);
+    if (!actorPosition || actorPosition.state !== "confirmed") {
+      fail("Only a personally confirmed outgoing technician may complete this handover.", 403);
+    }
+    // The v2 guard must still own this exact reservation and carry the epoch
+    // evidence the caller reviewed.
+    const guard = requireV2GuardBinding(
+      guardState.guardSnapshot.exists, guardState.guardSnapshot.data(), documentId, aggregate,
+    );
+    if (guard.guardRevision !== input.expectedGuardRevision || guard.fencingEpoch !== input.expectedFencingEpoch) {
+      fail("The reservation guard changed since this handover was reviewed.");
+    }
+
+    const finalHash = createEqualHandoverSnapshot(aggregate).snapshotHash;
+
+    // Step 3: retry safety — a completed handover replays its committed receipt
+    // before any staleness rejection, provided every durable pointer agrees.
+    if (aggregate.lifecycleStatus === "completed") {
+      if (!receiptSnapshot.exists) fail("A completed v2 handover is missing its transfer receipt; administrator review required.", 409);
+      const receipt = assertEqualHandoverTransferReceipt(hydrateTimestamps(receiptSnapshot.data()), aggregate, documentId, receiptId);
+      if (guard.ownerLifecycleState !== "completed" || guard.terminalEvidenceRef !== receiptId) {
+        fail("The reservation guard does not confirm this completed transfer.", 409);
+      }
+      return { status: "ALREADY_TRANSFERRED", replayed: true, receipt, aggregate, snapshotHash: finalHash, outgoingShiftId: input.outgoingShiftId, incomingShiftId: incomingId };
+    }
+    if (aggregate.lifecycleStatus !== "collecting_confirmations") fail("The handover is closed.");
+    if (receiptSnapshot.exists) fail("A transfer receipt already exists for a still-collecting handover; administrator review required.");
+
+    // Step 4: the live operational sources. Read the outgoing Shift, prove the
+    // reserved incoming Shift does not yet exist, and take the global control.
+    const [outgoingSnapshot, incomingSnapshot, controlSnapshot] = await Promise.all([
+      transaction.get(shifts.doc(input.outgoingShiftId)),
+      transaction.get(shifts.doc(incomingId)),
+      transaction.get(operationalShiftControl.doc(GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID)),
+    ]);
+    const outgoing = outgoingSnapshot.data() as (Shift & { handoverStartedAt?: string | null }) | undefined;
+    if (!outgoing || outgoing.id !== input.outgoingShiftId || outgoing.status !== "handover_pending" ||
+        outgoing.actualEnd !== null || typeof outgoing.actualStart !== "string" ||
+        !Number.isFinite(Date.parse(outgoing.actualStart)) || typeof outgoing.handoverStartedAt !== "string" ||
+        !Number.isFinite(Date.parse(outgoing.handoverStartedAt)) || outgoing.handoverStartedAt < outgoing.actualStart ||
+        outgoing.permanentPairId !== identity.outgoingPermanentPairId ||
+        !Array.isArray(outgoing.primaryTechnicianIds) || outgoing.primaryTechnicianIds.length !== 2 ||
+        outgoing.primaryTechnicianIds.some((uid, index) => uid !== identity.outgoingTechnicianIds[index])) {
+      fail("Invalid outgoing handover Shift.");
+    }
+    parseShiftTimeRange(outgoing.scheduledStart, outgoing.scheduledEnd);
+    if (incomingSnapshot.exists) fail("The reserved incoming Shift already exists.");
+
+    let control;
+    try {
+      control = assertOperationalShiftControl(controlSnapshot.data());
+      assertShiftOwnsOperationalSlot(control, input.outgoingShiftId, outgoing.operationalSlotToken, "handover_pending");
+      if (control.generation !== identity.outgoingGeneration || control.slotToken.toLowerCase() !== identity.outgoingSlotToken.toLowerCase()) {
+        fail("Invalid outgoing control lineage.");
+      }
+    } catch (error) {
+      if (error instanceof AssignmentOperationError) throw error;
+      fail("The outgoing Shift no longer owns valid operational control.");
+    }
+
+    await validateEqualHandoverPair(transaction, identity.outgoingPermanentPairId, identity.outgoingTechnicianIds);
+    await validateEqualHandoverPair(transaction, identity.incomingPermanentPairId, identity.incomingTechnicianIds);
+
+    const [outgoingMemberDocs, incomingMemberDocs] = await Promise.all([
+      transaction.get(shiftMembers.where("shiftId", "==", input.outgoingShiftId)),
+      transaction.get(shiftMembers.where("shiftId", "==", incomingId)),
+    ]);
+    if (!incomingMemberDocs.empty) fail("Reserved incoming membership already exists.");
+    const currentMembers: DocumentData[] = [];
+    for (const document of outgoingMemberDocs.docs) {
+      const member = document.data() as DocumentData;
+      identifier(member.technicianId, 128);
+      if (member.id !== document.id || document.id !== `${input.outgoingShiftId}_${member.technicianId}` ||
+          member.shiftId !== input.outgoingShiftId || !["primary", "additional"].includes(member.role) ||
+          typeof member.joinedAt !== "string" || !Number.isFinite(Date.parse(member.joinedAt)) ||
+          (member.leftAt !== null && (typeof member.leftAt !== "string" || !Number.isFinite(Date.parse(member.leftAt)) || member.leftAt < member.joinedAt))) {
+        fail("Invalid outgoing membership.");
+      }
+      if (member.leftAt === null) currentMembers.push(member);
+    }
+    for (const uid of identity.incomingTechnicianIds) {
+      if ((await transaction.get(shiftMembers.doc(`${incomingId}_${uid}`))).exists) fail("Reserved incoming membership already exists.");
+    }
+
+    // Every affected technician — the four reserved participants and any
+    // additional current member — must still be an eligible active technician,
+    // and their schedule must carry exactly the expected handover entry.
+    const requiredUsers = new Set<string>([
+      ...identity.outgoingTechnicianIds, ...identity.incomingTechnicianIds,
+      ...currentMembers.map((member) => member.technicianId as string),
+    ]);
+    const schedules = new Map<string, TechnicianScheduleEntry[]>();
+    for (const uid of requiredUsers) {
+      authorizeTechnicianProfile((await transaction.get(db.collection("users").doc(uid))).data() as Record<string, unknown> | undefined, uid);
+      const incoming = identity.incomingTechnicianIds.includes(uid);
+      const entries = readEqualHandoverParticipantSchedule(
+        (await transaction.get(technicianSchedules.doc(uid))).data(),
+        uid,
+        incoming
+          ? { shiftId: incomingId, status: "scheduled", scheduledStart: identity.scheduledStart, scheduledEnd: identity.scheduledEnd }
+          : { shiftId: input.outgoingShiftId, status: "handover_pending", scheduledStart: outgoing.scheduledStart, scheduledEnd: outgoing.scheduledEnd },
+      );
+      schedules.set(uid, entries);
+    }
+
+    // Step 5: re-derive the authoritative review, report-drift and readiness
+    // evidence from live sources — the same recomputation the readiness read
+    // uses — and refuse a transfer on any unresolved prerequisite.
+    const evidence = await readReservationEvidence(transaction, aggregate);
+    if (aggregate.revision !== binding.expectedRevision || evidence.snapshotHash !== binding.expectedSnapshotHash) {
+      fail("Stale equal handover revision or snapshot.");
+    }
+    if (!evidence.readiness.ready) {
+      fail(`The handover is not ready to transfer: ${evidence.readiness.reasons.join("; ")}`);
+    }
+    if (evidence.live.content.completeness.blockers.length > 0) {
+      fail(`Handover cannot transfer an incomplete report: ${evidence.live.content.completeness.blockers.join("; ")}`);
+    }
+    const frozenReport = evidence.frozenReport;
+    if (frozenReport === null || aggregate.reportBinding === null) {
+      fail("Freeze and review the consolidated report before transfer.");
+    }
+
+    const now = new Date(Math.max(
+      Date.now(),
+      Date.parse(aggregate.updatedAt),
+      Date.parse(outgoing.actualStart),
+      Date.parse(outgoing.handoverStartedAt as string),
+      Date.parse(control.updatedAt),
+      ...currentMembers.map((member) => Date.parse(member.joinedAt as string)),
+    )).toISOString();
+
+    // Step 6: authoritative lifecycle, control and membership transitions.
+    assertShiftActivationWindow(identity.scheduledStart, identity.scheduledEnd, new Date(now));
+    const completed = completeEqualHandoverTransfer(aggregate, {
+      revision: binding.expectedRevision, snapshotHash: binding.expectedSnapshotHash, recordedAt: now, actorUid: input.actorUid,
+    });
+    let after;
+    try {
+      after = transferOperationalShiftControl({
+        currentControl: control, outgoingShiftId: input.outgoingShiftId, outgoingSlotToken: identity.outgoingSlotToken,
+        outgoingGeneration: identity.outgoingGeneration, incomingShiftId: incomingId, successorSlotToken: identity.successorSlotToken,
+        successorGeneration: identity.successorGeneration, transferTimestamp: now,
+      });
+    } catch (error) {
+      if (error instanceof AssignmentOperationError) throw error;
+      fail("The operational shift control could not be transferred.");
+    }
+    let finalizedMembers: ReturnType<typeof finalizeCurrentShiftMemberships>;
+    try {
+      finalizedMembers = finalizeCurrentShiftMemberships({ shiftId: input.outgoingShiftId, completedAt: now, members: currentMembers });
+    } catch (error) {
+      if (error instanceof AssignmentOperationError) throw error;
+      fail("Outgoing shift memberships could not be finalized.");
+    }
+
+    // Steps 7+: writes only — no reads follow the first write.
+    transaction.set(aggregateRef, completed);
+    transaction.update(shifts.doc(input.outgoingShiftId), {
+      status: "completed", actualEnd: now, completedBy: input.actorUid,
+      completedAt: FieldValue.serverTimestamp(), updatedAt: now,
+    });
+    transaction.create(shifts.doc(incomingId), {
+      id: incomingId, operationalSlotToken: identity.successorSlotToken, permanentPairId: identity.incomingPermanentPairId,
+      shiftType: identity.shiftType, status: "active", scheduledStart: identity.scheduledStart, scheduledEnd: identity.scheduledEnd,
+      actualStart: now, actualEnd: null, primaryTechnicianIds: identity.incomingTechnicianIds, createdBy: input.actorUid,
+      createdAt: now, updatedAt: now, startedBy: input.actorUid, startedAt: FieldValue.serverTimestamp(),
+      previousShiftId: input.outgoingShiftId, previousOperationalSlotToken: identity.outgoingSlotToken,
+      operationalGeneration: identity.successorGeneration, handoverDocumentId: documentId,
+    });
+    for (const member of finalizedMembers) transaction.update(shiftMembers.doc(member.id), { leftAt: now });
+    for (const uid of identity.incomingTechnicianIds) {
+      transaction.create(shiftMembers.doc(`${incomingId}_${uid}`), {
+        id: `${incomingId}_${uid}`, shiftId: incomingId, technicianId: uid, role: "primary", joinedAt: now, leftAt: null,
+      });
+    }
+    for (const [uid, entries] of schedules) {
+      const incoming = identity.incomingTechnicianIds.includes(uid);
+      transaction.update(technicianSchedules.doc(uid), {
+        entries: incoming
+          ? entries.map((entry) => (entry.shiftId === incomingId ? { ...entry, status: "active" } : entry))
+          : entries.filter((entry) => entry.shiftId !== input.outgoingShiftId),
+        updatedAt: now,
+      });
+    }
+    transaction.set(operationalShiftControl.doc(GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID), after);
+    await completeReservationGuard(transaction, {
+      outgoingShiftId: input.outgoingShiftId, protocolOwner: "v2",
+      expectedGuardRevision: guard.guardRevision, expectedFencingEpoch: guard.fencingEpoch,
+      receiptId, outgoingSlotToken: identity.outgoingSlotToken, outgoingGeneration: identity.outgoingGeneration,
+      successorSlotToken: identity.successorSlotToken, successorGeneration: identity.successorGeneration,
+      recordedAt: now, actorUid: input.actorUid,
+    }, guardState);
+    const receiptMaterialBase: Omit<EqualHandoverTransferReceipt, "receiptHash"> = {
+      id: receiptId, schema: "equal-handover-transfer-v2", action: "EQUAL_SHIFT_HANDOVER_TRANSFERRED_V2",
+      outcome: "TRANSFERRED", protocol: "equal-handover-v2", handoverDocumentId: documentId,
+      outgoingShiftId: input.outgoingShiftId, incomingShiftId: incomingId, finalRevision: aggregate.revision,
+      finalSnapshotHash: finalHash, boundReportId: frozenReport.id, boundReportVersion: frozenReport.version,
+      actorUid: input.actorUid, actorRole: "technician", transferredAt: now,
+      operationalControlBefore: control, operationalControlAfter: after,
+    };
+    const receipt: EqualHandoverTransferReceipt = {
+      ...receiptMaterialBase,
+      receiptHash: createHash("sha256").update(transferReceiptMaterial(receiptMaterialBase)).digest("hex"),
+    };
+    transaction.create(receiptRef, { ...receipt, createdAt: FieldValue.serverTimestamp() });
+    for (const uid of requiredUsers) {
+      transaction.update(db.collection("users").doc(uid), {
+        lastAssignmentActivityAt: FieldValue.serverTimestamp(),
+        ...(uid === input.actorUid ? { lastOperationalActivityAt: FieldValue.serverTimestamp() } : {}),
+      });
+    }
+
+    return {
+      status: "TRANSFERRED", replayed: false, receipt, aggregate: completed,
+      snapshotHash: createEqualHandoverSnapshot(completed).snapshotHash,
+      outgoingShiftId: input.outgoingShiftId, incomingShiftId: incomingId,
+    };
   });
 }

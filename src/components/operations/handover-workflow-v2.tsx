@@ -3,7 +3,6 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { EqualHandoverReportState } from "@/lib/operations/equal-handover-report-firestore";
 import type { EqualHandoverReportV2Content } from "@/types/handover-report-v2";
-
 const field = "block w-full rounded-lg border bg-transparent p-2";
 
 const POSITION_LABELS: { position: string; side: "outgoing" | "incoming"; label: string }[] = [
@@ -108,6 +107,40 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     expectedSnapshotHash: state.snapshotHash,
   }, "Your personal confirmation has been recorded.");
 
+  // The transfer is the only action whose button cannot be trusted to a
+  // client-side flag: enabling it here is a display convenience, while the
+  // server re-derives every authority and prerequisite inside its own
+  // transaction (§10).
+  const transfer = async () => {
+    if (lock.current || !guard) return;
+    lock.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${base}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: aggregate.revision,
+          expectedSnapshotHash: state.snapshotHash,
+          expectedGuardRevision: guard.guardRevision,
+          expectedFencingEpoch: guard.fencingEpoch,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover transfer failed.");
+      setNotice(result.replayed
+        ? "This handover was already transferred — the incoming shift is active."
+        : "Handover transferred. The incoming shift is now active.");
+      const refreshed = await fetch(`${base}/report`, { headers: { Accept: "application/json" } });
+      const refreshResult = await refreshed.json();
+      if (refreshed.ok && refreshResult.success) setState(refreshResult.report);
+      router.refresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "The v2 handover transfer failed.");
+    } finally {
+      lock.current = false; setBusy(false);
+    }
+  };
+
   const absence = aggregate.absences[0] ?? null;
   // A position is the participant's exact slot, not just their side: index 0 of
   // the outgoing pair is outgoing_tech_a and index 1 is outgoing_tech_b (and the
@@ -132,12 +165,28 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
   const canConfirm = myPosition !== null && !myConfirmation && !myAbsence &&
     aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null;
 
+  const isTransferred = aggregate.lifecycleStatus === "completed";
+  const isConfirmedOutgoing = isOutgoing && myConfirmation !== undefined;
+  const blockers = content.completeness.blockers;
+  // Display prerequisite only — never a substitute for the server's own
+  // authorization: a personally confirmed outgoing technician, a bound and
+  // current frozen report, satisfied readiness and no visible blockers.
+  const canTransfer = isConfirmedOutgoing && !isTransferred && guard !== null &&
+    aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null &&
+    readiness.ready && blockers.length === 0 && !preparationDrifted;
+
   return <div className="space-y-6">
     <header className="space-y-1">
       <h1 className="text-2xl font-bold">Equal-technician handover report (v2)</h1>
       <p className="text-sm">{aggregate.identity.outgoingShiftId} → {aggregate.reservation.reservedIncomingShiftId} · {aggregate.lifecycleStatus.replaceAll("_", " ")} · Revision {aggregate.revision} · Guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}</p>
       <p className="text-sm">Scheduled {accra(aggregate.reservation.scheduledStart)} – {accra(aggregate.reservation.scheduledEnd)} (Africa/Accra)</p>
     </header>
+
+    {isTransferred && <section aria-label="Handover transferred" className="rounded-xl border border-green-600 p-4 text-sm space-y-1">
+      <h2 className="font-semibold text-green-800">Handover transferred</h2>
+      <p>This equal-technician handover is complete. The outgoing shift {aggregate.identity.outgoingShiftId} is closed and the incoming shift {aggregate.identity.incomingShiftId} is active.</p>
+      <p>Frozen report {frozenReport ? `v${frozenReport.version} (${short(frozenReport.id)})` : "unavailable"} · guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}. This record is immutable; a later transfer attempt replays this result.</p>
+    </section>}
 
     <section aria-label="Handover readiness" className={`rounded-xl border p-4 text-sm ${readiness.ready ? "border-green-600" : "border-neutral-500"}`}>
       <h2 className="font-semibold">Readiness: {readiness.ready ? "all confirmations and permitted exceptions satisfied" : "not ready"}</h2>
@@ -146,7 +195,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <p className="mt-2 italic">Readiness is derived from authoritative evidence and is not a completed handover or a transfer authorization.</p>
     </section>
 
-    {myPosition && <section className="rounded-xl border p-5 space-y-2 text-sm">
+    {myPosition && !isTransferred && <section className="rounded-xl border p-5 space-y-2 text-sm">
       <h2 className="text-lg font-semibold">Your confirmation</h2>
       <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
       {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against report {short(myConfirmation.reportBinding.id)} (digest {short(myConfirmation.reportBinding.digest)}).</p>}
@@ -181,7 +230,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     {notice && <p className="text-sm text-green-700">{notice}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-    {isOutgoing && <section className="space-y-3 rounded-xl border p-5">
+    {isOutgoing && !isTransferred && <section className="space-y-3 rounded-xl border p-5">
       <h2 className="text-lg font-semibold">Outgoing technician actions</h2>
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void prepare(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Optional preparation note<input className={field} name="reason" maxLength={2000} placeholder="Why this revision is being prepared"/></label>
@@ -204,9 +253,30 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
         {frozenReport && <label className="text-sm">Correction note (required for a later version)<input className={field} name="correctionNote" required maxLength={4000}/></label>}
         <button disabled={busy || !preparation || preparationDrifted || !guard || aggregate.lifecycleStatus !== "collecting_confirmations"} className="w-fit rounded-lg bg-blue-700 p-2 text-white">Review complete — freeze report</button>
       </form>
-      <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above. The final shift transfer, late acceptance and attendance finalization arrive in a later milestone and are not available here.</p>
+      <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above.</p>
     </section>}
-    {!isOutgoing && isIncoming && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only, but you can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen.</div>}
+
+    {isOutgoing && !isTransferred && <section aria-label="Final transfer" className="space-y-3 rounded-xl border p-5">
+      <h2 className="text-lg font-semibold">Final transfer</h2>
+      <ul className="space-y-1 text-sm">
+        <li>{aggregate.reportBinding !== null ? "• Consolidated report frozen" : "• Consolidated report not frozen yet"}</li>
+        <li>{myConfirmation ? "• You have personally confirmed this handover" : "• You must personally confirm this handover first"}</li>
+        <li>{`• Confirmations: ${readiness.confirmedCount}/${readiness.requiredConfirmations} · supported absences: ${readiness.absenceCount}/${readiness.supportedAbsences}`}</li>
+        <li>{blockers.length === 0 ? "• No report completeness blockers" : `• ${blockers.length} blocker(s) must be resolved`}</li>
+        <li>{preparationDrifted ? "• Sources changed since review — re-prepare and freeze" : "• Review is current"}</li>
+      </ul>
+      {!isConfirmedOutgoing && <p className="text-sm">Only an outgoing technician who has personally confirmed (not declared absent) can complete this handover.</p>}
+      <button
+        disabled={!canTransfer || busy}
+        onClick={() => void transfer()}
+        className="w-fit rounded-lg bg-green-700 p-2 text-white"
+      >{busy ? "Working…" : "Complete handover and transfer shift"}</button>
+      {!canTransfer && !busy && <p className="text-sm text-neutral-600">The transfer action is available only when every prerequisite above is satisfied.</p>}
+      <p className="text-sm text-neutral-600">This display gate is not an authorization: the server re-derives your authority, the reviewed evidence, readiness and completeness inside its own transaction and can still reject the request even when this button is enabled.</p>
+      {!isConfirmedOutgoing && !myConfirmation && !myAbsence && myPosition && <p className="text-sm">You have not confirmed yet — use the confirmation section above.</p>}
+    </section>}
+    {!isOutgoing && isIncoming && !isTransferred && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only, but you can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen. Completing the final transfer is reserved for an outgoing technician.</div>}
+
 
     <section className="space-y-4">
       <h2 className="text-lg font-semibold">{frozenReport ? "Frozen report content (immutable)" : preparation && !preparationDrifted ? "Prepared report (awaiting review)" : "Live consolidated evidence"}</h2>
