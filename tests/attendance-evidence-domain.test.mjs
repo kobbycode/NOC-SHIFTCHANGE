@@ -51,6 +51,15 @@ function loadModule(relativePath) {
         if (specifier === "./equal-technician-handover-domain") {
           return loadModule("src/lib/operations/equal-technician-handover-domain.ts");
         }
+        if (specifier === "./equal-handover-report-domain") {
+          return loadModule("src/lib/operations/equal-handover-report-domain.ts");
+        }
+        if (
+          specifier === "@/types/handover-report-v2" ||
+          specifier.endsWith("types/handover-report-v2")
+        ) {
+          return loadModule("src/types/handover-report-v2.ts");
+        }
         if (specifier === "./attendance-evidence-domain") {
           return loadModule("src/lib/operations/attendance-evidence-domain.ts");
         }
@@ -82,7 +91,9 @@ const MODULE_PATHS = [
   "src/types/attendance-evidence.ts",
   "src/types/equal-technician-handover.ts",
   "src/types/handover-reservation-guard.ts",
+  "src/types/handover-report-v2.ts",
   "src/lib/operations/equal-technician-handover-domain.ts",
+  "src/lib/operations/equal-handover-report-domain.ts",
   "src/lib/operations/attendance-evidence-domain.ts",
 ];
 for (const path of MODULE_PATHS) {

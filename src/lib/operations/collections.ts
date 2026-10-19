@@ -46,6 +46,12 @@ export const OPERATIONAL_COLLECTIONS = {
   EQUAL_HANDOVERS_V2:
     "equal_handovers_v2",
 
+  HANDOVER_REPORT_PREPARATIONS_V2:
+    "handover_report_preparations_v2",
+
+  HANDOVER_REPORTS_V2:
+    "handover_reports_v2",
+
   ATTENDANCE_EVIDENCE_V2:
     "attendance_evidence_v2",
 
@@ -119,6 +125,14 @@ export function getOperationalCollections() {
 
     equalHandoversV2: db.collection(
       OPERATIONAL_COLLECTIONS.EQUAL_HANDOVERS_V2
+    ),
+
+    handoverReportPreparationsV2: db.collection(
+      OPERATIONAL_COLLECTIONS.HANDOVER_REPORT_PREPARATIONS_V2
+    ),
+
+    handoverReportsV2: db.collection(
+      OPERATIONAL_COLLECTIONS.HANDOVER_REPORTS_V2
     ),
 
     attendanceEvidenceV2: db.collection(

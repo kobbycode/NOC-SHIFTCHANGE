@@ -583,7 +583,35 @@ test("12. Replacement fails closed when unexpected report or confirmation eviden
   };
 
   await addEligiblePair(f.outgoing, `${f.outgoing}-newpair`, [`${f.outgoing}-newa`, `${f.outgoing}-newb`]);
+
+  // §3 migration guarantee: a relabeled legacy v1 binding can no longer even
+  // be read back as a valid v2 aggregate.
   await corrupt({ reportBinding: { schema: "handover-report-v1", id: `report_${randomUUID()}`, digest: "a".repeat(64) } });
+  await assert.rejects(() => readEqualHandoverReservation(f.outgoing), (error) => {
+    assert.equal(error.status, 409);
+    assert.match(error.message, /report binding/i);
+    return true;
+  });
+
+  // A genuine v2 binding is readable but keeps replacement fail-closed.
+  await corrupt({ reportBinding: null });
+  const storedFingerprint = (await ref("equal_handovers_v2", documentId).get()).data().reservation.handoverId;
+  await corrupt({
+    reportBinding: {
+      schema: "handover-report-v2",
+      id: "report_v2_00000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      evidenceSnapshotHash: "b".repeat(64),
+      workSnapshotVersion: "c".repeat(64),
+      preparationId: `preparation_${storedFingerprint}`,
+      preparationRevision: 1,
+      reservationId: storedFingerprint,
+      aggregateRevision: 1,
+      fencingEpoch: 1,
+      frozenBy: f.out[0],
+      frozenAt: scheduledStart,
+    },
+  });
   const binding = await v2Binding(f);
   const before = await operationalState();
   await assert.rejects(

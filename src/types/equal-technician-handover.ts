@@ -1,4 +1,4 @@
-import type { HandoverReportBinding } from "./handover-report";
+import type { EqualHandoverReportV2Binding } from "./handover-report-v2";
 
 export const EQUAL_HANDOVER_POSITIONS = {
   OUTGOING_TECH_A: "outgoing_tech_a",
@@ -84,7 +84,7 @@ export interface EqualHandoverConfirmation {
   position: EqualHandoverPosition;
   technicianUid: string;
   revision: number;
-  reportBinding: HandoverReportBinding;
+  reportBinding: EqualHandoverReportV2Binding;
   snapshotHash: string;
   confirmedAt: string;
 }
@@ -111,7 +111,7 @@ export interface EqualHandoverSnapshot {
   schema: "equal-handover-v2";
   identity: EqualHandoverIdentity;
   reservation: EqualHandoverReservation;
-  reportBinding: HandoverReportBinding | null;
+  reportBinding: EqualHandoverReportV2Binding | null;
   absences: EqualHandoverAbsence[];
   revision: number;
   snapshotHash: string;
@@ -130,7 +130,7 @@ export interface EqualHandoverAggregate {
   schema: "equal-handover-v2";
   identity: EqualHandoverIdentity;
   reservation: EqualHandoverReservation;
-  reportBinding: HandoverReportBinding | null;
+  reportBinding: EqualHandoverReportV2Binding | null;
   confirmations: EqualHandoverConfirmation[];
   historicalConfirmations: EqualHandoverHistoricalConfirmation[];
   absences: EqualHandoverAbsence[];

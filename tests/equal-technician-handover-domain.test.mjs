@@ -19,6 +19,38 @@ runInNewContext(
 );
 const types = typesLoaded.exports;
 
+// Load v2 report types + pure report domain (the handover domain validates its
+// report binding through these modules).
+async function loadPure(file, extraRequire) {
+  const source = await readFile(new URL(file, import.meta.url), "utf8");
+  const loaded = { exports: {} };
+  runInNewContext(
+    ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText,
+    {
+      exports: loaded.exports,
+      structuredClone,
+      TextEncoder,
+      Buffer,
+      require(specifier) {
+        if (specifier === "node:crypto") return { createHash };
+        const hit = extraRequire(specifier);
+        if (hit) return hit;
+        throw new Error(`Unexpected pure-domain import: ${specifier}`);
+      },
+    },
+  );
+  return loaded.exports;
+}
+
+const reportTypes = await loadPure("../src/types/handover-report-v2.ts", () => null);
+const reportDomain = await loadPure("../src/lib/operations/equal-handover-report-domain.ts", (specifier) => {
+  if (specifier === "@/types/handover-report-v2" || specifier.endsWith("handover-report-v2")) return reportTypes;
+  if (specifier === "@/types/equal-technician-handover" || specifier.endsWith("equal-technician-handover")) return types;
+  return null;
+});
+
 // Load domain module
 const domainSource = await readFile(
   new URL("../src/lib/operations/equal-technician-handover-domain.ts", import.meta.url),
@@ -47,6 +79,15 @@ runInNewContext(
       ) {
         return {};
       }
+      if (
+        specifier === "@/types/handover-report-v2" ||
+        specifier.endsWith("handover-report-v2")
+      ) {
+        return reportTypes;
+      }
+      if (specifier.endsWith("equal-handover-report-domain")) {
+        return reportDomain;
+      }
       throw new Error(`Unexpected pure-domain import: ${specifier}`);
     },
   },
@@ -61,16 +102,32 @@ const at = "2026-10-04T08:00:00.000Z";
 const later = "2026-10-04T08:02:00.000Z";
 const endAt = "2026-10-04T17:00:00.000Z";
 
+const reservationFingerprint = `handover_v2_${"f".repeat(64)}`;
+
 const reportBinding1 = {
-  schema: "handover-report-v1",
-  id: "report_00000000-0000-4000-8000-000000000001",
+  schema: "handover-report-v2",
+  id: "report_v2_00000000-0000-4000-8000-000000000001",
   digest: "1".repeat(64),
+  evidenceSnapshotHash: "e".repeat(64),
+  workSnapshotVersion: "3".repeat(64),
+  preparationId: `preparation_${reservationFingerprint}`,
+  preparationRevision: 1,
+  reservationId: reservationFingerprint,
+  aggregateRevision: 1,
+  fencingEpoch: 1,
+  frozenBy: "out-tech-1",
+  frozenAt: at,
 };
 
 const reportBinding2 = {
-  schema: "handover-report-v1",
-  id: "report_00000000-0000-4000-8000-000000000002",
+  ...reportBinding1,
+  id: "report_v2_00000000-0000-4000-8000-000000000002",
   digest: "2".repeat(64),
+  evidenceSnapshotHash: "d".repeat(64),
+  workSnapshotVersion: "4".repeat(64),
+  preparationRevision: 2,
+  aggregateRevision: 2,
+  frozenAt: later,
 };
 
 function validIdentity(overrides = {}) {

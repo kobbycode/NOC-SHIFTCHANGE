@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { HandoverReportBinding } from "@/types/handover-report";
+import { assertEqualHandoverReportV2Binding } from "./equal-handover-report-domain";
+import type { EqualHandoverReportV2Binding } from "@/types/handover-report-v2";
 import {
   ATTENDANCE_CLOCK_OUT_PROVENANCE,
   EQUAL_ABSENCE_TYPES,
@@ -47,18 +48,12 @@ function fail(message: string, status = 409): never {
   throw new EqualHandoverDomainError(message, status);
 }
 
-export function assertReportBinding(value: unknown): HandoverReportBinding {
-  const data = record(value, ["schema", "id", "digest"]);
-  if (
-    data.schema !== "handover-report-v1" ||
-    typeof data.id !== "string" ||
-    !/^report_[0-9a-f-]{36}$/.test(data.id) ||
-    typeof data.digest !== "string" ||
-    !/^[0-9a-f]{64}$/.test(data.digest)
-  ) {
-    fail("Malformed report binding.");
-  }
-  return data as unknown as HandoverReportBinding;
+export function assertReportBinding(value: unknown): EqualHandoverReportV2Binding {
+  // §3 migration: the v2 aggregate binds only genuine `handover-report-v2`
+  // evidence (report_v2_ document, reservation fingerprint, preparation
+  // revision, evidence snapshot hash, work snapshot version, fencing epoch).
+  // A legacy v1 binding is rejected rather than relabeled.
+  return assertEqualHandoverReportV2Binding(value);
 }
 
 function record(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -380,7 +375,7 @@ export function assertEqualHandoverAggregate(value: unknown): EqualHandoverAggre
   positive(data.revision, "revision");
   const reservation = assertEqualHandoverReservation(data.reservation, identity, data.revision);
 
-  let reportBinding: HandoverReportBinding | null = null;
+  let reportBinding: EqualHandoverReportV2Binding | null = null;
   if (data.reportBinding !== null) {
     try {
       reportBinding = assertReportBinding(data.reportBinding);
@@ -573,7 +568,7 @@ export function assertEqualHandoverAggregate(value: unknown): EqualHandoverAggre
 
 export function createEqualHandover(input: {
   identity: EqualHandoverIdentity;
-  reportBinding?: HandoverReportBinding | null;
+  reportBinding?: EqualHandoverReportV2Binding | null;
   reservedAt: string;
   reservedBy: string;
 }): EqualHandoverAggregate {
@@ -657,7 +652,7 @@ function revise(
 export function reviseEqualHandoverReport(
   value: EqualHandoverAggregate,
   input: MutationContext & {
-    reportBinding: HandoverReportBinding;
+    reportBinding: EqualHandoverReportV2Binding;
   },
 ): EqualHandoverAggregate {
   const aggregate = mutation(value, input);
@@ -899,7 +894,7 @@ export function replaceEqualHandoverReservation(
   input: MutationContext & {
     actorUid: string;
     identity: EqualHandoverIdentity;
-    reportBinding?: HandoverReportBinding | null;
+    reportBinding?: EqualHandoverReportV2Binding | null;
   },
 ): { superseded: EqualHandoverAggregate; replacement: EqualHandoverAggregate } {
   const aggregate = mutation(value, input);

@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/firebase.handover-v2-emulator.generated.json
 
 # next.js
 /.next/
