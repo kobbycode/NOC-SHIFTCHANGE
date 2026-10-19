@@ -5,6 +5,7 @@ import type {
   CompleteGuardInput,
   HandoverProtocolOwner,
   HandoverReservationGuard,
+  ReacquireGuardInput,
   ReplaceGuardInput,
 } from "@/types/handover-reservation-guard";
 import type { HandoverAggregate } from "@/types/handover";
@@ -512,5 +513,133 @@ export function adoptGuardlessLegacyReservation(
     terminalEvidenceRef: receiptId ?? null,
     createdAt: legacy.createdAt,
     updatedAt: legacy.updatedAt,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cancelled-v1 → v2 re-reservation transition (TECH-HO-RECOVERY-04 §7).
+//
+// A cancelled v1 reservation is terminal for v1 forever. The only permitted
+// forward move is a narrowly scoped, fully audited hand-off: the exact
+// cancelled guard state is copied verbatim into the immutable history
+// collection, and the live guard document is replaced — inside the same
+// transaction — by a fresh v2-owned successor that advances the fencing
+// epoch and carries a deterministic pointer to the archived evidence. Any
+// stale v1 writer still holding the predecessor revision is rejected.
+// Completed guards never transition, in either direction.
+// ---------------------------------------------------------------------------
+
+export function createReservationGuardArchiveDocumentId(guard: HandoverReservationGuard): string {
+  const valid = assertHandoverReservationGuard(guard);
+  return `guard_archive_${valid.fencingEpoch}_${digest(canonical(valid))}`;
+}
+
+function digest(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonical).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export interface CancelledGuardArchive {
+  archived: HandoverReservationGuard;
+  archiveDocumentId: string;
+  archivedAt: string;
+}
+
+export function archiveCancelledReservationGuard(
+  existing: HandoverReservationGuard,
+  archivedAt: string,
+): CancelledGuardArchive {
+  const guard = assertHandoverReservationGuard(existing);
+  if (guard.ownerLifecycleState !== GUARD_LIFECYCLE_STATES.CANCELLED) {
+    fail("Only a cancelled reservation guard can be archived for re-reservation.");
+  }
+  timestamp(archivedAt);
+  if (Date.parse(archivedAt) < Date.parse(guard.updatedAt)) {
+    fail("The reservation guard archival timestamp is stale.");
+  }
+  const archived = structuredClone(guard);
+  return { archived, archiveDocumentId: createReservationGuardArchiveDocumentId(archived), archivedAt };
+}
+
+export function transitionCancelledGuardForEqualReacquisition(
+  archive: CancelledGuardArchive,
+  input: ReacquireGuardInput,
+): HandoverReservationGuard {
+  const guard = assertHandoverReservationGuard(archive.archived);
+  if (
+    guard.protocolOwner !== HANDOVER_PROTOCOL_OWNERS.V1 &&
+    guard.protocolOwner !== HANDOVER_PROTOCOL_OWNERS.V2
+  ) {
+    fail("Only a cancelled v1 or v2 reservation guard can transition to a v2 successor.");
+  }
+  if (input.protocolOwner !== HANDOVER_PROTOCOL_OWNERS.V2) {
+    fail("Only protocol v2 may reacquire an archived reservation guard.");
+  }
+  const expectedRevision = guard.protocolOwner === HANDOVER_PROTOCOL_OWNERS.V1
+    ? guard.guardRevision + 1
+    : guard.guardRevision;
+  if (
+    input.expectedGuardRevision !== expectedRevision ||
+    input.expectedFencingEpoch !== guard.fencingEpoch
+  ) {
+    fail("Stale guard revision or fencing epoch for reservation reacquisition.");
+  }
+  if (
+    input.outgoingShiftId !== guard.outgoingShiftId ||
+    input.outgoingSlotToken.toLowerCase() !== guard.outgoingSlotToken ||
+    input.outgoingGeneration !== guard.outgoingGeneration
+  ) {
+    fail("Re-reservation must retain the current outgoing operational lineage.");
+  }
+  if (input.successorGeneration !== guard.outgoingGeneration + 1) {
+    fail("Invalid re-reservation successor generation.");
+  }
+  const nextSuccessor = input.successorSlotToken.toLowerCase();
+  token(nextSuccessor);
+  if (
+    nextSuccessor === guard.successorSlotToken ||
+    nextSuccessor === guard.outgoingSlotToken ||
+    guard.retiredSuccessorSlotTokens.includes(nextSuccessor)
+  ) {
+    fail("Re-reservation requires a fresh, unretired successor token.");
+  }
+  identifier(input.reservationId, "re-reservation ID");
+  identifier(input.reservedIncomingShiftId, "re-reserved incoming shift ID");
+  timestamp(input.reservedAt);
+  if (input.reservedAt !== archive.archivedAt) {
+    fail("The re-reservation timestamp must match the archived reservation evidence.");
+  }
+  identifier(input.reservedBy, "reservedBy UID", 128);
+
+  return assertHandoverReservationGuard({
+    ...guard,
+    protocolOwner: HANDOVER_PROTOCOL_OWNERS.V2,
+    ownerHandoverDocumentId: input.ownerHandoverDocumentId,
+    ownerLifecycleState: GUARD_LIFECYCLE_STATES.ACTIVE,
+    guardRevision: guard.guardRevision + 2,
+    fencingEpoch: guard.fencingEpoch + 1,
+    successorSlotToken: nextSuccessor,
+    successorGeneration: input.successorGeneration,
+    reservationId: input.reservationId,
+    reservedIncomingShiftId: input.reservedIncomingShiftId,
+    reservedAt: input.reservedAt,
+    reservedBy: input.reservedBy,
+    retiredSuccessorSlotTokens: [...guard.retiredSuccessorSlotTokens, guard.successorSlotToken],
+    terminalEvidenceRef: archive.archiveDocumentId,
+    createdAt: input.reservedAt,
+    updatedAt: input.reservedAt,
   });
 }

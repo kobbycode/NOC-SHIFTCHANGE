@@ -227,8 +227,14 @@ async function persist(operation: Operation, input: FormalHandoverActor,
         actor.role !== input.expectedRole) fail("Your account is not authorized to manage handover reservations.", 403);
     if (operation === "initialize") {
       if (handoverSnapshot.exists) fail("A formal handover already exists for this shift.");
+      // Protocol ownership is fenced before the active-owner retry path: an
+      // active guard owned by another protocol is a cross-protocol conflict,
+      // not a duplicate v1 initialization.
       if (guardSnapshot.exists) {
         const existingGuard = assertHandoverReservationGuard(guardSnapshot.data());
+        if (existingGuard.protocolOwner !== "v1") {
+          fail(`The outgoing shift reservation is owned by protocol ${existingGuard.protocolOwner}.`, 409);
+        }
         if (existingGuard.ownerLifecycleState === "active") {
           fail("A formal handover already exists for this shift.");
         }

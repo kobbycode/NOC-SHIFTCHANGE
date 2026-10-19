@@ -52,9 +52,15 @@ import {
   readOperationalShiftControl,
 } from "./operational-shift-control";
 
+import { readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
+
 export interface BeginShiftHandoverInput {
   shiftId: string;
   actorUid: string;
+  // "manager" preserves the historical admin/supervisor-only v1 route.
+  // "equal-technician" is the v2 shared path: either outgoing permanent-pair
+  // technician may begin, with no primary/secondary authority distinction.
+  authority?: "manager" | "equal-technician";
 }
 
 export interface BeginShiftHandoverResult {
@@ -73,6 +79,7 @@ export async function beginShiftHandover(
   input: BeginShiftHandoverInput
 ): Promise<BeginShiftHandoverResult> {
   const { shiftId, actorUid } = input;
+  const authority = input.authority ?? "manager";
 
   if (
     !shiftId ||
@@ -88,7 +95,9 @@ export async function beginShiftHandover(
     );
   }
 
-  await ensureOperationalShiftControl(actorUid);
+  if (authority === "manager") {
+    await ensureOperationalShiftControl(actorUid);
+  }
 
   const db = getAdminFirestore();
 
@@ -144,15 +153,23 @@ export async function beginShiftHandover(
         );
       }
 
+      const authorizedActor =
+        authority === "manager"
+          ? [
+              "admin",
+              "supervisor",
+            ].includes(
+              actor?.role
+            )
+          : actor?.role === "technician";
+
       if (
         !actorSnapshot.exists ||
         !actor ||
         actor.status !== "active" ||
         actor.statusOperation != null ||
         actor.mustChangePassword === true ||
-        !["admin", "supervisor"].includes(
-          actor.role
-        )
+        !authorizedActor
       ) {
         throw new AssignmentOperationError(
           "Your account is not authorized to begin shift handover.",
@@ -333,6 +350,44 @@ export async function beginShiftHandover(
           "The shift's primary technician memberships are inconsistent.",
           409
         );
+      }
+
+      /*
+       * PHASE 3b (v2 equal-technician authority only):
+       * The actor must be one of the shift's two active permanent-pair
+       * technicians. Either technician may act; there is no primary or
+       * secondary authority distinction.
+       */
+
+      if (authority === "equal-technician") {
+        if (typeof shift.permanentPairId !== "string") {
+          throw new AssignmentOperationError(
+            "The shift has no permanent technician pair.",
+            409
+          );
+        }
+
+        const pairTechnicianIds =
+          readActivePermanentPairTechnicianIds(
+            (
+              await transaction.get(
+                db
+                  .collection("technician_pairs")
+                  .doc(shift.permanentPairId)
+              )
+            ).data(),
+            shift.permanentPairId
+          );
+
+        if (
+          !pairTechnicianIds.includes(actorUid) ||
+          !primaryIds.includes(actorUid)
+        ) {
+          throw new AssignmentOperationError(
+            "Only an outgoing permanent-pair technician can begin this handover.",
+            403
+          );
+        }
       }
 
       /*
@@ -590,4 +645,10 @@ export async function beginShiftHandover(
       };
     }
   );
+}
+
+export async function beginEqualTechnicianShiftHandover(
+  input: BeginShiftHandoverInput
+): Promise<BeginShiftHandoverResult> {
+  return beginShiftHandover({ ...input, authority: "equal-technician" });
 }

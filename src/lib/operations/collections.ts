@@ -40,6 +40,12 @@ export const OPERATIONAL_COLLECTIONS = {
   HANDOVER_RESERVATION_GUARDS:
     "handover_reservation_guards",
 
+  HANDOVER_RESERVATION_GUARD_HISTORY:
+    "handover_reservation_guard_history",
+
+  EQUAL_HANDOVERS_V2:
+    "equal_handovers_v2",
+
   ATTENDANCE_EVIDENCE_V2:
     "attendance_evidence_v2",
 
@@ -105,6 +111,14 @@ export function getOperationalCollections() {
 
     handoverReservationGuards: db.collection(
       OPERATIONAL_COLLECTIONS.HANDOVER_RESERVATION_GUARDS
+    ),
+
+    handoverReservationGuardHistory: db.collection(
+      OPERATIONAL_COLLECTIONS.HANDOVER_RESERVATION_GUARD_HISTORY
+    ),
+
+    equalHandoversV2: db.collection(
+      OPERATIONAL_COLLECTIONS.EQUAL_HANDOVERS_V2
     ),
 
     attendanceEvidenceV2: db.collection(

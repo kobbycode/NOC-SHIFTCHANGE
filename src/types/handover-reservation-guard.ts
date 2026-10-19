@@ -69,6 +69,11 @@ export interface ReplaceGuardInput {
   actorUid: string;
 }
 
+export interface ReacquireGuardInput extends AcquireGuardInput {
+  expectedGuardRevision: number;
+  expectedFencingEpoch: number;
+}
+
 export interface CancelGuardInput {
   outgoingShiftId: string;
   protocolOwner: HandoverProtocolOwner;

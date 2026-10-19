@@ -11,10 +11,12 @@ import type {
 import { getOperationalCollections } from "./collections";
 import {
   adoptGuardlessLegacyReservation,
+  archiveCancelledReservationGuard,
   assertHandoverReservationGuard,
   createHandoverReservationGuardDocumentId,
   createInitialReservationGuard,
   HandoverReservationGuardError,
+  transitionCancelledGuardForEqualReacquisition,
   assertSameOwnerRetry,
   transitionGuardForCancellation,
   transitionGuardForCompletion,
@@ -81,6 +83,36 @@ export async function resolveOrAcquireReservationGuard(
 
   if (state.guardSnapshot.exists) {
     const existing = assertHandoverReservationGuard(state.guardSnapshot.data());
+    if (
+      existing.ownerLifecycleState === "cancelled" &&
+      input.protocolOwner === "v2"
+    ) {
+      // Cancelled → v2 hand-off (§7): archive the exact terminal evidence
+      // immutably, then replace the live document inside this same transaction
+      // with a fresh v2 successor at the next fencing epoch. A cancelled
+      // guard remains terminal and rejecting for every v1 writer.
+      const archive = archiveCancelledReservationGuard(existing, input.reservedAt);
+      const historyRef = getOperationalCollections()
+        .handoverReservationGuardHistory
+        .doc(archive.archiveDocumentId);
+      const historySnapshot = await transaction.get(historyRef);
+      if (historySnapshot.exists) {
+        throw new HandoverReservationGuardError(
+          "Reservation guard archive history already exists; administrator review required.",
+          409,
+        );
+      }
+      const successor = transitionCancelledGuardForEqualReacquisition(archive, {
+        ...input,
+        expectedGuardRevision: existing.protocolOwner === "v1"
+          ? existing.guardRevision + 1
+          : existing.guardRevision,
+        expectedFencingEpoch: existing.fencingEpoch,
+      });
+      transaction.create(historyRef, archive.archived);
+      transaction.set(state.guardRef, successor);
+      return { guard: successor, isNew: true };
+    }
     const retried = assertSameOwnerRetry(existing, input);
     return { guard: retried, isNew: false };
   }
