@@ -4,7 +4,9 @@
 # Console overrides must be reviewed; never supply emulator hosts or private keys.
 scripts:
   buildCommand: npm run build
-  runCommand: npm run start -- --port $PORT
+  # runCommand is launched without shell expansion, so "$PORT" would reach
+  # next start as a literal and the container would exit before binding 8080.
+  runCommand: npm run start -- --port 8080
 
 # next start also requires public assets, Next config and installed dependencies.
 # Preserve the complete clean Git build context when bypassing the adapter.
