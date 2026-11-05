@@ -16,6 +16,11 @@
     "test:shift-join": "node --experimental-strip-types --test tests/shift-join.test.mjs",
     "test:shift-join:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-shift-join-emulator.ps1"
   },
+  "overrides": {
+    "jwks-rsa": {
+      "jose": "5.10.0"
+    }
+  },
   "dependencies": {
     "firebase": "^12.19.0",
     "firebase-admin": "^14.4.0",
