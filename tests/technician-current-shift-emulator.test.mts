@@ -135,6 +135,30 @@ const {
 const db =
   getAdminFirestore();
 
+async function resetShiftLedger() {
+  const snapshot =
+    await db.collection("shifts").get();
+
+  if (
+    snapshot.empty
+  ) {
+    return;
+  }
+
+  const batch =
+    db.batch();
+
+  for (
+    const document of snapshot.docs
+  ) {
+    batch.delete(
+      document.ref
+    );
+  }
+
+  await batch.commit();
+}
+
 let fixtureCounter = 0;
 
 const slotToken =
@@ -185,8 +209,24 @@ async function seedFixture(
 
     malformedShift?:
       boolean;
+
+    /*
+     * The activation ledger is the shifts collection, so each fixture starts
+     * from an empty one and opts into a completed witness record.
+     */
+    activatedWitness?:
+      boolean;
+
+    /*
+     * Either permanent-pair technician can bootstrap the first shift, so some
+     * cases need the partner's own eligible account.
+     */
+    seedPartnerUser?:
+      boolean;
   },
 ) {
+  await resetShiftLedger();
+
   fixtureCounter += 1;
 
   const suffix =
@@ -272,6 +312,57 @@ async function seedFixture(
         null,
     },
   );
+
+  const partnerUid =
+    actorKind === "primary"
+      ? technicianB
+      : technicianA;
+
+  const partner = {
+    uid: partnerUid,
+
+    fullName:
+      "Synthetic Partner Technician",
+
+    email:
+      `${partnerUid}@example.invalid`,
+
+    role:
+      "technician" as const,
+
+    status:
+      "active" as const,
+
+    mustChangePassword:
+      false,
+  };
+
+  if (
+    options?.seedPartnerUser === true
+  ) {
+    batch.set(
+      db
+        .collection("users")
+        .doc(partnerUid),
+      {
+        uid: partnerUid,
+
+        fullName:
+          "Synthetic Partner Technician",
+
+        email:
+          `${partnerUid}@example.invalid`,
+
+        role: "technician",
+
+        status: "active",
+
+        mustChangePassword: false,
+
+        statusOperation: null,
+      },
+    );
+  }
 
   let control =
     createPendingOperationalShiftControl(
@@ -541,11 +632,62 @@ async function seedFixture(
     }
   }
 
+  /*
+   * A completed shift in the ledger proves the first-ever bootstrap has
+   * already been consumed, so no technician can start again.
+   */
+  if (
+    options?.activatedWitness === true &&
+    status !== "pending"
+  ) {
+    batch.set(
+      db
+        .collection("shifts")
+        .doc(
+          `technician-current-witness-${suffix}`,
+        ),
+      {
+        id:
+          `technician-current-witness-${suffix}`,
+
+        operationalSlotToken:
+          previousSlotToken,
+
+        permanentPairId: pairId,
+        shiftType: "night",
+        status: "completed",
+
+        scheduledStart:
+          "2026-10-03T22:00:00.000Z",
+
+        scheduledEnd:
+          "2026-10-04T06:00:00.000Z",
+
+        actualStart:
+          "2026-10-03T22:05:00.000Z",
+
+        actualEnd:
+          "2026-10-04T06:00:00.000Z",
+
+        primaryTechnicianIds: [
+          technicianA,
+          technicianB,
+        ],
+
+        createdBy: "synthetic-manager",
+        createdAt,
+        updatedAt:
+          "2026-10-04T06:00:00.000Z",
+      },
+    );
+  }
+
   await batch.commit();
 
   return {
     actor,
     actorUid,
+    partner,
     shiftId,
     pairId,
     technicianA,
@@ -638,7 +780,7 @@ test(
 );
 
 test(
-  "scheduled primary technician sees assignment without start or join authority and the read is mutation-free",
+  "scheduled primary technician sees first-shift start authority without join authority and the read is mutation-free",
   async () => {
     const fixture =
       await seedFixture(
@@ -673,8 +815,13 @@ test(
     );
 
     assert.equal(
+      result.firstShiftBootstrapAvailable,
+      true,
+    );
+
+    assert.equal(
       result.canStart,
-      false,
+      true,
     );
 
     assert.equal(
@@ -690,6 +837,89 @@ test(
     assert.deepEqual(
       after,
       before,
+    );
+  },
+);
+
+test(
+  "scheduled primary technician has no start authority once the ledger shows an activated shift",
+  async () => {
+    const fixture =
+      await seedFixture(
+        "scheduled",
+        {
+          actorKind:
+            "primary",
+
+          activatedWitness:
+            true,
+        },
+      );
+
+    const result =
+      await getTechnicianCurrentShift(
+        fixture.actor,
+      );
+
+    assert.ok(result);
+
+    assert.equal(
+      result.id,
+      fixture.shiftId,
+    );
+
+    assert.equal(
+      result.firstShiftBootstrapAvailable,
+      false,
+    );
+
+    assert.equal(
+      result.canStart,
+      false,
+    );
+
+    assert.equal(
+      result.canJoin,
+      false,
+    );
+  },
+);
+
+test(
+  "scheduled partner technician has the same first-shift start authority",
+  async () => {
+    const fixture =
+      await seedFixture(
+        "scheduled",
+        {
+          actorKind:
+            "primary",
+
+          seedPartnerUser:
+            true,
+        },
+      );
+
+    const result =
+      await getTechnicianCurrentShift(
+        fixture.partner,
+      );
+
+    assert.ok(result);
+
+    assert.equal(
+      result.participationAuthority,
+      "primary",
+    );
+
+    assert.equal(
+      result.firstShiftBootstrapAvailable,
+      true,
+    );
+
+    assert.equal(
+      result.canStart,
+      true,
     );
   },
 );
@@ -719,6 +949,11 @@ test(
     );
 
     assert.equal(
+      result.firstShiftBootstrapAvailable,
+      true,
+    );
+
+    assert.equal(
       result.canStart,
       true,
     );
@@ -731,6 +966,91 @@ test(
     assert.equal(
       result.joinedAt,
       null,
+    );
+  },
+);
+
+test(
+  "a consumed temporary authorization cannot reopen start authority after the first shift",
+  async () => {
+    const fixture =
+      await seedFixture(
+        "scheduled",
+        {
+          actorKind:
+            "temporary",
+
+          activatedWitness:
+            true,
+        },
+      );
+
+    const result =
+      await getTechnicianCurrentShift(
+        fixture.actor,
+      );
+
+    assert.ok(result);
+
+    assert.equal(
+      result.participationAuthority,
+      "temporary_authorized",
+    );
+
+    assert.equal(
+      result.firstShiftBootstrapAvailable,
+      false,
+    );
+
+    assert.equal(
+      result.canStart,
+      false,
+    );
+
+    assert.equal(
+      result.canJoin,
+      false,
+    );
+  },
+);
+
+test(
+  "an activated current shift never reports first-shift bootstrap availability",
+  async () => {
+    const fixture =
+      await seedFixture(
+        "active",
+        {
+          actorKind:
+            "primary",
+        },
+      );
+
+    const result =
+      await getTechnicianCurrentShift(
+        fixture.actor,
+      );
+
+    assert.ok(result);
+
+    assert.equal(
+      result.status,
+      "active",
+    );
+
+    assert.equal(
+      result.firstShiftBootstrapAvailable,
+      false,
+    );
+
+    assert.equal(
+      result.canStart,
+      false,
+    );
+
+    assert.equal(
+      result.canJoin,
+      true,
     );
   },
 );

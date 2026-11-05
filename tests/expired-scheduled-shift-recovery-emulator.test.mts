@@ -130,6 +130,25 @@ const {
 );
 
 const {
+  startShift,
+} = await import(
+  "../src/lib/operations/start-shift"
+);
+
+const {
+  assertFirstEverShiftBootstrap,
+  FIRST_SHIFT_BOOTSTRAP_CLOSED_MESSAGE,
+} = await import(
+  "../src/lib/operations/first-shift-bootstrap-domain"
+);
+
+const {
+  readFirstShiftBootstrapEvidenceFromDatabase,
+} = await import(
+  "../src/lib/operations/first-shift-bootstrap"
+);
+
+const {
   createPendingOperationalShiftControl,
   consumeOperationalShiftSlot,
 } = await import(
@@ -204,6 +223,12 @@ interface FixtureOptions {
   unresolvedTask?: boolean;
 
   corruptScheduleA?: boolean;
+
+  /*
+   * Recovery must never reopen first-shift bootstrap, so some cases need a
+   * genuinely activated shift already present in the ledger.
+   */
+  activatedWitness?: boolean;
 }
 
 async function seedFixture(
@@ -482,6 +507,55 @@ async function seedFixture(
   const batch =
     db.batch();
 
+  const witnessShift =
+    options.activatedWitness === true
+      ? {
+          id:
+            `recovery-witness-${suffix}`,
+
+          shiftType:
+            "night",
+
+          status:
+            "completed",
+
+          scheduledStart:
+            "2019-12-31T22:00:00.000Z",
+
+          scheduledEnd:
+            "2020-01-01T06:00:00.000Z",
+
+          actualStart:
+            "2019-12-31T22:05:00.000Z",
+
+          actualEnd:
+            "2020-01-01T06:00:00.000Z",
+
+          handoverStartedAt:
+            null,
+
+          permanentPairId:
+            pairId,
+
+          operationalSlotToken:
+            "c1000000-0000-4000-8000-000000000001",
+
+          primaryTechnicianIds: [
+            technicianA,
+            technicianB,
+          ],
+
+          createdBy:
+            actorUid,
+
+          createdAt:
+            "2019-12-31T21:00:00.000Z",
+
+          updatedAt:
+            "2020-01-01T06:00:00.000Z",
+        }
+      : null;
+
   batch.set(
     db
       .collection("users")
@@ -722,6 +796,19 @@ async function seedFixture(
     );
   }
 
+  if (
+    witnessShift !== null
+  ) {
+    batch.set(
+      db
+        .collection("shifts")
+        .doc(
+          witnessShift.id
+        ),
+      witnessShift
+    );
+  }
+
   await batch.commit();
 
   return {
@@ -739,6 +826,7 @@ async function seedFixture(
     pair,
     reservationA,
     reservationB,
+    witnessShift,
   };
 }
 
@@ -1581,6 +1669,138 @@ test(
         fixture.shiftId
       ).length,
       0
+    );
+  }
+);
+
+/*
+ * 8. Recovery must never reopen the
+ * first-ever bootstrap gate.
+ */
+
+test(
+  "expired scheduled recovery keeps the activation ledger closed and grants no technician a manual start",
+  async () => {
+    const fixture =
+      await seedFixture({
+        activatedWitness: true,
+      });
+
+    assert.ok(fixture.witnessShift);
+
+    const witnessId =
+      fixture.witnessShift.id as string;
+
+    const recovered =
+      await recoverExpiredScheduledShift({
+        shiftId: fixture.shiftId,
+        actorUid: fixture.actorUid,
+      });
+
+    assert.equal(
+      recovered.status,
+      "cancelled"
+    );
+
+    /*
+     * Recovery may only cancel a shift that was never activated, so the
+     * already-started witness must survive byte-for-byte.
+     */
+
+    const witness =
+      await doc("shifts", witnessId);
+
+    assert.deepEqual(
+      witness,
+      fixture.witnessShift
+    );
+
+    const evidence =
+      await readFirstShiftBootstrapEvidenceFromDatabase(
+        db.collection("shifts")
+      );
+
+    assert.equal(
+      evidence.hasActivatedShift,
+      true
+    );
+
+    assert.equal(
+      evidence.activatedShiftId,
+      witnessId
+    );
+
+    assert.throws(
+      () =>
+        assertFirstEverShiftBootstrap(
+          evidence
+        ),
+      (error: unknown) =>
+        (error as Error).message ===
+        FIRST_SHIFT_BOOTSTRAP_CLOSED_MESSAGE
+    );
+
+    await assert.rejects(
+      () =>
+        startShift({
+          shiftId: fixture.shiftId,
+          actorUid: fixture.technicianA,
+        }),
+      isStatusError(409)
+    );
+
+    const started =
+      await db
+        .collection("shifts")
+        .where(
+          "status",
+          "in",
+          ["active", "handover_pending"]
+        )
+        .get();
+
+    assert.equal(
+      started.size,
+      0
+    );
+
+    const recoveredShift =
+      await doc(
+        "shifts",
+        fixture.shiftId
+      );
+
+    assert.equal(
+      recoveredShift?.status,
+      "cancelled"
+    );
+
+    assert.equal(
+      recoveredShift?.actualStart,
+      null
+    );
+
+    assert.equal(
+      await attendanceCount(
+        fixture.shiftId
+      ),
+      0
+    );
+
+    assert.equal(
+      await auditCount(
+        fixture.shiftId,
+        "SHIFT_STARTED"
+      ),
+      0
+    );
+
+    assert.equal(
+      await auditCount(
+        fixture.shiftId,
+        "SHIFT_CANCELLED"
+      ),
+      1
     );
   }
 );

@@ -1,28 +1,34 @@
 import "server-only";
 
-import { Timestamp } from "firebase-admin/firestore";
-import type {
-  DocumentData,
-  DocumentReference,
-  DocumentSnapshot,
-} from "firebase-admin/firestore";
+import type { DocumentData } from "firebase-admin/firestore";
 import type {
   AttendanceEvidence,
   AttendanceEvidenceRequest,
   AttendanceOperation,
   AttendanceTrustedAuthentication,
 } from "@/types/attendance-evidence";
-import type { HandoverReservationGuard } from "@/types/handover-reservation-guard";
 import type {
   EqualHandoverIdentity,
   EqualHandoverReservation,
 } from "@/types/equal-technician-handover";
 import { getOperationalCollections } from "./collections";
 import { readReservationGuardState } from "./handover-reservation-guard";
-import { assertHandoverReservationGuard } from "./handover-reservation-guard-domain";
 import { assertEqualHandoverAggregate } from "./equal-technician-handover-domain";
 import {
-  ALL_ATTENDANCE_EVIDENCE_KINDS,
+  ATTENDANCE_EVIDENCE_TIME_FIELDS,
+  assertNoAttendanceEvidenceCrossKindConflict,
+  attendanceEvidenceOtherKindRefs,
+  attendanceEvidenceTimestampsResolved,
+  attendanceTransactionalGetAll,
+  hydrateAttendanceDocumentFields,
+  outgoingShiftIdFromHandoverDocument,
+  persistAttendanceEvidence,
+  persistAttendanceOperation,
+  readAttendanceEvidenceSnapshot,
+  readAttendanceOperationSnapshot,
+  readReservationGuardSnapshot,
+} from "./attendance-evidence-firestore-state";
+import {
   assertAttendanceEvidence,
   assertAttendanceEvidenceRequest,
   assertAttendanceGuardOwnership,
@@ -83,168 +89,12 @@ export interface FinalizeAttendanceEvidenceResult {
   needsResume: boolean;
 }
 
-const EVIDENCE_TIME_FIELDS = [
-  "eventTime",
-  "clockIn",
-  "clockOut",
-  "finalizedAt",
-  "createdAt",
-] as const;
-
-const OPERATION_TIME_FIELDS = ["requestedAt", "finalizedAt", "abortedAt"] as const;
-
 function isCanonicalTimestamp(value: unknown): value is string {
   return (
     typeof value === "string" &&
     Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString() === value
   );
-}
-
-function toIso(value: unknown): string | null {
-  if (value instanceof Timestamp) {
-    return value.toDate().toISOString();
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  return null;
-}
-
-function hydrateFields(data: DocumentData, fields: readonly string[]): DocumentData {
-  const hydrated: DocumentData = { ...data };
-  for (const field of fields) {
-    hydrated[field] = toIso(data[field]);
-  }
-  return hydrated;
-}
-
-function readOperationSnapshot(snapshot: DocumentSnapshot): AttendanceOperation | null {
-  if (!snapshot.exists) {
-    return null;
-  }
-  return assertAttendanceOperation(
-    hydrateFields(snapshot.data() as DocumentData, OPERATION_TIME_FIELDS),
-  );
-}
-
-function readEvidenceSnapshot(snapshot: DocumentSnapshot): AttendanceEvidence | null {
-  if (!snapshot.exists) {
-    return null;
-  }
-  return assertAttendanceEvidence(
-    hydrateFields(snapshot.data() as DocumentData, EVIDENCE_TIME_FIELDS),
-  );
-}
-
-function readGuardSnapshot(snapshot: DocumentSnapshot): HandoverReservationGuard | null {
-  if (!snapshot.exists) {
-    return null;
-  }
-  return assertHandoverReservationGuard(
-    hydrateFields(snapshot.data() as DocumentData, ["createdAt", "updatedAt", "reservedAt"]),
-  );
-}
-
-// Firestore keeps unresolved server-timestamp sentinels as null on read.
-// eventTime/finalizedAt/createdAt are non-null on every evidence kind by
-// domain contract, so a null there means the write is not yet resolvable.
-function evidenceTimestampsResolved(data: DocumentData): boolean {
-  return (
-    toIso(data.eventTime) !== null &&
-    toIso(data.finalizedAt) !== null &&
-    toIso(data.createdAt) !== null
-  );
-}
-
-function toStoredTimestamp(value: string | null): unknown {
-  return value === null ? null : Timestamp.fromDate(new Date(value));
-}
-
-function persistEvidence(evidence: AttendanceEvidence): DocumentData {
-  return {
-    ...evidence,
-    eventTime: toStoredTimestamp(evidence.eventTime),
-    clockIn: toStoredTimestamp(evidence.clockIn),
-    clockOut: toStoredTimestamp(evidence.clockOut),
-    finalizedAt: toStoredTimestamp(evidence.finalizedAt),
-    createdAt: toStoredTimestamp(evidence.createdAt),
-  };
-}
-
-function persistOperation(operation: AttendanceOperation): DocumentData {
-  return {
-    ...operation,
-    requestedAt: toStoredTimestamp(operation.requestedAt),
-    finalizedAt: toStoredTimestamp(operation.finalizedAt),
-    abortedAt: toStoredTimestamp(operation.abortedAt),
-  };
-}
-
-function outgoingShiftIdFromHandoverDocument(handoverDocumentId: string): string {
-  const prefix = "handover_v2_";
-  if (!handoverDocumentId.startsWith(prefix) || handoverDocumentId.length === prefix.length) {
-    throw new AttendanceEvidenceDomainError(
-      "Attendance evidence requires a v2 equal-handover document binding.",
-      400,
-    );
-  }
-  return handoverDocumentId.slice(prefix.length);
-}
-
-async function transactionalGetAll(
-  transaction: { get(ref: DocumentReference): Promise<DocumentSnapshot> },
-  refs: DocumentReference[],
-): Promise<DocumentSnapshot[]> {
-  return Promise.all(refs.map((ref) => transaction.get(ref)));
-}
-
-function otherKindEvidenceRefs(
-  handoverId: string,
-  technicianUid: string,
-  kind: string,
-): DocumentReference[] {
-  const { attendanceEvidenceV2 } = getOperationalCollections();
-  return ALL_ATTENDANCE_EVIDENCE_KINDS.filter((item) => item !== kind).map(
-    (item) => attendanceEvidenceV2.doc(
-      attendanceEvidenceId(attendanceEvidenceSlotId({ handoverId, technicianUid, kind: item })),
-    ),
-  );
-}
-
-// Conflicting evidence for the same technician and handover must fail closed
-// and remain auditable: a personal clock-out and a colleague-attested
-// departure cannot coexist, and an attested departure may never replace a
-// prior personal clock-out.
-function assertNoCrossKindConflict(
-  snapshots: DocumentSnapshot[],
-  incomingKind: string,
-  technicianUid: string,
-): void {
-  for (const snapshot of snapshots) {
-    if (!snapshot.exists) {
-      continue;
-    }
-    const other = readEvidenceSnapshot(snapshot);
-    if (other === null || other.technicianUid !== technicianUid) {
-      continue;
-    }
-    const personal = "outgoing_personal_clock_out";
-    const attested = "outgoing_absent_departure_attestation";
-    const pair = `${incomingKind}|${other.kind}`;
-    if (
-      pair === `${personal}|${attested}` ||
-      pair === `${attested}|${personal}`
-    ) {
-      throw new AttendanceEvidenceDomainError(
-        `Conflicting attendance evidence already exists (${other.kind} for ${other.technicianUid}); fail closed and remain auditable.`,
-        409,
-      );
-    }
-  }
 }
 
 export async function beginAttendanceEvidenceOperation(
@@ -258,7 +108,7 @@ export async function beginAttendanceEvidenceOperation(
   try {
     return await db.runTransaction(async (transaction) => {
       const operationRef = attendanceEvidenceOperationsV2.doc(operationId);
-      const existingOperation = readOperationSnapshot(await transaction.get(operationRef));
+      const existingOperation = readAttendanceOperationSnapshot(await transaction.get(operationRef));
       if (existingOperation !== null) {
         if (existingOperation.requestDigest !== attendanceEvidenceRequestDigest(request)) {
           throw new AttendanceEvidenceDomainError(
@@ -274,9 +124,9 @@ export async function beginAttendanceEvidenceOperation(
         technicianUid: request.technicianUid,
         kind: request.kind,
       });
-      const [slotSnapshot, ...otherKindSnapshots] = await transactionalGetAll(transaction, [
+      const [slotSnapshot, ...otherKindSnapshots] = await attendanceTransactionalGetAll(transaction, [
         attendanceEvidenceV2.doc(attendanceEvidenceId(slotId)),
-        ...otherKindEvidenceRefs(request.handoverId, request.technicianUid, request.kind),
+        ...attendanceEvidenceOtherKindRefs(request.handoverId, request.technicianUid, request.kind),
       ]);
       if (slotSnapshot.exists) {
         throw new AttendanceEvidenceDomainError(
@@ -284,17 +134,17 @@ export async function beginAttendanceEvidenceOperation(
           409,
         );
       }
-      assertNoCrossKindConflict(otherKindSnapshots, request.kind, request.technicianUid);
+      assertNoAttendanceEvidenceCrossKindConflict(otherKindSnapshots, request.kind, request.technicianUid);
 
       const guardState = await readReservationGuardState(transaction, outgoingShiftId);
-      assertAttendanceRequestGuardBinding(readGuardSnapshot(guardState.guardSnapshot), request);
+      assertAttendanceRequestGuardBinding(readReservationGuardSnapshot(guardState.guardSnapshot), request);
 
       const operation = createPendingAttendanceOperation(request);
       // requestedAt is stamped with the Firestore-acknowledged clock of this
       // server process at request acceptance; it is audit metadata, while all
       // event times come from the trusted coordinator's server authentication
       // time and are immutable once written.
-      transaction.create(operationRef, persistOperation({
+      transaction.create(operationRef, persistAttendanceOperation({
         ...operation,
         requestedAt: new Date().toISOString(),
       }));
@@ -304,7 +154,7 @@ export async function beginAttendanceEvidenceOperation(
     // Concurrent identical begin: the other transaction created the
     // operation; converge onto the stored authoritative record.
     if (isAlreadyExistsError(error)) {
-      const operation = readOperationSnapshot(
+      const operation = readAttendanceOperationSnapshot(
         await attendanceEvidenceOperationsV2.doc(operationId).get(),
       );
       if (
@@ -332,7 +182,7 @@ export async function finalizeAttendanceEvidenceOperation(
 
   await db.runTransaction(async (transaction) => {
     const operationRef = attendanceEvidenceOperationsV2.doc(input.operationId);
-    const operation = readOperationSnapshot(await transaction.get(operationRef));
+    const operation = readAttendanceOperationSnapshot(await transaction.get(operationRef));
     if (operation === null) {
       throw new AttendanceEvidenceDomainError("Attendance operation not found.", 404);
     }
@@ -353,14 +203,14 @@ export async function finalizeAttendanceEvidenceOperation(
     const evidenceRef = attendanceEvidenceV2.doc(operation.evidenceId);
     const evidenceSnapshot = await transaction.get(evidenceRef);
     const guardState = await readReservationGuardState(transaction, outgoingShiftId);
-    const otherKindSnapshots = await transactionalGetAll(
+    const otherKindSnapshots = await attendanceTransactionalGetAll(
       transaction,
-      otherKindEvidenceRefs(request.handoverId, request.technicianUid, request.kind),
+      attendanceEvidenceOtherKindRefs(request.handoverId, request.technicianUid, request.kind),
     );
 
-    assertNoCrossKindConflict(otherKindSnapshots, request.kind, request.technicianUid);
+    assertNoAttendanceEvidenceCrossKindConflict(otherKindSnapshots, request.kind, request.technicianUid);
 
-    const guard = readGuardSnapshot(guardState.guardSnapshot);
+    const guard = readReservationGuardSnapshot(guardState.guardSnapshot);
     assertAttendanceGuardOwnership(guard, {
       ...attendanceGuardExpectations(input.reservation),
       expectedGuardRevision: request.expectedGuardRevision,
@@ -395,7 +245,7 @@ export async function finalizeAttendanceEvidenceOperation(
     }
 
     if (evidenceSnapshot.exists) {
-      const stored = readEvidenceSnapshot(evidenceSnapshot);
+      const stored = readAttendanceEvidenceSnapshot(evidenceSnapshot);
       if (stored !== null && stored.operationId !== operation.id) {
         // A different event already produced evidence for this slot. The
         // original event is authoritative: reject the duplicate instead of
@@ -420,8 +270,8 @@ export async function finalizeAttendanceEvidenceOperation(
       trustedAuthentication: input.trustedAuthentication,
     });
 
-    transaction.create(evidenceRef, persistEvidence(evidence));
-    transaction.set(operationRef, persistOperation(assertAttendanceOperation({
+    transaction.create(evidenceRef, persistAttendanceEvidence(evidence));
+    transaction.set(operationRef, persistAttendanceOperation(assertAttendanceOperation({
       ...operation,
       status: "finalized",
       interruptedFinalization: true,
@@ -467,7 +317,7 @@ export async function abortAttendanceEvidenceOperation(
   const { db, attendanceEvidenceOperationsV2 } = getOperationalCollections();
   const operationRef = attendanceEvidenceOperationsV2.doc(operationId);
   return db.runTransaction(async (transaction) => {
-    const operation = readOperationSnapshot(await transaction.get(operationRef));
+    const operation = readAttendanceOperationSnapshot(await transaction.get(operationRef));
     if (operation === null) {
       throw new AttendanceEvidenceDomainError("Attendance operation not found.", 404);
     }
@@ -483,7 +333,7 @@ export async function abortAttendanceEvidenceOperation(
       abortedAt: new Date().toISOString(),
       abortReason: abortReason.trim(),
     });
-    transaction.set(operationRef, persistOperation(aborted));
+    transaction.set(operationRef, persistAttendanceOperation(aborted));
     return aborted;
   });
 }
@@ -498,13 +348,13 @@ export async function readAttendanceEvidenceState(input: {
 }): Promise<{ operation: AttendanceOperation | null; evidence: AttendanceEvidence | null }> {
   const { attendanceEvidenceV2, attendanceEvidenceOperationsV2 } = getOperationalCollections();
   const slotId = attendanceEvidenceSlotId(input);
-  const evidence = readEvidenceSnapshot(
+  const evidence = readAttendanceEvidenceSnapshot(
     await attendanceEvidenceV2.doc(attendanceEvidenceId(slotId)).get(),
   );
   if (evidence === null) {
     return { operation: null, evidence: null };
   }
-  const operation = readOperationSnapshot(
+  const operation = readAttendanceOperationSnapshot(
     await attendanceEvidenceOperationsV2.doc(evidence.operationId).get(),
   );
   return { operation, evidence };
@@ -515,7 +365,7 @@ async function completeFinalizationAcknowledgement(
 ): Promise<{ operation: AttendanceOperation; evidence: AttendanceEvidence }> {
   const { attendanceEvidenceV2, attendanceEvidenceOperationsV2 } = getOperationalCollections();
   const operationRef = attendanceEvidenceOperationsV2.doc(operationId);
-  const operation = readOperationSnapshot(await operationRef.get());
+  const operation = readAttendanceOperationSnapshot(await operationRef.get());
   if (operation === null) {
     throw new AttendanceEvidenceDomainError("Attendance operation not found.", 404);
   }
@@ -538,8 +388,8 @@ async function completeFinalizationAcknowledgement(
       409,
     );
   }
-  const hydrated = hydrateFields(evidenceSnapshot.data() as DocumentData, EVIDENCE_TIME_FIELDS);
-  if (!evidenceTimestampsResolved(hydrated)) {
+  const hydrated = hydrateAttendanceDocumentFields(evidenceSnapshot.data() as DocumentData, ATTENDANCE_EVIDENCE_TIME_FIELDS);
+  if (!attendanceEvidenceTimestampsResolved(hydrated)) {
     throw new AttendanceEvidenceDomainError(
       "Attendance evidence server clock is not yet resolvable; retry resumeAttendanceEvidenceOperation.",
       409,
@@ -552,7 +402,7 @@ async function completeFinalizationAcknowledgement(
       interruptedFinalization: false,
       finalizedAt: evidence.finalizedAt,
     });
-    await operationRef.set(persistOperation(recovered));
+    await operationRef.set(persistAttendanceOperation(recovered));
     return { operation: recovered, evidence };
   }
   return { operation, evidence };
@@ -563,13 +413,13 @@ async function readStoredAttendanceEvidence(operationId: string): Promise<{
   evidence: AttendanceEvidence;
 }> {
   const { attendanceEvidenceV2, attendanceEvidenceOperationsV2 } = getOperationalCollections();
-  const operation = readOperationSnapshot(
+  const operation = readAttendanceOperationSnapshot(
     await attendanceEvidenceOperationsV2.doc(operationId).get(),
   );
   if (operation === null) {
     throw new AttendanceEvidenceDomainError("Attendance operation not found.", 404);
   }
-  const evidence = readEvidenceSnapshot(
+  const evidence = readAttendanceEvidenceSnapshot(
     await attendanceEvidenceV2.doc(operation.evidenceId).get(),
   );
   if (evidence === null) {

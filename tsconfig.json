@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,8 +23,10 @@
       }
     ],
     "paths": {
-  "@/*": ["./src/*"]
-}
+      "@/*": [
+        "./src/*"
+      ]
+    }
   },
   "include": [
     "next-env.d.ts",
@@ -28,7 +34,54 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next-uat/types/**/*.ts",
+    ".next-uat/dev/types/**/*.ts",
+    ".next-uat-b/types/**/*.ts",
+    ".next-uat-b/dev/types/**/*.ts",
+    ".next-09l/types/**/*.ts",
+    ".next-09l/dev/types/**/*.ts",
+    ".next-09m/types/**/*.ts",
+    ".next-09m/dev/types/**/*.ts",
+    ".next-09m-wp/types/**/*.ts",
+    ".next-09m-wp/dev/types/**/*.ts",
+    ".next-atomic-http-on/types/**/*.ts",
+    ".next-atomic-http-on/dev/types/**/*.ts",
+    ".next-atomic-http-off/types/**/*.ts",
+    ".next-atomic-http-off/dev/types/**/*.ts",
+    ".next-p6-on/types/**/*.ts",
+    ".next-p6-on/dev/types/**/*.ts",
+    ".next-p6-off/types/**/*.ts",
+    ".next-p6-off/dev/types/**/*.ts",
+    ".next-p7-off/types/**/*.ts",
+    ".next-p7-off/dev/types/**/*.ts",
+    ".next-p7-build/types/**/*.ts",
+    ".next-p7-build/dev/types/**/*.ts",
+    ".next-p8a2/types/**/*.ts",
+    ".next-p8a2/dev/types/**/*.ts",
+    ".next-p8a2r/types/**/*.ts",
+    ".next-p8a2r/dev/types/**/*.ts",
+    ".next-p8b/types/**/*.ts",
+    ".next-p8b/dev/types/**/*.ts",
+    ".next-recovery-approval-http-on/types/**/*.ts",
+    ".next-recovery-approval-http-on/dev/types/**/*.ts",
+    ".next-recovery-approval-http-off/types/**/*.ts",
+    ".next-recovery-approval-http-off/dev/types/**/*.ts",
+    ".next-recovery-eligibility-http-on/types/**/*.ts",
+    ".next-recovery-eligibility-http-on/dev/types/**/*.ts",
+    ".next-recovery-eligibility-http-off/types/**/*.ts",
+    ".next-recovery-eligibility-http-off/dev/types/**/*.ts",
+    ".next-launch-live/types/**/*.ts",
+    ".next-launch-live/dev/types/**/*.ts",
+    ".next-launch-p8a2r/types/**/*.ts",
+    ".next-launch-p8a2r/dev/types/**/*.ts",
+    ".next-recovery-approval-v2-http-on/types/**/*.ts",
+    ".next-recovery-approval-v2-http-on/dev/types/**/*.ts",
+    ".next-recovery-approval-v2-http-off/types/**/*.ts",
+    ".next-recovery-approval-v2-http-off/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "functions"
+  ]
 }

@@ -67,15 +67,15 @@ export async function POST(
   /*
    * PHASE 2:
    * Enforce role-based authorization.
+   *
+   * Activation is a technician action. Supervisors and administrators pair
+   * technicians and schedule shifts, but they never start one, and startShift
+   * re-derives the technician's assignment inside its own transaction.
    */
 
-  if (
-    actor.role !== "admin" &&
-    actor.role !== "supervisor" &&
-    actor.role !== "technician"
-  ) {
+  if (actor.role !== "technician") {
     return errorResponse(
-      "Only administrators, supervisors, or an explicitly authorized temporary technician can start shifts.",
+      "Only an assigned technician can start a shift. Supervisors and administrators do not start shifts.",
       403
     );
   }

@@ -74,6 +74,7 @@
 
 /* Light theme tokens */
 :root {
+  color-scheme: light;
   --background: #F8F9FA;
   --foreground: #0F172A;
   --surface: #FFFFFF;
@@ -89,6 +90,7 @@
 
 /* Dark theme tokens */
 :root.dark {
+  color-scheme: dark;
   --background: #0B0D13;
   --foreground: #F5F1E9;
   --surface: #151A26;
@@ -104,6 +106,21 @@
   --duration-hover: 160ms;
   --duration-active: 200ms;
 
+}
+
+/* Option lists and picker panels are painted by the browser, not by Tailwind,
+   and they take their palette from `color-scheme` - which is why the dark
+   theme's near-white text landed unreadably on the UA's default light list.
+   These pairs also cover engines that instead read the colours off the
+   element, and keep disabled rows legible. The hovered/selected row highlight
+   stays UA-drawn; CSS cannot theme it. */
+option {
+  color: var(--foreground);
+  background-color: var(--surface);
+}
+
+option:disabled {
+  color: var(--muted);
 }
 
 /* Tailwind theme configuration */

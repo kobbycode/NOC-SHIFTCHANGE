@@ -735,11 +735,30 @@ export function TechnicianShiftWorkspace() {
                 "scheduled" &&
               !currentShift.canStart && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                  This shift is assigned to
-                  you. Refresh My Shift when
-                  it becomes active, then use
-                  Join Shift to record your
-                  attendance.
+                  {currentShift.firstShiftBootstrapAvailable ? (
+                    <>
+                      This shift is assigned to
+                      you. Either technician on
+                      the pair can start it, but
+                      your account is not
+                      currently eligible to do
+                      so. Ask your supervisor to
+                      review your account status
+                      and pair membership.
+                    </>
+                  ) : (
+                    <>
+                      This shift is assigned to
+                      you. Later shifts activate
+                      automatically when an
+                      incoming technician accepts
+                      the handover with their own
+                      password. Refresh My Shift
+                      when it becomes active, then
+                      use Join Shift to record
+                      your attendance.
+                    </>
+                  )}
                 </div>
               )}
 

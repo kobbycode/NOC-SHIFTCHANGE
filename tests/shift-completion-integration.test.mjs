@@ -299,9 +299,16 @@ test(
 test(
   "handover does not fabricate attendance finalize authorization or end memberships",
   () => {
+    // Beginning a v2 handover only READS the initiator's own attendance to
+    // prove participation; it must never create or mutate an attendance row.
     assert.doesNotMatch(
       handoverSource,
-      /shiftAttendance/
+      /transaction\.(?:create|set|update|delete)\(\s*(?:attendanceRef|shiftAttendance)/
+    );
+
+    assert.match(
+      handoverSource,
+      /You must join this shift before beginning its handover/,
     );
 
     assert.doesNotMatch(

@@ -33,6 +33,10 @@ import {
   type TechnicianCurrentShiftView,
 } from "./technician-current-shift-domain";
 
+import {
+  readFirstShiftBootstrapEvidenceFromDatabase,
+} from "./first-shift-bootstrap";
+
 function mapDomainError(
   error: unknown,
 ): never {
@@ -163,6 +167,9 @@ export async function getTechnicianCurrentShift(
         attendanceDocumentId:
           null,
         attendance: null,
+
+        firstShiftBootstrapAvailable:
+          false,
       });
     } catch (error) {
       mapDomainError(error);
@@ -281,11 +288,15 @@ export async function getTechnicianCurrentShift(
     secondMembershipSnapshot,
     authorizationSnapshot,
     attendanceSnapshot,
+    bootstrapEvidence,
   ] = await Promise.all([
     firstMembershipRef.get(),
     secondMembershipRef.get(),
     authorizationRef.get(),
     attendanceRef.get(),
+    readFirstShiftBootstrapEvidenceFromDatabase(
+      shifts,
+    ),
   ]);
 
   try {
@@ -329,6 +340,9 @@ export async function getTechnicianCurrentShift(
         attendanceSnapshot.exists
           ? attendanceSnapshot.data()
           : null,
+
+      firstShiftBootstrapAvailable:
+        !bootstrapEvidence.hasActivatedShift,
     });
   } catch (error) {
     mapDomainError(error);

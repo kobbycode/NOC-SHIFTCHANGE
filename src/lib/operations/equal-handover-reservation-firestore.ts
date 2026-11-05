@@ -12,6 +12,8 @@ import type {
   TechnicianScheduleEntry,
 } from "@/types/technician-schedule";
 import { GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID, getOperationalCollections } from "./collections";
+import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
+import { reservationIntents } from "@/lib/notifications/notification-hooks";
 import { AssignmentOperationError, markAssignmentActivity, requireEligibleTechnician } from "./assignment-transaction";
 import { assertHandoverAggregate } from "./handover-domain";
 import { assertOperationalShiftControl, assertShiftOwnsOperationalSlot } from "./operational-shift-control-state";
@@ -609,6 +611,9 @@ async function persist(
         recordedAt: now,
         createdAt: FieldValue.serverTimestamp(),
       });
+      if (notificationsEnabled() && operation !== "cancel") {
+        writeOutboxEntries(transaction, db, reservationIntents(aggregate, now));
+      }
     }
 
     return {

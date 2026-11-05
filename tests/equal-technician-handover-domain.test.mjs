@@ -827,3 +827,133 @@ test("18. preservation of v1 domain contracts and separation of concerns", () =>
   assert.equal(lateAcceptance.isLate, true);
   assert.equal(lateAcceptance.latenessMinutes, 75);
 });
+
+// ----------------------------------------------------------------------------
+// 19. Absence attestation is a colleague act (09J §2) — no self-attestation.
+// ----------------------------------------------------------------------------
+test("19. a technician cannot attest their own absence at the domain contract", () => {
+  const agg = validAggregate();
+  assert.throws(
+    () => domain.recordEqualHandoverAbsence(agg, {
+      ...context(agg),
+      actorUid: "in-tech-2",
+      technicianUid: "in-tech-2",
+      absenceType: "not_yet_in",
+      reason: "Self declaration",
+    }),
+    /A technician cannot attest their own absence/,
+  );
+});
+
+// ----------------------------------------------------------------------------
+// 20. Only the attesting colleague may clear a declaration (09J §3).
+// ----------------------------------------------------------------------------
+test("20. only the attesting colleague may clear a standing absence declaration", () => {
+  let agg = validAggregate();
+  // out-tech-1 attests the incoming colleague's absence.
+  agg = domain.recordEqualHandoverAbsence(agg, {
+    ...context(agg),
+    actorUid: "out-tech-1",
+    technicianUid: "in-tech-2",
+    absenceType: "not_yet_in",
+    reason: "Stuck in transit",
+  });
+  assert.equal(agg.absences.length, 1);
+  assert.equal(agg.absences[0].recordedBy, "out-tech-1");
+
+  // A different outgoing technician cannot clear it — the standing declaration
+  // is preserved and the revision never advances.
+  assert.throws(
+    () => domain.clearEqualHandoverAbsence(agg, {
+      ...context(agg),
+      actorUid: "out-tech-2",
+      technicianUid: "in-tech-2",
+    }),
+    /Only the technician who attested an absence declaration may clear it/,
+  );
+  const subject = agg.absences[0].technicianUid;
+  assert.equal(subject, "in-tech-2");
+
+  // The absent technician still cannot clear their own declaration.
+  assert.throws(
+    () => domain.clearEqualHandoverAbsence(agg, {
+      ...context(agg),
+      actorUid: "in-tech-2",
+      technicianUid: "in-tech-2",
+    }),
+    /Only the technician who attested an absence declaration may clear it/,
+  );
+
+  // The attesting colleague clears it successfully.
+  const cleared = domain.clearEqualHandoverAbsence(agg, {
+    ...context(agg),
+    actorUid: "out-tech-1",
+    technicianUid: "in-tech-2",
+  });
+  assert.deepEqual(cleared.absences, []);
+  assert.equal(cleared.revision, agg.revision + 1);
+});
+
+// ----------------------------------------------------------------------------
+// 21. Clearing keeps the existing revision, lifecycle and no-op guarantees.
+// ----------------------------------------------------------------------------
+test("21. clearing respects stale revision, terminal lifecycle and idempotent no-op rules", () => {
+  let agg = validAggregate();
+  agg = domain.recordEqualHandoverAbsence(agg, {
+    ...context(agg),
+    actorUid: "out-tech-1",
+    technicianUid: "in-tech-2",
+    absenceType: "not_yet_in",
+    reason: "Delayed arrival",
+  });
+
+  // Stale revision is rejected before any clearing work.
+  assert.throws(
+    () => domain.clearEqualHandoverAbsence(agg, {
+      revision: agg.revision - 1,
+      snapshotHash: domain.createEqualHandoverSnapshot(agg).snapshotHash,
+      recordedAt: later,
+      actorUid: "out-tech-1",
+      technicianUid: "in-tech-2",
+    }),
+    /Stale handover revision/,
+  );
+
+  // Clearing a position that holds no declaration is an idempotent no-op that
+  // leaves the aggregate byte-identical (no revision advance).
+  const noop = domain.clearEqualHandoverAbsence(agg, {
+    ...context(agg),
+    actorUid: "out-tech-1",
+    technicianUid: "in-tech-1",
+  });
+  assert.equal(canonical(noop), canonical(agg));
+
+  // Once the lifecycle is terminal, mutation is refused even for the attestor.
+  let done = validAggregate();
+  for (const uid of ["out-tech-1", "out-tech-2", "in-tech-1", "in-tech-2"]) {
+    done = domain.confirmEqualHandoverParticipant(done, {
+      ...context(done),
+      actorUid: uid,
+      technicianUid: uid,
+    });
+  }
+  const completed = domain.completeEqualHandoverTransfer(done, {
+    ...context(done),
+    actorUid: "supervisor-1",
+  });
+  assert.equal(completed.lifecycleStatus, "completed");
+  assert.throws(
+    () => domain.clearEqualHandoverAbsence(completed, {
+      revision: completed.revision,
+      snapshotHash: domain.createEqualHandoverSnapshot(completed).snapshotHash,
+      recordedAt: later,
+      actorUid: "out-tech-1",
+      technicianUid: "in-tech-2",
+    }),
+    /Handover lifecycle does not permit mutation/,
+  );
+});
+
+function canonical(value) {
+  return JSON.stringify(value);
+}

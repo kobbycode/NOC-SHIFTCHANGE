@@ -717,6 +717,13 @@ export function recordEqualHandoverAbsence(
 ): EqualHandoverAggregate {
   const aggregate = mutation(value, input);
   identifier(input.actorUid, "recording actor UID", 128);
+  // Domain-level rule (09J §2): a colleague attestation is never a
+  // self-declaration. Profile-based "authorized outgoing technician" authority
+  // needs the live user profile, so it stays in the service; this subject-based
+  // invariant is enforced here too so a future caller cannot bypass it.
+  if (input.actorUid === input.technicianUid) {
+    fail("A technician cannot attest their own absence.", 403);
+  }
   const participant = participantFor(aggregate, input.technicianUid);
   const absenceReason = reason(input.reason);
 
@@ -781,8 +788,16 @@ export function clearEqualHandoverAbsence(
   const aggregate = mutation(value, input);
   identifier(input.actorUid, "clearing actor UID", 128);
   const participant = participantFor(aggregate, input.technicianUid);
-  if (!aggregate.absences.some((item) => item.position === participant.position)) {
+  const standing = aggregate.absences.find((item) => item.position === participant.position);
+  if (!standing) {
     return aggregate;
+  }
+  // Domain-level rule (09J §3): a declaration may only be cleared by the
+  // colleague who attested it. recordedBy is always an outgoing attestor, so
+  // this also confines clearing to the outgoing side. The mutation() guard
+  // above already enforces revision, lifecycle and snapshot concurrency.
+  if (standing.recordedBy !== input.actorUid) {
+    fail("Only the technician who attested an absence declaration may clear it.", 403);
   }
   const next = revise(aggregate, input.recordedAt, "absence_cleared");
   next.absences = next.absences.filter((item) => item.position !== participant.position);

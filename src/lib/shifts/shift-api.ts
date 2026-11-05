@@ -8,8 +8,13 @@ import {
   SHIFT_TYPES,
 } from "@/types/shift";
 import type {
+  Shift,
+} from "@/types/shift";
+import type {
+  CreateShiftInput,
   ShiftCompletionApiResponse,
   ShiftCompletionResult,
+  ShiftCreateApiResponse,
   ShiftHandoverApiResponse,
   ShiftHandoverResult,
   ShiftListApiResponse,
@@ -161,6 +166,167 @@ Promise<ShiftListResult> {
   };
 }
 
+
+/*
+ * Request authoritative creation of one
+ * scheduled operational shift.
+ *
+ * The browser supplies only the shift window
+ * and the selected permanent pair. Actor
+ * identity, account state, pair validity,
+ * technician eligibility, slot ownership,
+ * authorization consumption and audit data
+ * remain server-owned.
+ */
+export async function createShift(
+  input: CreateShiftInput,
+): Promise<Shift> {
+  const permanentPairId =
+    typeof input.permanentPairId ===
+      "string"
+      ? input.permanentPairId.trim()
+      : "";
+
+  if (
+    !permanentPairId ||
+    permanentPairId === "." ||
+    permanentPairId === ".." ||
+    permanentPairId.includes("/") ||
+    permanentPairId.length > 512
+  ) {
+    throw new ShiftApiError(
+      "Please select a valid permanent technician pair.",
+      400,
+    );
+  }
+
+  if (
+    input.shiftType !== SHIFT_TYPES.MORNING &&
+    input.shiftType !== SHIFT_TYPES.NIGHT
+  ) {
+    throw new ShiftApiError(
+      "Please select a valid shift type.",
+      400,
+    );
+  }
+
+  if (
+    !isCanonicalShiftApiTimestamp(
+      input.scheduledStart,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      input.scheduledEnd,
+    ) ||
+    Date.parse(input.scheduledEnd) <=
+      Date.parse(input.scheduledStart)
+  ) {
+    throw new ShiftApiError(
+      "Please provide a valid shift window.",
+      400,
+    );
+  }
+
+  const response = await fetch(
+    "/api/operations/shifts",
+    {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        shiftType: input.shiftType,
+        scheduledStart:
+          input.scheduledStart,
+        scheduledEnd:
+          input.scheduledEnd,
+        permanentPairId,
+      }),
+    }
+  );
+
+  const data =
+    await readApiResponse(response);
+
+  const result =
+    requireSuccessfulResponse<
+      ShiftCreateApiResponse
+    >(response, data);
+
+  if (
+    result.success !== true ||
+    !isShiftApiRecord(result.shift)
+  ) {
+    throw new ShiftApiError(
+      "The shift-creation response is invalid.",
+      response.status,
+    );
+  }
+
+  const shift = result.shift;
+
+  const {
+    id,
+    shiftType,
+    status,
+    scheduledStart,
+    scheduledEnd,
+    permanentPairId:
+      responsePairId,
+    primaryTechnicianIds,
+    operationalSlotToken,
+    createdAt,
+    updatedAt,
+  } = shift;
+
+  if (
+    typeof id !== "string" ||
+    !id.trim() ||
+    id === "." ||
+    id === ".." ||
+    id.includes("/") ||
+    id.length > 512 ||
+    shiftType !== input.shiftType ||
+    status !== SHIFT_STATUSES.SCHEDULED ||
+    scheduledStart !==
+      input.scheduledStart ||
+    scheduledEnd !==
+      input.scheduledEnd ||
+    responsePairId !==
+      permanentPairId ||
+    !Array.isArray(
+      primaryTechnicianIds,
+    ) ||
+    primaryTechnicianIds.length !== 2 ||
+    primaryTechnicianIds.some(
+      (technicianId) =>
+        typeof technicianId !==
+          "string" ||
+        !technicianId.trim(),
+    ) ||
+    primaryTechnicianIds[0] ===
+      primaryTechnicianIds[1] ||
+    !(
+      operationalSlotToken === null ||
+      typeof operationalSlotToken ===
+        "string"
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      createdAt,
+    ) ||
+    !isCanonicalShiftApiTimestamp(
+      updatedAt,
+    )
+  ) {
+    throw new ShiftApiError(
+      "The shift-creation response is invalid.",
+      response.status,
+    );
+  }
+
+  return shift as unknown as Shift;
+}
 
 /*
  * Retrieve authoritative membership records
@@ -533,6 +699,7 @@ function isTechnicianCurrentShift(
     authorizationId,
     attendance,
     joinedAt,
+    firstShiftBootstrapAvailable,
     canStart,
     canJoin,
   } = value;
@@ -573,6 +740,8 @@ function isTechnicianCurrentShift(
     !isAllowedParticipationAuthority(
       participationAuthority,
     ) ||
+    typeof firstShiftBootstrapAvailable !==
+      "boolean" ||
     typeof canStart !== "boolean" ||
     typeof canJoin !== "boolean"
   ) {
@@ -603,10 +772,7 @@ function isTechnicianCurrentShift(
       joinedAt !== null ||
       canJoin ||
       canStart !==
-        (
-          participationAuthority ===
-          ATTENDANCE_PARTICIPATION_AUTHORITIES.TEMPORARY_AUTHORIZED
-        )
+        firstShiftBootstrapAvailable
     ) {
       return false;
     }
@@ -647,6 +813,17 @@ function isTechnicianCurrentShift(
     ) {
       return false;
     }
+  }
+
+  /*
+   * A shift that is already active or handing over is itself activation
+   * evidence, so manual start is closed for it by definition.
+   */
+
+  if (
+    firstShiftBootstrapAvailable !== false
+  ) {
+    return false;
   }
 
   if (
@@ -721,8 +898,11 @@ Promise<TechnicianCurrentShiftResult | null> {
 /*
  * Request authoritative shift activation.
  *
- * For a technician, the server independently
- * verifies exact temporary authorization,
+ * Only an assigned technician may activate a
+ * shift, and only for the first shift ever:
+ * the server independently re-derives the
+ * activation ledger, permanent-pair
+ * membership or exact temporary authorization,
  * slot ownership, eligibility, and the
  * activation window.
  *

@@ -8,6 +8,7 @@ import { evaluateAssignmentEligibility } from "./assignment-eligibility";
 import { requireEligibleAssignmentShift } from "./assignment-shift-eligibility";
 import { assertOperationalShiftControl, assertShiftOwnsOperationalSlot } from "./operational-shift-control-state";
 import { createNextShiftAuthorizationDocumentId, readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
+import { readFirstShiftBootstrapEvidenceInTransaction } from "./first-shift-bootstrap";
 import { resolveTechnicianCurrentShift } from "./technician-current-shift-domain";
 import { assembleShiftOperations, operationIdentifier, parseOperation, ShiftOperationsError } from "./shift-operations-domain";
 
@@ -46,13 +47,15 @@ export async function requireOperationsScope(transaction: Transaction, actor: Ap
   const pairDoc = await transaction.get(technicianPairs.doc(shift.permanentPairId));
   const ids = readActivePermanentPairTechnicianIds(pairDoc.data(),shift.permanentPairId);
   const authorizationId = createNextShiftAuthorizationDocumentId(shift.permanentPairId,control.generation,control.slotToken);
-  const [first,second,authorization,attendance] = await Promise.all([
+  const [first,second,authorization,attendance,bootstrapEvidence] = await Promise.all([
     transaction.get(technicianPairMemberships.doc(ids[0])), transaction.get(technicianPairMemberships.doc(ids[1])),
     transaction.get(nextShiftAuthorizations.doc(authorizationId)), transaction.get(shiftAttendance.doc(`${shiftId}_${actor.uid}`)),
+    readFirstShiftBootstrapEvidenceInTransaction(transaction, shifts),
   ]);
   const current = resolveTechnicianCurrentShift({technicianUid: actor.uid, control, shift, permanentPair: pairDoc.data(),
     pairMemberships: [first.data() ?? null, second.data() ?? null], authorizationDocumentId: authorization.exists ? authorization.id : null,
-    authorization: authorization.data() ?? null, attendanceDocumentId: attendance.exists ? attendance.id : null, attendance: attendance.data() ?? null });
+    authorization: authorization.data() ?? null, attendanceDocumentId: attendance.exists ? attendance.id : null, attendance: attendance.data() ?? null,
+    firstShiftBootstrapAvailable: !bootstrapEvidence.hasActivatedShift });
   if (!current || current.id !== shiftId || !current.joinedAt || !current.attendance || current.attendance.clockOut !== null) {
     throw new ShiftOperationsError("Join your current shift before recording operations.",403);
   }

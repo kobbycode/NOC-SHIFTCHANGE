@@ -26,6 +26,8 @@ import {
   assertHandoverReservationGuard,
   transitionGuardForCompletion,
 } from "./handover-reservation-guard-domain";
+import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
+import { taskTransferIntents } from "@/lib/notifications/notification-hooks";
 
 export interface FormalHandoverTransferBinding { expectedRevision: number; expectedSnapshotHash: string }
 export interface FormalHandoverTransferInput extends FormalHandoverTransferBinding {
@@ -337,6 +339,7 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
       technicianUid: uid, participationAuthority: "primary", authorizationId: null, recordedAt: now }));
     const releasedIds: string[] = [];
     const historyIds: string[] = [];
+    const transferIntents: ReturnType<typeof taskTransferIntents> = [];
     // Membership/schedule mutations participate in the same account-operation
     // activity markers as ordinary activation and completion.
     const assignmentActivity = new Set<string>(requiredUsers);
@@ -359,6 +362,9 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
         operationalControlBefore: control, operationalControlAfter: after };
       add(`handover_task_transfers/${id}`, "create", evidence); historyIds.push(id);
       add(`tasks/${task.id}`, "update", { shiftId: incomingId, updatedAt: now }, task);
+      if (notificationsEnabled()) transferIntents.push(...taskTransferIntents({ eventId: id,
+        incomingTechnicianUids: [...identity.incomingPrimaryTechnicianIds], taskId: task.id,
+        outgoingShiftId, incomingShiftId: incomingId, createdAt: now }));
     }
     for (const uid of new Set([actorUid, ...assignmentActivity])) {
       add(`users/${uid}`, "update", { ...(uid === actorUid ? { lastOperationalActivityAt: FieldValue.serverTimestamp() } : {}),
@@ -383,6 +389,8 @@ export async function persistFormalHandoverTransfer(input: FormalHandoverTransfe
       else if (write.operation === "update") transaction.update(ref, write.data);
       else transaction.set(ref, write.data);
     }
+    // Durable notification outbox: transactional sets only, never a push call.
+    if (transferIntents.length > 0) writeOutboxEntries(transaction, db, transferIntents);
     return { status: "TRANSFERRED", receipt };
   });
 }

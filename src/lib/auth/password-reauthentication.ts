@@ -102,14 +102,80 @@ export async function reauthenticatePassword(
   if (process.env.FIREBASE_AUTH_EMULATOR_HOST) {
     // Never send demonstration credentials to production or an arbitrary host.
     // Emulator authentication still verifies the password and exact Firebase UID.
-    if (process.env.FIREBASE_AUTH_EMULATOR_HOST !== "127.0.0.1:9099" ||
-        process.env.FIRESTORE_EMULATOR_HOST !== "127.0.0.1:8080" ||
-        process.env.FIREBASE_PROJECT_ID !== "demo-shiftchange-v2" ||
-        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID !== "demo-shiftchange-v2" ||
-        process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS !== "true") {
+    // This closed list mirrors ISOLATED_EMULATOR_ENVIRONMENTS in
+    // src/lib/firebase/client.ts so the browser and the server always reach the
+    // same isolated emulator; anything else fails closed.
+    const isolatedEnvironments = [
+      {
+        projectId: "demo-shiftchange-v2",
+        authEmulatorHost: "127.0.0.1:9099",
+        firestoreEmulatorHost: "127.0.0.1:8080",
+      },
+      {
+        projectId: "demo-shiftchange-v2-uat",
+        authEmulatorHost: "127.0.0.1:9199",
+        firestoreEmulatorHost: "127.0.0.1:8180",
+      },
+      {
+        projectId: "demo-shiftchange-v2-09l",
+        authEmulatorHost: "127.0.0.1:9299",
+        firestoreEmulatorHost: "127.0.0.1:8280",
+      },
+      {
+        projectId: "demo-shiftchange-v2-09m",
+        authEmulatorHost: "127.0.0.1:9399",
+        firestoreEmulatorHost: "127.0.0.1:8380",
+      },
+      {
+        projectId: "demo-atomic-acceptance-r5",
+        authEmulatorHost: "127.0.0.1:9083",
+        firestoreEmulatorHost: "127.0.0.1:8183",
+      },
+      {
+        projectId: "demo-atomic-browser-p6",
+        authEmulatorHost: "127.0.0.1:9499",
+        firestoreEmulatorHost: "127.0.0.1:8480",
+      },
+      {
+        projectId: "demo-product-readiness-p7",
+        authEmulatorHost: "127.0.0.1:9599",
+        firestoreEmulatorHost: "127.0.0.1:8580",
+      },
+      {
+        projectId: "demo-scheduling-p8a",
+        authEmulatorHost: "127.0.0.1:9799",
+        firestoreEmulatorHost: "127.0.0.1:8680",
+      },
+      {
+        projectId: "demo-lifecycle-p8a2",
+        authEmulatorHost: "127.0.0.1:9899",
+        firestoreEmulatorHost: "127.0.0.1:8780",
+      },
+      {
+        projectId: "demo-lifecycle-p8a2r",
+        authEmulatorHost: "127.0.0.1:9999",
+        firestoreEmulatorHost: "127.0.0.1:8880",
+      },
+      {
+        projectId: "demo-admin-review-8b",
+        authEmulatorHost: "127.0.0.1:10099",
+        firestoreEmulatorHost: "127.0.0.1:8980",
+      },
+    ];
+
+    const isolated = isolatedEnvironments.find(
+      (environment) =>
+        environment.projectId === process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
+        environment.projectId === process.env.FIREBASE_PROJECT_ID &&
+        environment.authEmulatorHost === process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+        environment.firestoreEmulatorHost === process.env.FIRESTORE_EMULATOR_HOST
+    );
+
+    if (!isolated || process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS !== "true") {
       throw new PasswordReauthenticationError("CONFIGURATION_UNAVAILABLE");
     }
-    endpoint = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=";
+
+    endpoint = `http://${isolated.authEmulatorHost}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=`;
   }
 
   let response: Pick<Response, "ok" | "status" | "json">;

@@ -3,6 +3,8 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { EqualHandoverReportState } from "@/lib/operations/equal-handover-report-firestore";
 import type { EqualHandoverReportV2Content } from "@/types/handover-report-v2";
+import { reportAttendanceLabels, reportNoticeCategory } from "@/lib/operations/handover-report-attendance-view";
+import { IncomingAcceptanceAtomicPanel } from "./incoming-acceptance-atomic";
 const field = "block w-full rounded-lg border bg-transparent p-2";
 
 const POSITION_LABELS: { position: string; side: "outgoing" | "incoming"; label: string }[] = [
@@ -20,7 +22,7 @@ function short(value: string | null): string {
   return value === null ? "—" : value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
 }
 
-export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; initialState: EqualHandoverReportState }) {
+export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEnabled }: { uid: string; initialState: EqualHandoverReportState; atomicAcceptanceEnabled: boolean }) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
   const [busy, setBusy] = useState(false);
@@ -54,6 +56,16 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
     } finally {
       lock.current = false; setBusy(false);
     }
+  };
+
+  // Read-only refresh of the authoritative report state, shared with the
+  // atomic acceptance panel so its success/failure display always reflects
+  // persisted evidence rather than an optimistic local guess.
+  const refreshReport = async () => {
+    const refreshed = await fetch(`${base}/report`, { headers: { Accept: "application/json" } });
+    const refreshResult = await refreshed.json();
+    if (refreshed.ok && refreshResult.success) setState(refreshResult.report);
+    router.refresh();
   };
 
   const prepare = async (form: HTMLFormElement) => {
@@ -283,7 +295,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
 
     {frozenReport && <div className="rounded-xl border p-4 text-sm">Frozen report <strong>{frozenReport.id}</strong> (version {frozenReport.version}{frozenReport.supersedesReportId ? `, supersedes ${frozenReport.supersedesReportId}` : ""}) frozen by {frozenReport.frozenBy} at {accra(frozenReport.frozenAt)} · digest {short(frozenReport.digest)}.</div>}
     {preparationDrifted && <div className="rounded-xl border border-amber-500 p-4 text-sm">The authoritative sources changed since the last preparation. Re-prepare and review the consolidated report before freezing.</div>}
-    {!preparation && !preparationDrifted && <div className="rounded-xl border p-4 text-sm">No preparation exists yet. Prepare the consolidated report to begin the review.</div>}
+    {!preparation && !preparationDrifted && !frozenReport && <div className="rounded-xl border p-4 text-sm">No preparation exists yet. Prepare the consolidated report to begin the review.</div>}
     {notice && <p className="text-sm text-green-700">{notice}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
@@ -333,20 +345,28 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       {!isConfirmedOutgoing && !myConfirmation && !myAbsence && myPosition && <p className="text-sm">You have not confirmed yet — use the confirmation section above.</p>}
     </section>}
 
-    {isIncoming && (isAwaitingAcceptance || isCompleted) && <section aria-label="Accept handover" className="space-y-3 rounded-xl border border-green-600 p-5">
-      <h2 className="text-lg font-semibold">Accept handover with your password</h2>
-      <p className="text-sm">
-        {isAwaitingAcceptance
-          ? <>You are a reserved incoming technician. Accepting with <strong>your own current password</strong> will activate the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and record <em>your</em> attendance at the authoritative acceptance clock. Your partner will join the same active shift when they accept later.</>
-          : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with your own independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
-      </p>
-      <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for you (§10).</p>
-      {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
-        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
-        <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
-      </form>}
-      {!canAccept && <p className="text-sm text-neutral-600">Acceptance is available only to a reserved incoming technician on an active reservation.</p>}
-    </section>}
+    {isIncoming && (isAwaitingAcceptance || isCompleted) && (atomicAcceptanceEnabled
+      ? <IncomingAcceptanceAtomicPanel
+          base={base}
+          scheduledStart={aggregate.reservation.scheduledStart}
+          lifecycleSignature={`${aggregate.lifecycleStatus}:${aggregate.revision}:${state.snapshotHash}`}
+          declaredLateReason={myAbsence?.absenceType === "not_yet_in" ? myAbsence.reason : null}
+          onAuthoritativeChange={refreshReport}
+        />
+      : <section aria-label="Accept handover" className="space-y-3 rounded-xl border border-green-600 p-5">
+        <h2 className="text-lg font-semibold">Accept handover with your password</h2>
+        <p className="text-sm">
+          {isAwaitingAcceptance
+            ? <>You are a reserved incoming technician. Accepting with <strong>your own current password</strong> will activate the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and record <em>your</em> attendance at the authoritative acceptance clock. Your partner will join the same active shift when they accept later.</>
+            : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with your own independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
+        </p>
+        <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for you (§10).</p>
+        {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
+          <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+          <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
+        </form>}
+        {!canAccept && <p className="text-sm text-neutral-600">Acceptance is available only to a reserved incoming technician on an active reservation.</p>}
+      </section>)}
 
     {!isOutgoing && !isIncoming && <div className="rounded-xl border p-4 text-sm">You are not a participant in this reserved pair. This report is read-only for you.</div>}
     {isIncoming && aggregate.lifecycleStatus === "collecting_confirmations" && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only until the outgoing pair commits the handover. You can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen; accepting and activating the incoming shift becomes available only after the commit.</div>}
@@ -366,15 +386,15 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
       <div className="rounded-xl border p-5 space-y-2 text-sm overflow-x-auto">
         <h3 className="font-semibold">Attendance and absences</h3>
         <table className="w-full text-left text-sm">
-          <thead><tr><th>Participant</th><th>Side</th><th>Clock-in</th><th>Clock-out</th><th>Departure</th><th>Hours</th><th>Payable</th><th>Absence</th><th>Evidence</th></tr></thead>
-          <tbody>{content.attendance.map(row => <tr key={row.position}>
-            <td>{row.name ?? row.uid}</td><td>{row.side}</td><td>{accra(row.clockIn)}</td><td>{accra(row.clockOut)}</td>
-            <td>{row.departureProvenance ?? "—"}</td><td>{row.hoursWorked === null ? "—" : row.hoursWorked.toFixed(2)}</td>
+          <thead><tr><th>Participant</th><th>Side</th><th>Reporting</th><th>Clock-in</th><th>Clock-out</th><th>Clock evidence</th><th>Departure</th><th>Worked hours</th><th>Payable</th><th>Absence</th><th>Evidence</th></tr></thead>
+          <tbody>{content.attendance.map(row => { const labels = reportAttendanceLabels(row, content.outgoingShiftId); return <tr key={row.position}>
+            <td>{row.name ?? row.uid}</td><td>{row.side}</td><td>{labels.reporting}</td><td>{row.clockIn === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockIn)}</td><td>{row.clockOut === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockOut)}</td><td>{labels.clocks}</td>
+            <td>{row.departureProvenance ?? "—"}</td><td>{labels.hours}</td>
             <td>{row.payableHours}</td><td>{row.absenceDeclared?.replaceAll("_", " ") ?? "—"}</td>
-            <td>{row.reportingEvidence ? `${row.reportingEvidence.kind} · ${row.reportingEvidence.personallyAuthenticated ? "personal" : `attested by ${row.reportingEvidence.attestedByUid ?? "—"}`}` : row.legacyAttendance ? "legacy record" : "missing"}</td>
-          </tr>)}</tbody>
+            <td>{row.reportingEvidence ? `${row.reportingEvidence.kind} · ${row.reportingEvidence.personallyAuthenticated ? "personal" : row.reportingEvidence.attestedByUid ? `attested by ${row.reportingEvidence.attestedByUid}` : "reporting record only"} · ${accra(row.reportingEvidence.eventTime)}` : row.legacyAttendance ? "legacy record (see reporting status)" : "No evidence recorded"}</td>
+          </tr>; })}</tbody>
         </table>
-        {content.attendance.some(row => row.clockIn === null && row.clockOut === null && row.absenceDeclared === null) && <p>Missing attendance remains missing — it is never synthesized.</p>}
+        <p>Reporting confirmation does not establish personal clock-in, clock-out or worked hours. Unknown clocks and hours remain unknown.</p>
       </div>
 
       <div className="rounded-xl border p-5 space-y-2 text-sm">
@@ -401,8 +421,11 @@ export function EqualHandoverWorkflowV2({ uid, initialState }: { uid: string; in
         <h3 className="font-semibold">Completeness</h3>
         <p className="font-semibold text-red-700">Blockers ({content.completeness.blockers.length})</p>
         <ul>{content.completeness.blockers.map(item => <li key={item}>• {item}</li>)}</ul>
-        <p className="pt-2 font-semibold text-amber-700">Warnings ({content.completeness.warnings.length})</p>
-        <ul>{content.completeness.warnings.map(item => <li key={item}>• {item}</li>)}</ul>
+        <p className="pt-2 font-semibold">Evidence notices ({content.completeness.warnings.length})</p>
+        {["Evidence required", "Not yet due", "Information", "Historical / unclassified"].map(category => {
+          const notices = content.completeness.warnings.filter(item => reportNoticeCategory(item) === category);
+          return notices.length > 0 && <div key={category}><p className="font-medium">{category} ({notices.length})</p><ul>{notices.map(item => <li key={item}>• {item}</li>)}</ul></div>;
+        })}
       </div>
 
       {content.corrections.length > 0 && <div className="rounded-xl border p-5 space-y-1 text-sm"><h3 className="font-semibold">Report corrections</h3>

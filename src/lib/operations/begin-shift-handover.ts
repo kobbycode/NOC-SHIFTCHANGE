@@ -27,6 +27,13 @@ import {
 } from "./collections";
 
 import {
+  notificationsEnabled,
+  writeOutboxEntries,
+} from "@/lib/notifications/notification-outbox";
+
+import { initiationIntents } from "@/lib/notifications/notification-hooks";
+
+import {
   AssignmentOperationError,
   requireEligibleTechnician,
   markAssignmentActivity,
@@ -53,6 +60,7 @@ import {
 } from "./operational-shift-control";
 
 import { readActivePermanentPairTechnicianIds } from "./next-shift-authorization-domain";
+import { assertHandoverOperationalEvidenceComplete } from "./handover-begin-preflight";
 
 export interface BeginShiftHandoverInput {
   shiftId: string;
@@ -104,6 +112,7 @@ export async function beginShiftHandover(
   const {
     shifts,
     shiftMembers,
+    shiftAttendance,
     technicianSchedules,
     operationalShiftControl,
   } = getOperationalCollections();
@@ -388,6 +397,38 @@ export async function beginShiftHandover(
             403
           );
         }
+
+        /*
+         * PHASE 3c (v2 equal-technician authority only):
+         * The initiating technician must have personally joined this shift.
+         *
+         * Handover is the outgoing technicians' own record: an unjoined
+         * technician cannot open one, and their absence is attested by a
+         * colleague instead of being inferred from an empty report. The joined
+         * partner keeps the legitimate path, so this never requires attendance
+         * from everyone on the roster.
+         */
+
+        const actorAttendanceSnapshot =
+          await transaction.get(
+            shiftAttendance.doc(
+              `${shiftId}_${actorUid}`
+            )
+          );
+
+        const actorAttendance =
+          actorAttendanceSnapshot.data();
+
+        if (
+          !actorAttendanceSnapshot.exists ||
+          actorAttendance?.shiftId !== shiftId ||
+          actorAttendance?.technicianId !== actorUid
+        ) {
+          throw new AssignmentOperationError(
+            "You must join this shift before beginning its handover. A colleague can attest your absence.",
+            403
+          );
+        }
       }
 
       /*
@@ -541,6 +582,20 @@ export async function beginShiftHandover(
       }
 
       /*
+       * PHASE 4b (v2 equal-technician authority only):
+       * Mandatory operational evidence — verified broadcast observations for
+       * every enabled station and a non-conflicting outside-broadcast
+       * position — must be complete before this shift may move to handover
+       * pending. These are in-transaction reads: evidence changing under the
+       * transaction aborts it and the whole check reruns, so the rejection
+       * and the commit always observe the same document state. There is no
+       * override, bypass, or flag; the V1 manager path is unaffected.
+       */
+      if (authority === "equal-technician") {
+        await assertHandoverOperationalEvidenceComplete(transaction, shiftId);
+      }
+
+      /*
        * PHASE 5:
        * All transaction reads are complete.
        *
@@ -634,6 +689,14 @@ export async function beginShiftHandover(
             "The active shift entered the handover pending state.",
         }
       );
+
+      if (notificationsEnabled()) {
+        writeOutboxEntries(
+          transaction,
+          db,
+          initiationIntents(shiftId, [...shift.primaryTechnicianIds], now),
+        );
+      }
 
       return {
         shiftId,

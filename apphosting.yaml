@@ -1,0 +1,45 @@
+# Proposed pilot configuration. Not deployed.
+# Set NEXT_PUBLIC_FIREBASE_API_KEY in the Console at BUILD and RUNTIME.
+# Set APP_ORIGIN in the Console to the exact backend HTTPS origin before traffic.
+# Console overrides must be reviewed; never supply emulator hosts or private keys.
+scripts:
+  buildCommand: npm run build
+  runCommand: npm run start -- --port $PORT
+
+# next start also requires public assets, Next config and installed dependencies.
+# Preserve the complete clean Git build context when bypassing the adapter.
+outputFiles:
+  serverApp:
+    include: ["."]
+
+runConfig:
+  minInstances: 0
+  maxInstances: 1
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: shiftchange20-e4265.firebaseapp.com
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: shiftchange20-e4265
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: shiftchange20-e4265.firebasestorage.app
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "1042059464078"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:1042059464078:web:b769f6fb314ea5b848e8df"
+  - variable: FIREBASE_PROJECT_ID
+    value: shiftchange20-e4265
+  - variable: NEXT_PUBLIC_USE_FIREBASE_EMULATORS
+    value: "false"
+  - variable: HANDOVER_V2_DEV
+    value: "true"
+  - variable: HANDOVER_V2_ATOMIC_ACCEPTANCE
+    value: "true"
+  - variable: NOTIFICATIONS_ENABLED
+    value: "false"
+  - variable: NEXT_PUBLIC_NOTIFICATIONS_ENABLED
+    value: "false"
+  - variable: NOTIFICATIONS_TRANSPORT
+    value: mock

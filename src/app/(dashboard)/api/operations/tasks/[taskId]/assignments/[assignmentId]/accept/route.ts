@@ -17,6 +17,14 @@ import {
   respondToTaskAssignment,
 } from "@/lib/operations/respond-to-task-assignment";
 
+import {
+  markActionedByReference,
+} from "@/lib/notifications/notification-service";
+
+import {
+  NOTIFICATION_EVENT_KINDS,
+} from "@/types/notification";
+
 export const runtime = "nodejs";
 
 type RouteContext = {
@@ -103,6 +111,17 @@ export async function POST(
         action:
           "accept",
       });
+
+    // Best-effort ONLY after the authoritative acceptance committed. Gated by
+    // NOTIFICATIONS_ENABLED internally and never in the transaction; a failure
+    // here cannot affect the accepted assignment.
+    await markActionedByReference(actor.uid, {
+      eventKinds: [
+        NOTIFICATION_EVENT_KINDS.TASK_ASSIGNED,
+        NOTIFICATION_EVENT_KINDS.TASK_REASSIGNED,
+      ],
+      taskId,
+    }, new Date().toISOString()).catch(() => {});
 
     return NextResponse.json(
       {

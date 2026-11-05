@@ -3,9 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+
+import Link from "next/link";
 
 import {
   AlertCircle,
@@ -22,6 +25,19 @@ import {
   getShifts,
   ShiftApiError,
 } from "@/lib/shifts/shift-api";
+
+import {
+  getTechnicianPairs,
+  TechnicianPairApiError,
+} from "@/lib/technician-pairs/technician-pair-api";
+
+import type {
+  TechnicianPairWithTechnicians,
+} from "@/lib/technician-pairs/technician-pair-display";
+
+import {
+  SupervisorShiftScheduling,
+} from "@/components/shifts/supervisor-shift-scheduling";
 
 import type {
   Shift,
@@ -101,6 +117,30 @@ function statusClasses(
   }
 }
 
+function formatActivationState(
+  shift: Shift,
+): string {
+  switch (shift.status) {
+    case "scheduled":
+      return "Activation pending";
+
+    case "active":
+      return "Active";
+
+    case "handover_pending":
+      return "Active · handover pending";
+
+    case "completed":
+      return "Completed";
+
+    case "cancelled":
+      return "Cancelled";
+
+    default:
+      return shift.status;
+  }
+}
+
 export function SupervisorShiftWorkspace() {
   const [shifts, setShifts] =
     useState<Shift[]>([]);
@@ -147,6 +187,23 @@ export function SupervisorShiftWorkspace() {
   const [
     lifecycleSuccess,
     setLifecycleSuccess,
+  ] = useState<string | null>(null);
+
+  const [
+    technicianPairs,
+    setTechnicianPairs,
+  ] = useState<
+    TechnicianPairWithTechnicians[]
+  >([]);
+
+  const [
+    technicianPairsLoading,
+    setTechnicianPairsLoading,
+  ] = useState(true);
+
+  const [
+    technicianPairsError,
+    setTechnicianPairsError,
   ] = useState<string | null>(null);
 
   const retrievalInProgress =
@@ -295,6 +352,70 @@ export function SupervisorShiftWorkspace() {
   useEffect(() => {
     void loadShifts();
   }, [loadShifts]);
+
+  const fetchTechnicianPairs =
+    useCallback((): Promise<void> => {
+      return getTechnicianPairs()
+        .then((result) => {
+          setTechnicianPairs(result.pairs);
+        })
+        .catch((caughtError) => {
+          setTechnicianPairs([]);
+
+          setTechnicianPairsError(
+            caughtError instanceof
+              TechnicianPairApiError
+              ? caughtError.message
+              : "Unable to retrieve technician pairs."
+          );
+        })
+        .finally(() => {
+          setTechnicianPairsLoading(false);
+        });
+    }, []);
+
+  useEffect(() => {
+    void fetchTechnicianPairs();
+  }, [fetchTechnicianPairs]);
+
+  const reloadTechnicianPairs =
+    useCallback(async () => {
+      setTechnicianPairsLoading(true);
+      setTechnicianPairsError(null);
+
+      await fetchTechnicianPairs();
+    }, [fetchTechnicianPairs]);
+
+  const pairLabels = useMemo(
+    () =>
+      new Map(
+        technicianPairs.map((pair) => [
+          pair.id,
+          pair.technicians
+            .map(
+              (technician) =>
+                technician.fullName
+            )
+            .join(" & "),
+        ])
+      ),
+    [technicianPairs]
+  );
+
+  const handleShiftCreated = useCallback(
+    (shift: Shift) => {
+      setSelectedShiftId(shift.id);
+      setLoadedMemberShiftId(null);
+      setMembers([]);
+      setMembersError(null);
+      setMembersLoading(false);
+      setLifecycleError(null);
+      setLifecycleSuccess(null);
+
+      void loadShifts();
+    },
+    [loadShifts]
+  );
 
   useEffect(() => {
     if (!selectedShiftId) return;
@@ -490,6 +611,18 @@ export function SupervisorShiftWorkspace() {
         </div>
       )}
 
+      <SupervisorShiftScheduling
+        pairs={technicianPairs}
+        pairsLoading={
+          technicianPairsLoading
+        }
+        pairsError={technicianPairsError}
+        onReloadPairs={() => {
+          void reloadTechnicianPairs();
+        }}
+        onShiftCreated={handleShiftCreated}
+      />
+
       {loading ? (
         <div className="flex min-h-48 items-center justify-center rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="text-center">
@@ -580,6 +713,16 @@ export function SupervisorShiftWorkspace() {
                         shift.scheduledEnd,
                       )}
                     </span>
+
+                    <span className="sm:col-span-2">
+                      Pair:{" "}
+                      {shift.permanentPairId
+                        ? (pairLabels.get(
+                            shift.permanentPairId,
+                          ) ??
+                          shift.permanentPairId)
+                        : "Not recorded"}
+                    </span>
                   </div>
                 </button>
               );
@@ -661,7 +804,51 @@ export function SupervisorShiftWorkspace() {
                     )}
                   </dd>
                 </div>
+
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                    Assigned Pair
+                  </dt>
+
+                  <dd className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                    {selectedShift.permanentPairId
+                      ? (pairLabels.get(
+                          selectedShift.permanentPairId,
+                        ) ??
+                        selectedShift.permanentPairId)
+                      : "Not recorded"}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                    Activation State
+                  </dt>
+
+                  <dd className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                    {formatActivationState(
+                      selectedShift,
+                    )}
+                  </dd>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                    Shift ID
+                  </dt>
+
+                  <dd className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                    {selectedShift.id}
+                  </dd>
+                </div>
               </dl>
+
+              <Link
+                href="/supervisor/handovers"
+                className="mt-4 inline-block text-sm text-blue-700 underline dark:text-blue-400"
+              >
+                Open handover workspace
+              </Link>
 
                             {(lifecycleError ||
                 lifecycleSuccess) && (

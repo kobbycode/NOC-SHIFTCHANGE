@@ -2,6 +2,8 @@ import "server-only";
 import { NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { confirmEqualHandoverParticipantV2 } from "@/lib/operations/equal-handover-report-firestore";
+import { markActionedByReference } from "@/lib/notifications/notification-service";
+import { NOTIFICATION_EVENT_KINDS } from "@/types/notification";
 import {
   handoverV2Enabled,
   mapHandoverV2ReportError,
@@ -38,6 +40,12 @@ export async function POST(request: NextRequest, context: Context) {
       actorUid: actor.uid,
       ...parseConfirmBody(body),
     });
+    // Best-effort ONLY after the authoritative confirmation committed. A failure
+    // here cannot affect the confirmation and never participates in its transaction.
+    await markActionedByReference(actor.uid, {
+      eventKinds: [NOTIFICATION_EVENT_KINDS.OUTGOING_CONFIRMATION_REQUIRED],
+      outgoingShiftId: shiftId,
+    }, new Date().toISOString()).catch(() => {});
     return respond({
       success: true,
       confirmation: { aggregate: result.aggregate, snapshotHash: result.snapshotHash, replayed: result.replayed },

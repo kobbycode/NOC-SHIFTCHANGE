@@ -37,6 +37,8 @@ import {
 } from "./assignment-identity";
 
 import { nextTaskAssignmentGeneration } from "./assignment-generation-domain";
+import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
+import { taskReassignedIntents } from "@/lib/notifications/notification-hooks";
 
 export interface ReassignTaskInput {
   taskId: string;
@@ -717,6 +719,16 @@ export async function reassignTask(
             "An operational task responsibility was transferred to another technician.",
         }
       );
+
+      if (notificationsEnabled()) {
+        writeOutboxEntries(transaction, db, taskReassignedIntents({
+          eventId: historyRef.id,
+          newAssigneeUid: replacementTechnicianUid,
+          previousAssigneeUid: originalTechnicianUid,
+          taskId,
+          createdAt: now,
+        }));
+      }
 
       return {
         previousAssignmentId:

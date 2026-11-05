@@ -423,7 +423,7 @@ test("active shifts and changed control states cannot be started a second time",
   );
 });
 
-test("G-D source preserves manager start and keeps temporary start read-only for C", async () => {
+test("G-D source keeps technician-only start and read-only temporary authority", async () => {
   const source = await readFile(
     new URL("../src/lib/operations/start-shift.ts", import.meta.url),
     "utf8"
@@ -436,9 +436,15 @@ test("G-D source preserves manager start and keeps temporary start read-only for
     "utf8"
   );
 
-  assert.match(source, /actorIsManager/);
-  assert.match(source, /actorIsTechnician/);
+  assert.match(source, /actor\.role !== "technician"/);
+  assert.doesNotMatch(source, /actorIsManager/);
+  assert.doesNotMatch(source, /"manager"\s*\)/);
   assert.match(source, /assertShiftActivationWindow\(/);
+  assert.match(source, /assertFirstEverShiftBootstrap\(/);
+  assert.match(
+    source,
+    /readFirstShiftBootstrapEvidenceInTransaction\(/
+  );
   assert.match(source, /assertTemporaryTechnicianCanStartShift\(/);
   assert.match(source, /assertValidShiftTransition\(/);
   assert.match(source, /assertShiftReadyToStart\(/);
@@ -448,6 +454,7 @@ test("G-D source preserves manager start and keeps temporary start read-only for
   assert.match(source, /temporaryAuthorizationId/);
   assert.match(route, /actor\.role !== "technician"/);
   assert.match(route, /actorUid:\s*actor\.uid/);
+  assert.doesNotMatch(route, /actor\.role === "admin"|actor\.role === "supervisor"/);
   assert.doesNotMatch(route, /authorizationId|slotToken|slotGeneration/);
   assert.doesNotMatch(source, /transaction\.(?:create|update)\([^)]*attendance/i);
   assert.doesNotMatch(
@@ -472,11 +479,17 @@ test("G-D start writes remain after every transactional authorization and roster
   const authCheckIndex = source.indexOf(
     "assertTemporaryTechnicianCanStartShift({"
   );
+  const bootstrapGateIndex = source.indexOf(
+    "assertFirstEverShiftBootstrap("
+  );
   const memberQueryIndex = source.indexOf(
     "shiftMembers.where("
   );
 
   assert.notEqual(firstWriteIndex, -1);
   assert.ok(authCheckIndex > -1 && authCheckIndex < firstWriteIndex);
+  assert.ok(
+    bootstrapGateIndex > -1 && bootstrapGateIndex < firstWriteIndex
+  );
   assert.ok(memberQueryIndex > -1 && memberQueryIndex < firstWriteIndex);
 });

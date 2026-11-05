@@ -40,6 +40,37 @@ export type ShiftListApiResponse =
   | ShiftApiErrorResponse;
 
 /*
+ * Public client input for shift creation.
+ *
+ * The API accepts only these four fields.
+ * Actor identity, role, status, lifecycle,
+ * timestamps and audit data remain
+ * server-owned.
+ */
+export interface CreateShiftInput {
+  shiftType: Shift["shiftType"];
+  scheduledStart: string;
+  scheduledEnd: string;
+  permanentPairId: string;
+}
+
+/*
+ * Successful shift-creation response.
+ */
+export interface ShiftCreateSuccessResponse {
+  success: true;
+  message: string;
+  shift: Shift;
+}
+
+/*
+ * Shift-creation API response.
+ */
+export type ShiftCreateApiResponse =
+  | ShiftCreateSuccessResponse
+  | ShiftApiErrorResponse;
+
+/*
  * Authoritative membership retrieval result.
  */
 export interface ShiftMemberListResult {
@@ -153,6 +184,12 @@ export interface TechnicianCurrentShiftResult {
   attendance: Attendance | null;
 
   joinedAt: string | null;
+
+  /**
+   * True only while no shift in this installation has ever been activated,
+   * which is the sole condition under which a technician may start one.
+   */
+  firstShiftBootstrapAvailable: boolean;
 
   canStart: boolean;
   canJoin: boolean;

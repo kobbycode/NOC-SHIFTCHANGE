@@ -7,6 +7,7 @@ import Link from "next/link";
 import {
   usePathname,
   useRouter,
+  useSearchParams,
 } from "next/navigation";
 
 import {
@@ -33,19 +34,56 @@ interface AppSidebarProps {
   onClose: () => void;
 }
 
-const AVAILABLE_ROUTES = new Set([
-  "/admin",
-  "/admin/users",
-  "/supervisor",
-  "/supervisor/shifts",
-  "/supervisor/attendance",
-  "/supervisor/tasks",
-  "/technician",
-  "/technician/tasks",
-  "/technician/operations",
-  "/technician/handovers",
-  "/supervisor/handovers",
-]);
+const NOT_IMPLEMENTED_HINT =
+  "Not implemented in this milestone. No page is served at this link.";
+
+function splitNavigationHref(href: string): {
+  path: string;
+  section: string | null;
+} {
+  const [path, query] = href.split("?");
+
+  return {
+    path,
+    section: query
+      ? new URLSearchParams(query).get("section")
+      : null,
+  };
+}
+
+function getMostSpecificMatch(
+  pathname: string,
+  currentSection: string | null,
+  items: NavigationItem[],
+): NavigationItem | null {
+  let workspaceRoot: NavigationItem | null = null;
+
+  for (const item of items) {
+    if (!item.implemented) continue;
+
+    const { path, section } = splitNavigationHref(item.href);
+
+    const onPath =
+      pathname === path ||
+      pathname.startsWith(`${path}/`);
+
+    if (!onPath) continue;
+
+    if (section !== null) {
+      if (section === currentSection) return item;
+
+      continue;
+    }
+
+    // The workspace root stays highlighted for sections that have no
+    // dedicated sidebar entry.
+    if (!workspaceRoot) {
+      workspaceRoot = item;
+    }
+  }
+
+  return workspaceRoot;
+}
 
 const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
 
@@ -69,30 +107,6 @@ function getDesktopNavServerSnapshot() {
   return true;
 }
 
-function getMostSpecificMatch(
-  pathname: string,
-  items: NavigationItem[],
-  availableRoutes: Set<string>
-): NavigationItem | null {
-  let bestMatch: NavigationItem | null = null;
-  let bestLength = -1;
-
-  for (const item of items) {
-    if (!availableRoutes.has(item.href)) continue;
-
-    const matches =
-      pathname === item.href ||
-      pathname.startsWith(`${item.href}/`);
-
-    if (matches && item.href.length > bestLength) {
-      bestLength = item.href.length;
-      bestMatch = item;
-    }
-  }
-
-  return bestMatch;
-}
-
 export function AppSidebar({
   role,
   open,
@@ -100,6 +114,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const isDesktopNav = useSyncExternalStore(
     subscribeDesktopNav,
@@ -123,8 +138,8 @@ export function AppSidebar({
 
   const matchedItem = getMostSpecificMatch(
     pathname,
+    searchParams.get("section"),
     navigation,
-    AVAILABLE_ROUTES
   );
 
   const drawerAccessible = open || isDesktopNav;
@@ -274,15 +289,14 @@ export function AppSidebar({
           {navigation.map((item) => {
             const Icon = item.icon;
 
-            const available =
-              AVAILABLE_ROUTES.has(item.href);
+            const available = item.implemented;
 
             if (!available) {
               return (
                 <div
                   key={item.href}
                   aria-disabled="true"
-                  title="Coming in a later phase"
+                  title={NOT_IMPLEMENTED_HINT}
                   className="
                     flex cursor-not-allowed
                     items-center gap-3
@@ -295,6 +309,10 @@ export function AppSidebar({
 
                   <span className="flex-1">
                     {item.label}
+
+                    <span className="mt-0.5 block text-[11px] font-normal normal-case tracking-normal opacity-80">
+                      Not implemented in this milestone
+                    </span>
                   </span>
 
                   <LockKeyhole size={13} />

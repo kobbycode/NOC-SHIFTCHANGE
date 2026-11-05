@@ -23,18 +23,24 @@ import type {
   EqualHandoverReportV2AttendanceRow,
   EqualHandoverReportV2Binding,
   EqualHandoverReportV2Content,
-  EqualHandoverReportV2ReportingEvidence,
   EqualHandoverReportV2TerminalTask,
   FrozenEqualHandoverReportV2,
 } from "@/types/handover-report-v2";
 import { AssignmentOperationError } from "./assignment-transaction";
+import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
+import {
+  absenceIntents,
+  commitIntents,
+  completionIntents,
+  confirmationIntents,
+} from "@/lib/notifications/notification-hooks";
 import { getOperationalCollections, GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID } from "./collections";
 import { readAttendanceRecord } from "./attendance-read-domain";
+import { buildReportAttendanceRow, reportAttendanceNotices } from "./handover-report-attendance";
 import {
   assertAttendanceEvidence,
   attendanceEvidenceCountsAsClockIn,
   attendanceAuthenticationMethodForKind,
-  computeAttendanceWorkedDuration,
 } from "./attendance-evidence-domain";
 import {
   ATTENDANCE_EVIDENCE_KINDS,
@@ -89,6 +95,7 @@ import { assertNoScheduleConflict, parseShiftTimeRange } from "./shift-overlap";
 import { createHandoverWorkSnapshot, resolveHandoverWorkReadiness } from "./handover-work-snapshot";
 import { assembleShiftOperations } from "./shift-operations-domain";
 import { readOperationStations, readShiftOperationEvents } from "./shift-operations";
+import { createLegacyIncomingAcceptanceEventId } from "./incoming-acceptance-application-domain";
 
 export { EqualHandoverReportDomainError };
 
@@ -120,7 +127,7 @@ function text(value: unknown, label: string, max = 2_000): string | null {
   return value.trim();
 }
 
-function canonical(value: unknown): string {
+export function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, item) => {
     if (item !== null && typeof item === "object" && !Array.isArray(item)) {
       return Object.keys(item as Record<string, unknown>).sort().reduce<Record<string, unknown>>(
@@ -310,72 +317,16 @@ async function buildLiveReportEvidence(
   const absences = [...aggregate.absences].sort(positionCompare);
   const absenceByPosition = new Map(absences.map((item) => [item.position, item.absenceType]));
 
-  const attendance: EqualHandoverReportV2AttendanceRow[] = positions.map((item) => {
-    const legacy = legacyAttendance.get(item.technicianUid) ?? null;
-    const own = evidence.filter((record) => record.technicianUid === item.technicianUid);
-    const clockInDocs = own.filter((record) => attendanceEvidenceCountsAsClockIn(record));
-    const personalClockOutDocs = own.filter(
-      (record) => record.kind === ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CLOCK_OUT && record.clockOut !== null,
-    );
-    const attestationDocs = own.filter(
-      (record) => record.kind === ATTENDANCE_EVIDENCE_KINDS.OUTGOING_ABSENT_DEPARTURE_ATTESTATION,
-    );
-    if (clockInDocs.length > 1 || personalClockOutDocs.length > 1 || attestationDocs.length > 1) {
-      fail("Conflicting attendance evidence exists for a participant; administrator review required.", 409);
-    }
-    if (personalClockOutDocs.length === 1 && attestationDocs.length === 1) {
-      fail("A colleague attestation contradicts a personal clock-out; administrator review required.", 409);
-    }
-    const clockInDoc = clockInDocs[0] ?? null;
-    const personalClockOutDoc = personalClockOutDocs[0] ?? null;
-    const attestationDoc = attestationDocs[0] ?? null;
-
-    const personalClockIn = legacy?.clockIn ?? null;
-    const clockIn = item.side === "incoming" ? clockInDoc?.clockIn ?? null : personalClockIn;
-    const personalClockOut = legacy?.clockOut ?? personalClockOutDoc?.clockOut ?? null;
-    // §4: a colleague attestation never overwrites or replaces personal
-    // attendance; departure provenance records exactly who evidenced it.
-    const clockOut = personalClockOut;
-    const departureProvenance = personalClockOut !== null
-      ? "personal" as const
-      : attestationDoc !== null ? "colleague_attested" as const : null;
-
-    const source = item.side === "incoming"
-      ? clockInDoc
-      : personalClockOutDoc ?? attestationDoc;
-    const reportingEvidence: EqualHandoverReportV2ReportingEvidence | null = source
-      ? {
-        kind: source.kind,
-        authenticationMethod: source.authenticationMethod,
-        personallyAuthenticated: source.personallyAuthenticated,
-        eventTime: source.eventTime ?? null,
-        attestedByUid: source.attestedByUid,
-        lateReason: source.lateReason ?? null,
-      }
-      : null;
-
-    // §4: worked duration only from valid personal clock-in and clock-out.
-    const duration = computeAttendanceWorkedDuration({
-      clockIn: clockIn !== null && departureProvenance === "personal" ? clockIn : null,
-      clockOut,
-    });
-    return {
-      position: item.position,
-      side: item.side,
-      uid: item.technicianUid,
-      name: profiles.get(item.technicianUid) ?? null,
-      clockIn,
-      clockOut,
-      reportingEvidence,
-      legacyAttendance: legacy,
-      hoursWorked: duration.status === "computed" && duration.workedMs !== null ? duration.workedMs / 3_600_000 : null,
-      // Payable-hours treatment remains an explicit unresolved policy: this
-      // milestone never infers an attendance-correction authority.
-      payableHours: "policy_unresolved" as const,
-      departureProvenance,
-      absenceDeclared: absenceByPosition.get(item.position) ?? null,
-    };
-  }).sort(positionCompare);
+  const attendance: EqualHandoverReportV2AttendanceRow[] = positions.map((item) => buildReportAttendanceRow({
+    outgoingShiftId,
+    position: item.position,
+    side: item.side,
+    uid: item.technicianUid,
+    name: profiles.get(item.technicianUid) ?? null,
+    legacy: legacyAttendance.get(item.technicianUid) ?? null,
+    evidence,
+    absenceDeclared: absenceByPosition.get(item.position) ?? null,
+  })).sort(positionCompare);
 
   const blockers: string[] = [
     ...operations.completeness.broadcastMissing.map((name) => `Missing verified broadcast observation: ${name}`),
@@ -388,16 +339,11 @@ async function buildLiveReportEvidence(
   const warnings: string[] = [];
   // §4: absent records are never described as proof that nothing happened.
   if (operations.latest.every((item) => item.kind !== "incident")) {
-    warnings.push("No fault or technical activity records were submitted. This is not a declaration of no faults.");
+    warnings.push("Information: No fault or technical activity records were submitted. This is not a declaration of no faults.");
   }
-  for (const row of attendance) {
-    if (row.clockIn === null && row.clockOut === null && row.reportingEvidence === null && row.absenceDeclared === null) {
-      warnings.push(`Attendance missing: ${row.name ?? row.uid}`);
-    }
-    if (row.hoursWorked === null && row.absenceDeclared === null) warnings.push(`Hours worked cannot be determined: ${row.name ?? row.uid}`);
-  }
+  for (const row of attendance) warnings.push(...reportAttendanceNotices(row));
   if ([...profiles.values()].some((name) => name === null)) {
-    warnings.push("One or more staff names are missing from authoritative account profiles.");
+    warnings.push("Evidence required: One or more staff names are missing from authoritative account profiles.");
   }
 
   const content: EqualHandoverReportV2Content = {
@@ -468,7 +414,7 @@ async function buildLiveReportEvidence(
   };
 }
 
-function readV2Aggregate(transactionValue: unknown, outgoingShiftId: string): EqualHandoverAggregate {
+export function readV2Aggregate(transactionValue: unknown, outgoingShiftId: string): EqualHandoverAggregate {
   const aggregate = assertEqualHandoverAggregate(transactionValue);
   if (aggregate.identity.outgoingShiftId !== outgoingShiftId) {
     fail("Equal handover aggregate identity does not match the requested shift.", 409);
@@ -476,7 +422,7 @@ function readV2Aggregate(transactionValue: unknown, outgoingShiftId: string): Eq
   return aggregate;
 }
 
-function requireV2GuardBinding(
+export function requireV2GuardBinding(
   guardSnapshotExists: boolean,
   guardData: unknown,
   documentId: string,
@@ -494,7 +440,7 @@ function requireV2GuardBinding(
   return guard;
 }
 
-function authorizeTechnicianProfile(profile: Record<string, unknown> | undefined, actorUid: string) {
+export function authorizeTechnicianProfile(profile: Record<string, unknown> | undefined, actorUid: string) {
   identifier(actorUid, 128);
   if (!profile || profile.role !== "technician" || profile.status !== "active" ||
       profile.statusOperation != null || profile.mustChangePassword === true) {
@@ -1028,6 +974,7 @@ export async function recordEqualHandoverAbsenceV2(
       createdAt: FieldValue.serverTimestamp(),
     });
     transaction.update(actorRef, { lastOperationalActivityAt: FieldValue.serverTimestamp() });
+    if (notificationsEnabled()) writeOutboxEntries(transaction, db, absenceIntents(next, now));
     return { aggregate: next, snapshotHash, replayed: false };
   });
 }
@@ -1064,6 +1011,14 @@ export async function clearEqualHandoverAbsenceV2(
       return { aggregate, snapshotHash: createEqualHandoverSnapshot(aggregate).snapshotHash, replayed: true };
     }
 
+    // 09J §3: a standing declaration may only be cleared by the colleague who
+    // attested it. This runs before the revision guard so a non-attestor gets a
+    // clean 403 rather than a stale-write rejection.
+    const standingAbsence = aggregate.absences.find((item) => item.technicianUid === input.technicianUid) ?? null;
+    if (standingAbsence && standingAbsence.recordedBy !== input.actorUid) {
+      fail("Only the technician who attested an absence declaration may clear it.", 403);
+    }
+
     const now = new Date().toISOString();
     const next = clearEqualHandoverAbsence(aggregate, {
       revision: binding.expectedRevision,
@@ -1075,7 +1030,6 @@ export async function clearEqualHandoverAbsenceV2(
     if (canonical(next) === canonical(aggregate)) return { aggregate, snapshotHash: binding.expectedSnapshotHash, replayed: true };
 
     const previous = aggregate.absences.find((item) => item.technicianUid === input.technicianUid) ?? null;
-    if (!previous) fail("Only the colleague who holds an absence declaration may clear it.", 409);
     const snapshotHash = createEqualHandoverSnapshot(next).snapshotHash;
     transaction.set(aggregateRef, next);
     const auditId = equalHandoverReportAuditId({
@@ -1193,6 +1147,7 @@ export async function confirmEqualHandoverParticipantV2(
       createdAt: FieldValue.serverTimestamp(),
     });
     transaction.update(actorRef, { lastOperationalActivityAt: FieldValue.serverTimestamp() });
+    if (notificationsEnabled()) writeOutboxEntries(transaction, db, confirmationIntents(next, now));
     return { aggregate: next, snapshotHash, replayed: false };
   });
 }
@@ -1460,7 +1415,7 @@ export interface EqualHandoverTransferInput {
   expectedFencingEpoch: number;
 }
 
-async function validateEqualHandoverPair(
+export async function validateEqualHandoverPair(
   transaction: Transaction,
   pairId: string,
   expected: readonly string[],
@@ -1480,7 +1435,7 @@ async function validateEqualHandoverPair(
   }
 }
 
-function readEqualHandoverParticipantSchedule(
+export function readEqualHandoverParticipantSchedule(
   data: DocumentData | undefined,
   uid: string,
   target: { shiftId: string; status: string; scheduledStart: string; scheduledEnd: string },
@@ -1581,7 +1536,7 @@ export interface EqualHandoverCommitResult {
   incomingShiftId: string;
 }
 
-function equalHandoverCommitReceiptId(documentId: string): string {
+export function equalHandoverCommitReceiptId(documentId: string): string {
   return `handover-commit-v2-${createHash("sha256")
     .update(canonical({ namespace: "equal-handover-commit-v2", handoverDocumentId: documentId }))
     .digest("hex")}`;
@@ -1604,7 +1559,7 @@ function commitReceiptMaterial(receipt: Omit<EqualHandoverCommitReceipt, "receip
   });
 }
 
-function assertEqualHandoverCommitReceipt(
+export function assertEqualHandoverCommitReceipt(
   value: unknown,
   aggregate: EqualHandoverAggregate,
   documentId: string,
@@ -1728,6 +1683,8 @@ export async function commitEqualHandoverOutgoingV2(
       receiptHash: createHash("sha256").update(commitReceiptMaterial(receiptMaterialBase)).digest("hex"),
     };
     transaction.create(receiptRef, { ...receipt, createdAt: FieldValue.serverTimestamp() });
+
+    if (notificationsEnabled()) writeOutboxEntries(transaction, db, commitIntents(committed, recordedAt));
 
     return {
       status: "COMMITTED", replayed: false, receipt, aggregate: committed,
@@ -2129,6 +2086,8 @@ export async function acceptEqualHandoverIncomingV2(
       });
     }
 
+    if (notificationsEnabled()) writeOutboxEntries(transaction, db, completionIntents(completed, now));
+
     return { status: "ACTIVATED", replayed: false, outcome: "ACTIVATION", receipt, aggregate: completed,
       snapshotHash: createEqualHandoverSnapshot(completed).snapshotHash, outgoingShiftId: input.outgoingShiftId,
       incomingShiftId: incomingId, acceptingTechnicianUid: input.actorUid };
@@ -2279,9 +2238,11 @@ export async function readEqualHandoverAcceptanceContext(
       ? ATTENDANCE_EVIDENCE_KINDS.INCOMING_LATE_ACCEPTANCE
       : ATTENDANCE_EVIDENCE_KINDS.INCOMING_CLOCK_IN;
 
-    const eventId = `acceptance_v2_${createHash("sha256")
-      .update(canonical({ handoverId: aggregate.reservation.handoverId, technicianUid: actorUid, kind: evidenceKind }))
-      .digest("hex")}`;
+    const eventId = createLegacyIncomingAcceptanceEventId({
+      handoverId: aggregate.reservation.handoverId,
+      technicianUid: actorUid,
+      kind: evidenceKind,
+    });
 
     const alreadyAccepted = (await transaction.get(shiftAttendance.doc(`${incomingId}_${actorUid}`))).exists;
 

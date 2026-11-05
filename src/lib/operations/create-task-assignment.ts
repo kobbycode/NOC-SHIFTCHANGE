@@ -35,6 +35,8 @@ import {
 } from "./assignment-identity";
 
 import { nextTaskAssignmentGeneration } from "./assignment-generation-domain";
+import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
+import { taskAssignedIntents } from "@/lib/notifications/notification-hooks";
 
 export interface CreateTaskAssignmentInput {
   taskId: string;
@@ -374,6 +376,12 @@ export async function createTaskAssignment(
             "An operational task was assigned to a technician.",
         }
       );
+
+      if (notificationsEnabled()) {
+        writeOutboxEntries(transaction, db, taskAssignedIntents({
+          eventId: historyRef.id, assigneeUid: technicianUid, taskId, createdAt: now,
+        }));
+      }
 
       return assignment;
     }

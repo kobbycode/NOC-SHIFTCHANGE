@@ -57,6 +57,19 @@ export const OPERATIONAL_COLLECTIONS = {
 
   ATTENDANCE_EVIDENCE_OPERATIONS_V2:
     "attendance_evidence_operations_v2",
+
+  // TECH-HO-RECOVERY-09L — durable notification subsystem.
+  NOTIFICATIONS:
+    "notifications",
+
+  NOTIFICATION_OUTBOX:
+    "notification_outbox",
+
+  NOTIFICATION_DELIVERY_ATTEMPTS:
+    "notification_delivery_attempts",
+
+  DEVICE_REGISTRATIONS:
+    "device_registrations",
 } as const;
 
 export const GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID =
@@ -142,5 +155,15 @@ export function getOperationalCollections() {
     attendanceEvidenceOperationsV2: db.collection(
       OPERATIONAL_COLLECTIONS.ATTENDANCE_EVIDENCE_OPERATIONS_V2
     ),
+
+    notifications: db.collection(OPERATIONAL_COLLECTIONS.NOTIFICATIONS),
+
+    notificationOutbox: db.collection(OPERATIONAL_COLLECTIONS.NOTIFICATION_OUTBOX),
+
+    notificationDeliveryAttempts: db.collection(
+      OPERATIONAL_COLLECTIONS.NOTIFICATION_DELIVERY_ATTEMPTS
+    ),
+
+    deviceRegistrations: db.collection(OPERATIONAL_COLLECTIONS.DEVICE_REGISTRATIONS),
   };
 }

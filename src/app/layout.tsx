@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   title: "ShiftChange 2.0",
   description:
     "Technical Department Shift Management and Handover System",
+  // Serve and link the PWA manifest; without this link no page is installable
+  // and Web Push cannot register its service worker against a manifest scope.
+  manifest: "/manifest.webmanifest",
 };
 
 export default function RootLayout({

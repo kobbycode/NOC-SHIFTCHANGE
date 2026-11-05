@@ -401,6 +401,37 @@ export function readActivePermanentPairTechnicianIds(
   ];
 }
 
+export function assertPermanentPairMembershipReservations(
+  permanentPairId: string,
+  pairTechnicianIds: [string, string],
+  pairMemberships: [unknown, unknown]
+): void {
+  for (const [index, membershipValue] of
+    pairMemberships.entries()) {
+    const membership = membershipValue as {
+      technicianUid?: unknown;
+      pairId?: unknown;
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    } | null;
+
+    if (
+      !membership ||
+      membership.technicianUid !== pairTechnicianIds[index] ||
+      membership.pairId !== permanentPairId ||
+      !isCanonicalTimestamp(membership.createdAt) ||
+      !isCanonicalTimestamp(membership.updatedAt) ||
+      Date.parse(membership.updatedAt) <
+        Date.parse(membership.createdAt)
+    ) {
+      throw new NextShiftAuthorizationDomainError(
+        "The permanent pair reservations are missing or inconsistent.",
+        409
+      );
+    }
+  }
+}
+
 export function assertTemporaryTechnicianCanStartShift(input: {
   requiredShiftStatus?: "scheduled" | "active";
   actorUid: string;
@@ -520,30 +551,11 @@ export function assertTemporaryTechnicianCanStartShift(input: {
     );
   }
 
-  for (const [index, membershipValue] of
-    input.pairMemberships.entries()) {
-    const membership = membershipValue as {
-      technicianUid?: unknown;
-      pairId?: unknown;
-      createdAt?: unknown;
-      updatedAt?: unknown;
-    } | null;
-
-    if (
-      !membership ||
-      membership.technicianUid !== pairTechnicianIds[index] ||
-      membership.pairId !== shift.permanentPairId ||
-      !isCanonicalTimestamp(membership.createdAt) ||
-      !isCanonicalTimestamp(membership.updatedAt) ||
-      Date.parse(membership.updatedAt) <
-        Date.parse(membership.createdAt)
-    ) {
-      throw new NextShiftAuthorizationDomainError(
-        "The permanent pair reservations are missing or inconsistent.",
-        409
-      );
-    }
-  }
+  assertPermanentPairMembershipReservations(
+    shift.permanentPairId,
+    pairTechnicianIds,
+    input.pairMemberships
+  );
 
   let authorization: NextShiftAuthorization;
 

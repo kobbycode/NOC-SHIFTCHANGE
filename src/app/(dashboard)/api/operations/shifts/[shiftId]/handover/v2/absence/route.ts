@@ -22,7 +22,10 @@ type Context = { params: Promise<{ shiftId: string }> };
 // Absence declarations are colleague attestations by an outgoing reserved
 // technician only; the service enforces fresh-profile authority, the no
 // self-declaration rule and the single-absence limit, and never finalizes
-// attendance evidence because of a declaration.
+// attendance evidence because of a declaration. A declaration may only be
+// cleared by the same outgoing colleague who attested it (enforced in both the
+// service and the domain contract). The clearing actor is always the
+// session-derived technician, never a request-body field.
 async function mutate(request: NextRequest, context: Context, operation: "record" | "clear") {
   if (!handoverV2Enabled()) return respond({ success: false, error: "Not found." }, 404);
   const actor = await getCurrentUser();

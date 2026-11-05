@@ -13,6 +13,8 @@ import {
   isEqualHandoverIncomingAttendanceResolved,
   readEqualHandoverAcceptanceContext,
 } from "@/lib/operations/equal-handover-report-firestore";
+import { markActionedByReference } from "@/lib/notifications/notification-service";
+import { NOTIFICATION_EVENT_KINDS } from "@/types/notification";
 import {
   AttendanceEvidenceDomainError,
   beginAttendanceEvidenceOperation,
@@ -26,6 +28,7 @@ import {
   respond,
   sameOrigin,
 } from "@/lib/operations/handover-v2-report-http";
+import { handoverV2AtomicAcceptanceEnabled } from "@/lib/operations/handover-v2-atomic-http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +55,17 @@ export async function POST(request: NextRequest, context: Context) {
     return respond({ success: false, error: "Your account is not authorized to accept v2 handovers." }, 403);
   }
   if (!sameOrigin(request)) return respond({ success: false, error: "Invalid request origin." }, 403);
+
+  // With the atomic protocol enabled this legacy split writer refuses the
+  // intent outright: an acceptance must never silently fall back to the old
+  // evidence-then-transaction path once the atomic gate is on.
+  if (handoverV2AtomicAcceptanceEnabled()) {
+    return respond({
+      success: false,
+      code: "ACCEPTANCE_ATOMIC_PROTOCOL_ENABLED",
+      error: "Atomic incoming acceptance is enabled for this environment. Use the atomic acceptance interface; the legacy acceptance writer is disabled.",
+    }, 409);
+  }
 
   const { shiftId } = await context.params;
   let body: unknown;
@@ -202,6 +216,13 @@ export async function POST(request: NextRequest, context: Context) {
     } catch (error) {
       console.error("Equal handover v2 guard finalization deferred; acceptance already committed:", error);
     }
+
+    // Best-effort ONLY after the authoritative acceptance committed. Never in the
+    // transaction; a failure here cannot affect the accepted handover.
+    await markActionedByReference(actor.uid, {
+      eventKinds: [NOTIFICATION_EVENT_KINDS.INCOMING_ACCEPTANCE_REQUIRED],
+      outgoingShiftId: shiftId,
+    }, new Date().toISOString()).catch(() => {});
 
     return respond({
       success: true,

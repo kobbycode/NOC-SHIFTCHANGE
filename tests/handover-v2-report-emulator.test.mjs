@@ -225,7 +225,18 @@ async function recordOperationsFixturePhase(f, kind) {
 async function makeReservedFixture({ ops = "none", managerRole = "supervisor", named = true } = {}) {
   const f = await makeActiveShiftFixture({ managerRole, named });
   await recordOperationsFixturePhase(f, ops);
-  await beginShiftHandover({ shiftId: f.outgoing, actorUid: f.out[0], authority: "equal-technician" });
+  // Only a technician who personally joined the shift may begin its handover.
+  await seedLegacyAttendance(f, f.out[0]);
+  if (ops === "full") {
+    await beginShiftHandover({ shiftId: f.outgoing, actorUid: f.out[0], authority: "equal-technician" });
+  } else {
+    // 09M.1: the equal-technician v2 begin now refuses incomplete evidence.
+    // Report-layer blocker logic must still defend against legacy incomplete
+    // states, so those fixtures are produced through the historical v1
+    // manager-authority begin, which performs the identical
+    // active→handover_pending transition without the v2 preflight.
+    await beginShiftHandover({ shiftId: f.outgoing, actorUid: f.manager, authority: "manager" });
+  }
   await initializeEqualHandoverReservation(initInput(f));
   return f;
 }
@@ -527,6 +538,9 @@ test("2. Preparation authorization matrix: incoming, unrelated, supervisor, admi
 test("3. Preparation without a v2 reservation is 404; a cancelled reservation is refused by lifecycle before any write", async () => {
   await clearDb();
   const begun = await makeActiveShiftFixture();
+  // 09M.1: the v2 begin requires complete mandatory evidence up front.
+  await recordOperationsFixturePhase(begun, "full");
+  await seedLegacyAttendance(begun, begun.out[0]);
   await beginShiftHandover({ shiftId: begun.outgoing, actorUid: begun.out[0], authority: "equal-technician" });
   await assert.rejects(
     () => prepareEqualHandoverReport({ outgoingShiftId: begun.outgoing, actorUid: begun.out[0], reason: null }),
@@ -619,7 +633,7 @@ test("6. Missing incident records are never described as proof that no faults oc
   const f = await makeReservedFixture({ ops: "none" });
   const prep = await prepareEqualHandoverReport({ outgoingShiftId: f.outgoing, actorUid: f.out[0], reason: null });
   assert.ok(prep.preparation.content.completeness.warnings.includes(
-    "No fault or technical activity records were submitted. This is not a declaration of no faults.",
+    "Information: No fault or technical activity records were submitted. This is not a declaration of no faults.",
   ));
 
   await clearDb();
@@ -660,8 +674,8 @@ test("7. Attendance merges legacy personal records and v2 evidence; missing atte
   assert.equal(inB.clockOut, null);
   assert.equal(inB.reportingEvidence, null);
   assert.equal(inB.legacyAttendance, null);
-  assert.ok(content.completeness.warnings.some((line) => line.startsWith("Attendance missing: ") && line.includes(inB.name)));
-  assert.ok(content.completeness.warnings.some((line) => line.startsWith("Hours worked cannot be determined:")));
+  assert.ok(content.completeness.warnings.includes(`Not yet due: Awaiting personal acceptance: ${inB.name}. Worked hours: Not yet applicable.`));
+  assert.ok(content.completeness.warnings.some((line) => line.startsWith("Information: Worked hours unknown:")));
 
   assert.deepEqual(await collectionState("attendance_evidence_v2"), evidenceBefore, "the report writes no attendance evidence");
   assert.deepEqual(await collectionState("shift_attendance"), legacyBefore);
@@ -685,7 +699,7 @@ test("8. A colleague-attested departure keeps hoursWorked undetermined and payab
   assert.equal(row.payableHours, "policy_unresolved");
   assert.equal(row.reportingEvidence.kind, ATTENDANCE_EVIDENCE_KINDS.OUTGOING_ABSENT_DEPARTURE_ATTESTATION);
   assert.equal(row.reportingEvidence.attestedByUid, f.out[0]);
-  assert.ok(preparation.content.completeness.warnings.some((line) => line.startsWith("Hours worked cannot be determined:")));
+  assert.ok(preparation.content.completeness.warnings.some((line) => line.startsWith("Information: Worked hours unknown:")));
 });
 
 test("9. Conflicting attendance evidence fails closed and blocks preparation", async () => {
@@ -730,7 +744,7 @@ test("10. Staff names come from authoritative profiles; missing names are flagge
   assert.equal(preparation.content.participants.length, 4);
   assert.ok(preparation.content.participants.every((participant) => participant.name === null));
   assert.ok(preparation.content.completeness.warnings.includes(
-    "One or more staff names are missing from authoritative account profiles.",
+    "Evidence required: One or more staff names are missing from authoritative account profiles.",
   ));
   await ref("users", f.out[0]).update({ fullName: "Real Name" });
   const drifted = await prepareEqualHandoverReport({ outgoingShiftId: f.outgoing, actorUid: f.out[1], reason: "profile updated" });
@@ -745,6 +759,7 @@ test("11. Absence declaration updates the aggregate with audit history and never
   await clearDb();
   const f = await makeReservedFixture();
   const before = await v2Binding(f);
+  const attendanceBefore = await collectionState("shift_attendance");
   const result = await recordEqualHandoverAbsenceV2(absenceBase(f, before, f.incoming[0], { reason: "Incoming technician not yet in" }));
   assert.equal(result.replayed, false);
   assert.equal(result.aggregate.revision, before.aggregate.revision + 1);
@@ -767,7 +782,7 @@ test("11. Absence declaration updates the aggregate with audit history and never
   assert.equal(audits[0][1].absence.technicianUid, f.incoming[0]);
 
   assert.equal((await collectionState("attendance_evidence_v2")).length, 0, "an absence declaration must not finalize or fabricate attendance evidence");
-  assert.equal((await collectionState("shift_attendance")).length, 0);
+  assert.deepEqual(await collectionState("shift_attendance"), attendanceBefore, "an absence declaration writes no personal attendance record");
 });
 
 test("12. Outgoing absence requires absent_left_office with a reported departure time; incoming absence requires not_yet_in", async () => {
@@ -873,6 +888,44 @@ test("14. At most one participant absence may stand; clearing reopens the declar
   assert.equal(clearedAudits.length, 1);
   assert.equal(clearedAudits[0][1].clearedDeclaration.technicianUid, f.out[1]);
   assert.equal(clearedAudits[0][1].clearedDeclaration.reason, "Departed early");
+});
+
+// 09J §3 — only the attesting colleague may clear. A different outgoing
+// technician (who is still an authorized outgoing declarator) is refused, and
+// the rejected attempt leaves the aggregate and audit history untouched.
+test("14b. Only the attesting colleague may clear a standing absence declaration", async () => {
+  await clearDb();
+  const f = await makeReservedFixture();
+  const binding = await v2Binding(f);
+  // out-tech-1 (f.out[0]) attests the incoming colleague's absence.
+  const declared = await recordEqualHandoverAbsenceV2(absenceBase(f, binding, f.incoming[0], {
+    reason: "Stuck in transit",
+  }));
+  assert.equal(declared.aggregate.absences[0].recordedBy, f.out[0]);
+
+  // A different outgoing technician cannot clear it.
+  await assert.rejects(
+    () => clearEqualHandoverAbsenceV2({ outgoingShiftId: f.outgoing, actorUid: f.out[1], technicianUid: f.incoming[0],
+      expectedRevision: declared.aggregate.revision, expectedSnapshotHash: declared.snapshotHash }),
+    as403(/attested an absence declaration may clear it/),
+  );
+  // The rejected attempt wrote nothing.
+  assert.equal((await getV2Document(f)).absences.length, 1, "a rejected clear leaves the declaration standing");
+  assert.equal((await auditsByAction("EQUAL_HANDOVER_ABSENCE_CLEARED_V2")).length, 0);
+
+  // The attestor clears it successfully; a replay is an idempotent no-op.
+  const stamp = await v2Binding(f);
+  const cleared = await clearEqualHandoverAbsenceV2({ outgoingShiftId: f.outgoing, actorUid: f.out[0], technicianUid: f.incoming[0],
+    expectedRevision: stamp.aggregate.revision, expectedSnapshotHash: stamp.snapshotHash });
+  assert.equal(cleared.replayed, false);
+  assert.deepEqual(cleared.aggregate.absences, []);
+  assert.equal((await auditsByAction("EQUAL_HANDOVER_ABSENCE_CLEARED_V2")).length, 1);
+
+  const afterClear = await v2Binding(f);
+  const replay = await clearEqualHandoverAbsenceV2({ outgoingShiftId: f.outgoing, actorUid: f.out[0], technicianUid: f.incoming[0],
+    expectedRevision: afterClear.aggregate.revision, expectedSnapshotHash: afterClear.snapshotHash });
+  assert.equal(replay.replayed, true, "clearing an already-cleared declaration is an idempotent no-op");
+  assert.equal((await auditsByAction("EQUAL_HANDOVER_ABSENCE_CLEARED_V2")).length, 1, "the replay writes no second audit");
 });
 
 test("15. Absence cannot replace genuine personal attendance evidence (legacy or v2)", async () => {
@@ -1750,9 +1803,11 @@ test("40. Read view flags evidence that changes after a freeze as drift; the com
 
   // Withdrawing the declaration moves the live evidence away from the frozen
   // review, so the read view must flag it exactly like the freeze authority does.
+  // 09J: the withdrawal is issued by f.out[0], the colleague who attested the
+  // declaration — only the attestor may clear it.
   await sleep();
   const beforeClear = await v2Binding(f);
-  await clearEqualHandoverAbsenceV2({ outgoingShiftId: f.outgoing, actorUid: f.out[1], technicianUid: f.incoming[0],
+  await clearEqualHandoverAbsenceV2({ outgoingShiftId: f.outgoing, actorUid: f.out[0], technicianUid: f.incoming[0],
     expectedRevision: beforeClear.aggregate.revision, expectedSnapshotHash: beforeClear.snapshotHash });
   const drifted = await readEqualHandoverReportState(f.outgoing, f.out[1]);
   assert.equal(drifted.preparationDrifted, true, "evidence changed after a freeze must flag the reviewed preparation as stale");

@@ -273,6 +273,8 @@ function resolve(
       [unknown, unknown];
     authorizationOverride?:
       unknown;
+    firstShiftBootstrapAvailable?:
+      boolean;
   },
 ) {
   const includeAuthorization =
@@ -330,6 +332,11 @@ function resolve(
 
     attendance:
       attendanceValue,
+
+    firstShiftBootstrapAvailable:
+      options
+        ?.firstShiftBootstrapAvailable ??
+      false,
   });
 }
 
@@ -351,6 +358,8 @@ test(
         attendanceDocumentId:
           null,
         attendance: null,
+        firstShiftBootstrapAvailable:
+          true,
       });
 
     assert.equal(
@@ -361,7 +370,7 @@ test(
 );
 
 test(
-  "scheduled primary technician sees assignment without start or join authority",
+  "scheduled primary technician sees assignment without start or join authority after the first shift",
   () => {
     const result =
       resolve(
@@ -382,6 +391,11 @@ test(
     );
 
     assert.equal(
+      result.firstShiftBootstrapAvailable,
+      false,
+    );
+
+    assert.equal(
       result.canStart,
       false,
     );
@@ -399,12 +413,58 @@ test(
 );
 
 test(
+  "either permanent-pair technician may start the first-ever shift",
+  () => {
+    for (const technicianUid of [
+      technicianA,
+      technicianB,
+    ]) {
+      const result =
+        resolve(
+          technicianUid,
+          "scheduled",
+          {
+            firstShiftBootstrapAvailable:
+              true,
+          },
+        );
+
+      assert.ok(result);
+
+      assert.equal(
+        result.participationAuthority,
+        "primary",
+      );
+
+      assert.equal(
+        result.firstShiftBootstrapAvailable,
+        true,
+      );
+
+      assert.equal(
+        result.canStart,
+        true,
+      );
+
+      assert.equal(
+        result.canJoin,
+        false,
+      );
+    }
+  },
+);
+
+test(
   "scheduled temporary technician sees exact consumed authorization and start authority",
   () => {
     const result =
       resolve(
         technicianC,
         "scheduled",
+        {
+          firstShiftBootstrapAvailable:
+            true,
+        },
       );
 
     assert.ok(result);
@@ -432,6 +492,29 @@ test(
 );
 
 test(
+  "a consumed authorization cannot start a later shift manually",
+  () => {
+    const result =
+      resolve(
+        technicianC,
+        "scheduled",
+      );
+
+    assert.ok(result);
+
+    assert.equal(
+      result.firstShiftBootstrapAvailable,
+      false,
+    );
+
+    assert.equal(
+      result.canStart,
+      false,
+    );
+  },
+);
+
+test(
   "unrelated technician cannot discover the current shift",
   () => {
     const result =
@@ -444,6 +527,29 @@ test(
       result,
       null,
     );
+  },
+);
+
+test(
+  "an already activated shift cannot claim first-shift bootstrap",
+  () => {
+    for (const status of [
+      "active",
+      "handover_pending",
+    ] as const) {
+      assert.throws(
+        () =>
+          resolve(
+            technicianA,
+            status,
+            {
+              firstShiftBootstrapAvailable:
+                true,
+            },
+          ),
+        /activation ledger is inconsistent/i,
+      );
+    }
   },
 );
 

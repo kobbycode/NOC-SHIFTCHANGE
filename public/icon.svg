@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ShiftChange">
+  <rect width="512" height="512" rx="96" fill="#0b1220"/>
+  <path d="M256 128a128 128 0 1 0 90 218l-28-28a88 88 0 1 1 0-124l28-28a127 127 0 0 0-90-38z" fill="#38bdf8"/>
+  <path d="M300 256l56 56 56-56-24-24-32 32-32-32z" fill="#38bdf8"/>
+</svg>

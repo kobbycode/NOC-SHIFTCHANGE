@@ -54,6 +54,7 @@ const { createHandoverDocumentId, createHandoverSnapshot, assertHandoverAggregat
   "../src/lib/operations/handover-domain.ts"
 );
 const { beginShiftHandover } = await import("../src/lib/operations/begin-shift-handover.ts");
+const { joinShift } = await import("../src/lib/operations/join-shift.ts");
 const {
   initializeEqualHandoverReservation,
   replaceEqualHandoverReservationForTechnicians,
@@ -163,13 +164,57 @@ async function makeActiveShiftFixture({ managerRole = "supervisor" } = {}) {
     });
   }
   await batch.commit();
+  // 09M.1: the v2 begin preflight refuses incomplete mandatory evidence, so
+  // fixtures carry the same record-derived evidence the production writer
+  // would produce (a verified observation for each default station plus an
+  // outside-broadcast report). Direct document writes follow the established
+  // seed pattern and keep fixtures free of operational-writer session and
+  // audit side effects.
+  await seedOperationEvidence(f);
   return f;
+}
+
+async function seedOperationEvidence(f, authorUid = f.out[0]) {
+  const authorName = authorUid === f.out[1] ? "Ben Out-B" : "Ada Out-A";
+  const at = (hour) => `2020-01-01T0${hour}:00:00.000Z`;
+  const events = [
+    ...[["joy-fm", "Joy FM"], ["adom-fm", "Adom FM"], ["asempa-fm", "Asempa FM"], ["hitz-fm", "Hitz FM"]]
+      .map(([stationId, stationName], index) => ({
+        id: `${f.outgoing}-evidence-b${index}`, recordId: `${f.outgoing}-evidence-b${index}`,
+        shiftId: f.outgoing, revision: 1, kind: "broadcast", occurredAt: at(1 + index),
+        stationId, stationName, status: "on_air", remarks: "",
+        authorUid, authorName, originalReporterUid: authorUid, originalReporterName: authorName,
+        createdAt: at(1 + index), provenance: "authenticated_technician",
+      })),
+    {
+      id: `${f.outgoing}-evidence-ob`, recordId: `${f.outgoing}-evidence-ob`,
+      shiftId: f.outgoing, revision: 1, kind: "outside_broadcast", occurredAt: at(5),
+      title: "Outside van feed", location: "Accra mall", runningStatus: "ended",
+      technicalIssues: "None", actionTaken: "Monitored handoff.", status: "resolved", remarks: "",
+      linkedTaskId: null,
+      authorUid, authorName, originalReporterUid: authorUid, originalReporterName: authorName,
+      createdAt: at(5), provenance: "authenticated_technician",
+    },
+  ];
+  const batch = db.batch();
+  for (const event of events) {
+    batch.set(ref("shift_operation_events", event.id), event);
+    batch.set(ref("shift_operation_heads", event.recordId), event);
+  }
+  await batch.commit();
+}
+
+// Handover belongs to technicians who personally joined the shift, so every
+// v2 initiator joins through the real join service before beginning.
+async function joinOutgoing(f, uid) {
+  return joinShift({ shiftId: f.outgoing, actorUid: uid });
 }
 
 // Technician-authorized v2 begin (shared begin service) moves the fixture to
 // handover_pending before any reservation is attempted.
 async function makeHandoverFixture(options = {}) {
   const f = await makeActiveShiftFixture(options);
+  await joinOutgoing(f, f.out[0]);
   await beginShiftHandover({ shiftId: f.outgoing, actorUid: f.out[0], authority: "equal-technician" });
   return f;
 }
@@ -262,6 +307,7 @@ const as403 = expectsStatus(AssignmentOperationError, 403);
 test("1. Either outgoing technician begins active→handover_pending; shift, control, schedules and audit move atomically", async () => {
   await clearDb();
   const fa = await makeActiveShiftFixture();
+  await joinOutgoing(fa, fa.out[0]);
   await beginShiftHandover({ shiftId: fa.outgoing, actorUid: fa.out[0], authority: "equal-technician" });
   const shiftA = (await ref("shifts", fa.outgoing).get()).data();
   assert.equal(shiftA.status, "handover_pending");
@@ -271,6 +317,7 @@ test("1. Either outgoing technician begins active→handover_pending; shift, con
 
   await clearDb();
   const fb = await makeActiveShiftFixture();
+  await joinOutgoing(fb, fb.out[1]);
   await beginShiftHandover({ shiftId: fb.outgoing, actorUid: fb.out[1], authority: "equal-technician" });
   const shiftB = (await ref("shifts", fb.outgoing).get()).data();
   assert.equal(shiftB.status, "handover_pending");
@@ -1185,3 +1232,39 @@ test("28. A v2 cancellation then re-reservation with a fresh key archives the v2
 async function responseJson(response) {
   return response.json();
 }
+
+// Phase 5 participation gate: handover belongs to technicians who personally
+// joined, so an unjoined outgoing technician must be refused.
+test("41. An unjoined outgoing technician cannot begin the handover; the joined partner can", async () => {
+  await clearDb();
+  const f = await makeActiveShiftFixture();
+  const before = await operationalState();
+
+  await assert.rejects(
+    () => beginShiftHandover({ shiftId: f.outgoing, actorUid: f.out[0], authority: "equal-technician" }),
+    (error) => {
+      assert.ok(error instanceof AssignmentOperationError, `${error.constructor.name}: ${error.message}`);
+      assert.equal(error.status, 403);
+      assert.match(error.message, /join this shift before beginning its handover/i);
+      return true;
+    },
+  );
+
+  assert.deepEqual(await operationalState(), before, "a refused begin mutates nothing");
+
+  await joinOutgoing(f, f.out[1]);
+  await beginShiftHandover({ shiftId: f.outgoing, actorUid: f.out[1], authority: "equal-technician" });
+
+  const shift = (await ref("shifts", f.outgoing).get()).data();
+  assert.equal(shift.status, "handover_pending");
+  assert.equal(shift.handoverStartedBy, f.out[1]);
+
+  const initiator = (await ref("shift_attendance", `${f.outgoing}_${f.out[1]}`).get()).data();
+  assert.equal(initiator.technicianId, f.out[1]);
+  assert.equal(initiator.participationAuthority, "primary");
+  assert.equal(
+    (await ref("shift_attendance", `${f.outgoing}_${f.out[0]}`).get()).exists,
+    false,
+    "beginning a handover never fabricates the partner attendance",
+  );
+});

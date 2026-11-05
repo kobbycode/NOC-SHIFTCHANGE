@@ -20,6 +20,10 @@ import {
   ThemeToggle,
 } from "./theme-toggle";
 
+import {
+  NotificationBell,
+} from "./notification-bell";
+
 import { usePathname } from "next/navigation";
 
 interface AppHeaderProps {
@@ -122,15 +126,19 @@ export function AppHeader({
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <ThemeToggle />
 
-        <div
-          title="Notifications will be available in a later phase"
-          className="
-            flex h-11 w-11 items-center justify-center
-            rounded-xl text-[var(--muted)]
-          "
-        >
-          <Bell size={20} />
-        </div>
+        {role === "technician" ? (
+          <NotificationBell />
+        ) : (
+          <div
+            title="Notifications will be available in a later phase"
+            className="
+              flex h-11 w-11 items-center justify-center
+              rounded-xl text-[var(--muted)]
+            "
+          >
+            <Bell size={20} />
+          </div>
+        )}
 
         <div
           className="

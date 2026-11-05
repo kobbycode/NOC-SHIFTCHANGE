@@ -68,6 +68,13 @@ export interface TechnicianCurrentShiftView {
 
   joinedAt: string | null;
 
+  /**
+   * True only while no shift in this installation has ever been activated.
+   * Manual start exists solely for that first shift; every later shift
+   * activates through an incoming technician's handover acceptance.
+   */
+  firstShiftBootstrapAvailable: boolean;
+
   canStart: boolean;
   canJoin: boolean;
 }
@@ -89,6 +96,8 @@ export interface ResolveTechnicianCurrentShiftInput {
   attendanceDocumentId:
     string | null;
   attendance: unknown | null;
+
+  firstShiftBootstrapAvailable: boolean;
 }
 
 interface CurrentShiftRecord {
@@ -190,6 +199,16 @@ export function resolveTechnicianCurrentShift(
   } catch {
     throw new TechnicianCurrentShiftDomainError(
       "The current shift does not match the global operational slot.",
+    );
+  }
+
+  if (
+    shift.status !== "scheduled" &&
+    input.firstShiftBootstrapAvailable ===
+      true
+  ) {
+    throw new TechnicianCurrentShiftDomainError(
+      "The first-shift activation ledger is inconsistent with the current shift.",
     );
   }
 
@@ -432,11 +451,13 @@ export function resolveTechnicianCurrentShift(
       attendance?.recordedAt ??
       null,
 
+    firstShiftBootstrapAvailable:
+      input.firstShiftBootstrapAvailable === true,
+
     canStart:
       shift.status ===
         "scheduled" &&
-      participationAuthority ===
-        "temporary_authorized",
+      input.firstShiftBootstrapAvailable === true,
 
     canJoin:
       shift.status === "active" &&

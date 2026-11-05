@@ -129,6 +129,7 @@ function validCurrentShift(
     authorizationId: null,
     attendance: null,
     joinedAt: null,
+    firstShiftBootstrapAvailable: false,
     canStart: false,
     canJoin: true,
     ...overrides,
@@ -189,13 +190,42 @@ test(
 );
 
 test(
-  "accepts a scheduled primary assignment without start or join authority",
+  "accepts a scheduled primary assignment after the first shift without start or join authority",
   { concurrency: false },
   async () => {
     const currentShift =
       validCurrentShift({
         status: "scheduled",
         actualStart: null,
+        canJoin: false,
+      });
+
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift,
+        }),
+      async () => {
+        assert.deepEqual(
+          await getTechnicianCurrentShift(),
+          currentShift,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "accepts a scheduled first-ever bootstrap assignment with start authority",
+  { concurrency: false },
+  async () => {
+    const currentShift =
+      validCurrentShift({
+        status: "scheduled",
+        actualStart: null,
+        firstShiftBootstrapAvailable: true,
+        canStart: true,
         canJoin: false,
       });
 
@@ -227,6 +257,7 @@ test(
           "temporary_authorized",
         authorizationId:
           "next-shift-auth-client-test",
+        firstShiftBootstrapAvailable: true,
         canStart: true,
         canJoin: false,
       });
@@ -241,6 +272,98 @@ test(
         assert.deepEqual(
           await getTechnicianCurrentShift(),
           currentShift,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects start authority that contradicts the activation ledger",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift({
+              status: "scheduled",
+              actualStart: null,
+              firstShiftBootstrapAvailable: false,
+              canStart: true,
+              canJoin: false,
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects a current-shift response without the bootstrap field",
+  { concurrency: false },
+  async () => {
+    const {
+      firstShiftBootstrapAvailable,
+      ...withoutBootstrap
+    } = validCurrentShift({
+      status: "scheduled",
+      actualStart: null,
+      canJoin: false,
+    });
+
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift: withoutBootstrap,
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects bootstrap availability for an already activated shift",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift({
+              firstShiftBootstrapAvailable: true,
+              canStart: false,
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
         );
       },
     );

@@ -15,9 +15,14 @@
 /firebase.handover-v2-emulator.generated.json
 /firebase.handover-v2-report-emulator.generated.json
 /firebase.handover-v2-confirmation-emulator.generated.json
+/firebase.uat-emulator.generated.json
+/firebase.uat-09m-emulator.generated.json
+/firebase.recovery-approval-v2-8c4b.generated.json
+/firebase.recovery-approval-v2-http.generated.json
 
 # next.js
 /.next/
+/.next-*/
 /out/
 
 # production
@@ -47,3 +52,12 @@ ui-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cloud functions (delivery backend) build artifacts + local deps
+/functions/node_modules/
+/functions/lib/
+
+# service-account / FCM credentials must never be committed
+*.serviceAccount*.json
+service-account*.json
+firebase-service-account*.json

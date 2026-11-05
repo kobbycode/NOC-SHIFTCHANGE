@@ -6,6 +6,7 @@ import { HandoverDomainError } from "@/lib/operations/handover-domain";
 import { EqualHandoverDomainError } from "@/lib/operations/equal-technician-handover-domain";
 import { HandoverReservationGuardError } from "@/lib/operations/handover-reservation-guard-domain";
 import { NextShiftAuthorizationDomainError } from "@/lib/operations/next-shift-authorization-domain";
+import { OperationalEvidenceIncompleteError } from "@/lib/operations/handover-begin-preflight";
 import { beginEqualTechnicianShiftHandover } from "@/lib/operations/begin-shift-handover";
 
 export const runtime = "nodejs";
@@ -23,6 +24,15 @@ function respond(error: string, status: number) {
 }
 
 function mapError(error: unknown) {
+  if (error instanceof OperationalEvidenceIncompleteError) {
+    // Structured, actionable rejection: the plain `error` message keeps the
+    // existing contract intact while code + missingRequirements let the UI
+    // name every unsatisfied mandatory-evidence rule.
+    return NextResponse.json(
+      { success: false, error: error.message, code: error.code, missingRequirements: error.missingRequirements },
+      { status: error.status, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (
     error instanceof AssignmentOperationError ||
     error instanceof HandoverDomainError ||
