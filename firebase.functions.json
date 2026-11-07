@@ -1,0 +1,15 @@
+{
+  "//": "TECH-HO-RECOVERY-09L — Cloud Functions delivery-backend deploy manifest. Standalone and DELIBERATELY separate from firebase.emulator.json / firebase.uat-emulator.generated.json so the isolated UAT setup is never modified. NOT used by any local emulator run and NOT deployed this milestone. When the owner provisions a real staging project, deploy with: firebase deploy --config firebase.functions.json --project <staging-project-id> --only functions",
+  "functions": {
+    "source": "functions",
+    "codebase": "default",
+    "runtime": "nodejs22",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "src",
+      "*.ts",
+      "tsconfig.json"
+    ]
+  }
+}

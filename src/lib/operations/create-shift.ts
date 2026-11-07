@@ -35,6 +35,11 @@ import {
 } from "./shift-overlap";
 
 import {
+  findShiftWindowDeviation,
+  isShiftWindowPolicyRelaxed,
+} from "@/lib/scheduling/shift-schedule-policy";
+
+import {
   consumeOperationalShiftSlot,
 } from "./operational-shift-control-state";
 
@@ -156,6 +161,43 @@ export async function createShift(
     throw new AssignmentOperationError(
       "Please provide valid shift start and end dates in UTC ISO format.",
       400
+    );
+  }
+
+  /*
+   * Owner-set scheduling policy (2026-11-06): a
+   * morning shift is 08:00–17:00 and a night
+   * shift is 17:00–08:00 of the next local day,
+   * in the scheduling timezone. The submitted
+   * window must be exactly that window, unless
+   * this is a proven isolated emulator stack.
+   */
+
+  const windowDeviation = findShiftWindowDeviation(
+    shiftType,
+    scheduledStart,
+    scheduledEnd
+  );
+
+  if (windowDeviation) {
+    if (!isShiftWindowPolicyRelaxed(process.env)) {
+      throw new AssignmentOperationError(
+        windowDeviation.message,
+        400
+      );
+    }
+
+    console.warn(
+      "Shift window policy relaxed for an isolated emulator stack.",
+      {
+        shiftType,
+        scheduledStart,
+        scheduledEnd,
+        expectedScheduledStart:
+          windowDeviation.expectedScheduledStart,
+        expectedScheduledEnd:
+          windowDeviation.expectedScheduledEnd,
+      }
     );
   }
 

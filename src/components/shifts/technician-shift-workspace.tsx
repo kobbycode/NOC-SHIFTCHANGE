@@ -26,6 +26,8 @@ import {
 
 import type {
   TechnicianCurrentShiftResult,
+  TechnicianCurrentShiftSnapshot,
+  TechnicianWriteAuthorityResult,
 } from "@/lib/shifts/shift-api-types";
 
 function formatShiftType(
@@ -121,10 +123,10 @@ function statusClasses(
 
 export function TechnicianShiftWorkspace() {
   const [
-    currentShift,
-    setCurrentShift,
+    snapshot,
+    setSnapshot,
   ] =
-    useState<TechnicianCurrentShiftResult | null>(
+    useState<TechnicianCurrentShiftSnapshot | null>(
       null,
     );
 
@@ -175,6 +177,16 @@ export function TechnicianShiftWorkspace() {
   const retrievalInProgress =
     useRef(false);
 
+  const currentShift =
+    snapshot?.currentShift ??
+    null;
+
+  const writeAuthority:
+    TechnicianWriteAuthorityResult |
+    null =
+    snapshot?.writeAuthority ??
+    null;
+
   const actionInProgress =
     useRef(false);
 
@@ -204,13 +216,13 @@ export function TechnicianShiftWorkspace() {
           const result =
             await getTechnicianCurrentShift();
 
-          setCurrentShift(
+          setSnapshot(
             result,
           );
 
           return true;
         } catch (caughtError) {
-          setCurrentShift(null);
+          setSnapshot(null);
 
           if (
             caughtError instanceof
@@ -249,7 +261,7 @@ export function TechnicianShiftWorkspace() {
           return;
         }
 
-        setCurrentShift(
+        setSnapshot(
           result,
         );
 
@@ -261,7 +273,7 @@ export function TechnicianShiftWorkspace() {
             return;
           }
 
-          setCurrentShift(null);
+          setSnapshot(null);
 
           if (
             caughtError instanceof
@@ -376,6 +388,7 @@ export function TechnicianShiftWorkspace() {
     if (
       !currentShift ||
       !currentShift.canJoin ||
+      !writeAuthority?.mayWrite ||
       actionInProgress.current
     ) {
       return;
@@ -519,6 +532,25 @@ export function TechnicianShiftWorkspace() {
           <span>
             {actionSuccess}
           </span>
+        </div>
+      )}
+
+      {writeAuthority && !writeAuthority.mayWrite && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+
+          <div>
+            <p className="font-medium">
+              Read-only
+            </p>
+
+            <p className="mt-1 text-xs">
+              {writeAuthority.message}
+            </p>
+          </div>
         </div>
       )}
 
@@ -680,7 +712,8 @@ export function TechnicianShiftWorkspace() {
               </div>
             )}
 
-            {currentShift.canJoin && (
+            {currentShift.canJoin &&
+              writeAuthority?.mayWrite && (
               <div className="space-y-3">
                 <button
                   type="button"
@@ -710,6 +743,16 @@ export function TechnicianShiftWorkspace() {
                 </p>
               </div>
             )}
+
+            {currentShift.canJoin &&
+              writeAuthority &&
+              !writeAuthority.mayWrite && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  Join Shift is unavailable
+                  while this view is
+                  read-only.
+                </p>
+              )}
 
             {currentShift.attendance && (
               <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
@@ -749,14 +792,19 @@ export function TechnicianShiftWorkspace() {
                   ) : (
                     <>
                       This shift is assigned to
-                      you. Later shifts activate
-                      automatically when an
-                      incoming technician accepts
-                      the handover with their own
-                      password. Refresh My Shift
-                      when it becomes active, then
-                      use Join Shift to record
-                      your attendance.
+                      you. It activates when a
+                      reserved incoming
+                      technician accepts the
+                      outgoing handover with
+                      their own password on the
+                      last page of the handover
+                      form. Refresh My Shift
+                      once it is active. Only the
+                      technician who accepted
+                      that handover can change
+                      operational data; every
+                      other technician view is
+                      read-only.
                     </>
                   )}
                 </div>

@@ -18,6 +18,10 @@ import {
 } from "@/lib/operations/respond-to-task-assignment";
 
 import {
+  requireTechnicianWriteAuthority,
+} from "@/lib/operations/technician-write-authority-firestore";
+
+import {
   markActionedByReference,
 } from "@/lib/notifications/notification-service";
 
@@ -84,6 +88,11 @@ export async function POST(
      * Read the authoritative route
      * identifiers.
      */
+
+    await requireTechnicianWriteAuthority({
+      uid: actor.uid,
+      role: actor.role,
+    });
 
     const {
       taskId,

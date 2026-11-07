@@ -10,6 +10,7 @@ import {
 } from "@/lib/operations/handover-v2-atomic-http";
 import { sameOrigin } from "@/lib/operations/handover-v2-report-http";
 import { finalizeIncomingAcceptanceGuardAtomically } from "@/lib/operations/incoming-acceptance-guard-finalization";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest, context: Context) {
   }
 
   try {
+    await requireTechnicianWriteAuthority({ uid: actor.uid, role: actor.role });
     const nowIso = new Date().toISOString();
     const result = await finalizeIncomingAcceptanceGuardAtomically({
       outgoingShiftId: shiftId,

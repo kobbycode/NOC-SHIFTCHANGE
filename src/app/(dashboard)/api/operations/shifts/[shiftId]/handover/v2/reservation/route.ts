@@ -14,6 +14,7 @@ import {
   readEqualHandoverReservation,
   replaceEqualHandoverReservationForTechnicians,
 } from "@/lib/operations/equal-handover-reservation-firestore";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,6 +88,7 @@ async function mutate(request: NextRequest, context: Context, operation: "initia
   if (session.error) return session.error;
   if (!sameOrigin(request)) return respond({ success: false, error: "Invalid request origin." }, 403);
   try {
+    await requireTechnicianWriteAuthority({ uid: session.actor.uid, role: session.actor.role });
     const { shiftId } = await context.params;
     let body: unknown;
     try { body = await request.json(); }

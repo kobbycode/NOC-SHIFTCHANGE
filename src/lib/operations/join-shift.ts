@@ -17,6 +17,10 @@ import type {
   NextShiftAuthorization,
 } from "@/types/next-shift-authorization";
 
+import type {
+  AttendanceLocationEvidence,
+} from "@/types/attendance-location";
+
 import {
   getOperationalCollections,
   GLOBAL_OPERATIONAL_SHIFT_CONTROL_ID,
@@ -52,6 +56,7 @@ import {
 export interface JoinShiftInput {
   shiftId: string;
   actorUid: string;
+  locationEvidence?: AttendanceLocationEvidence | null;
 }
 
 function mapDomainError(error: unknown): never {
@@ -402,6 +407,7 @@ export async function joinShift(
         participationAuthority: attendanceAuthority,
         authorizationId,
         recordedAt: now,
+        locationEvidence: input.locationEvidence ?? null,
       });
 
       if (!isPrimary) {

@@ -19,6 +19,10 @@ import {
 } from "@/types/attendance";
 
 import type {
+  AttendanceLocationEvidence,
+} from "@/types/attendance-location";
+
+import type {
   NextShiftAuthorization,
 } from "@/types/next-shift-authorization";
 
@@ -384,6 +388,7 @@ export function createShiftAttendanceRecord(input: {
   participationAuthority: AttendanceParticipationAuthority;
   authorizationId: string | null;
   recordedAt: string;
+  locationEvidence?: AttendanceLocationEvidence | null;
 }): Attendance {
   if (
     !isValidIdentifier(input.shiftId, 512) ||
@@ -414,6 +419,9 @@ export function createShiftAttendanceRecord(input: {
     clockOut: null,
     recordedAt: input.recordedAt,
     updatedAt: input.recordedAt,
+    ...(input.locationEvidence
+      ? { locationEvidence: input.locationEvidence }
+      : {}),
   };
 }
 

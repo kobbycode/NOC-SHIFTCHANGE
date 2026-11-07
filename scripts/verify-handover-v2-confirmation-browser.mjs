@@ -7,7 +7,8 @@
  * What this proves: a real Chromium (Edge channel) browser signs each reserved
  * technician in through the production login flow against the synthetic Auth
  * emulator, walks into the dedicated v2 page, and confirms for self through the
- * real /handover/v2/confirmation route with a real session cookie — proving the
+ * real /handover/v2/confirmation route with a real session cookie AND that
+ * technician's OWN password, re-verified server-side — proving the
  * missing-confirmation blocker clears and derived readiness becomes ready only
  * when the authoritative evidence supports it. It shows a supported colleague
  * absence satisfying the four-person obligation (three personal confirmations
@@ -18,8 +19,10 @@
  * technician in the body) are attempted from the browser and denied. Every
  * step is asserted against final Firestore documents and audit evidence, not
  * only API return values. The workflow stops at confirmation/readiness: no
- * incoming shift is created, attendance is never finalized, and no handover is
- * transferred.
+ * incoming shift is created and no handover is transferred. Each OUTGOING
+ * technician's verified password leaves exactly one `outgoing_personal_confirmation`
+ * attendance record, which proves authentication only — never a clock-in, a
+ * clock-out or a completed attendance finalization.
  *
  * Safety: refuses to run outside the synthetic "demo-shiftchange-v2" emulator
  * project, refuses a busy port, refuses an account file that already exists,
@@ -84,6 +87,7 @@ const {
   readEqualHandoverReservation,
 } = await import("../src/lib/operations/equal-handover-reservation-firestore.ts");
 const { createEqualHandoverDocumentId } = await import("../src/lib/operations/equal-technician-handover-domain.ts");
+const { attendanceEvidenceCountsAsClockIn } = await import("../src/lib/operations/attendance-evidence-domain.ts");
 const { recordShiftOperation } = await import("../src/lib/operations/shift-operations.ts");
 const {
   createPendingOperationalShiftControl,
@@ -192,10 +196,13 @@ async function openV2Page(context, account, shiftId) {
   return page;
 }
 
-async function confirmForSelf(page) {
+async function confirmForSelf(page, account) {
   const button = page.getByRole("button", { name: "Confirm this handover for myself" });
   await button.waitFor({ timeout: 60_000 });
   assert.ok(await button.isEnabled(), "The self-confirmation control must be enabled for an authorized participant.");
+  // A confirmation is personal: the technician types their OWN password, which
+  // the route verifies server-side before any write and never stores or echoes.
+  await page.locator("form", { has: button }).locator('input[name="password"]').fill(account.password);
   await button.click();
   await page.getByText("Your personal confirmation has been recorded.").waitFor({ timeout: 180_000 });
 }
@@ -310,7 +317,7 @@ async function main() {
     record(2, "missing-confirmation blocker shown before any personal confirmation", { readiness: "not ready", reason: "missing_confirmation" });
 
     // 3 — outgoing technician A confirms for self; it persists across reload.
-    await confirmForSelf(page);
+    await confirmForSelf(page, seeded.accounts.outgoingA);
     await page.getByText("Confirmed 1 of 4").waitFor({ timeout: 60_000 });
     const afterConfirm = await pageText(page);
     assert.match(afterConfirm, /Confirmed 1 of 4/);
@@ -329,7 +336,7 @@ async function main() {
     await page.close();
     for (const key of ["outgoingB", "incomingA", "incomingB"]) {
       page = await openV2Page(context, seeded.accounts[key], seeded.shiftId);
-      await confirmForSelf(page);
+      await confirmForSelf(page, seeded.accounts[key]);
       await signOut(page);
       await page.close();
     }
@@ -401,7 +408,7 @@ async function main() {
     await page.close();
     for (const key of ["outgoingA", "outgoingB", "incomingA"]) {
       page = await openV2Page(context, seeded.accounts[key], seeded.shiftId);
-      await confirmForSelf(page);
+      await confirmForSelf(page, seeded.accounts[key]);
       await signOut(page);
       await page.close();
     }
@@ -423,7 +430,8 @@ async function main() {
     await signIn(page, seeded.accounts.outsider);
     const outsiderStamp = await bindingFor(seeded.shiftId);
     const outsiderDenial = await probePost(page, seeded.shiftId, "/confirmation", {
-      expectedRevision: outsiderStamp.expectedRevision, expectedSnapshotHash: outsiderStamp.expectedSnapshotHash });
+      expectedRevision: outsiderStamp.expectedRevision, expectedSnapshotHash: outsiderStamp.expectedSnapshotHash,
+      password: seeded.accounts.outsider.password });
     assert.equal(outsiderDenial.status, 403, `An outsider must not confirm: ${JSON.stringify(outsiderDenial.body)}`);
     await signOut(page);
     await page.close();
@@ -432,7 +440,8 @@ async function main() {
     await signIn(page, seeded.accounts.supervisor);
     const supervisorStamp = await bindingFor(seeded.shiftId);
     const supervisorDenial = await probePost(page, seeded.shiftId, "/confirmation", {
-      expectedRevision: supervisorStamp.expectedRevision, expectedSnapshotHash: supervisorStamp.expectedSnapshotHash });
+      expectedRevision: supervisorStamp.expectedRevision, expectedSnapshotHash: supervisorStamp.expectedSnapshotHash,
+      password: seeded.accounts.supervisor.password });
     assert.equal(supervisorDenial.status, 403, `A supervisor must not confirm: ${JSON.stringify(supervisorDenial.body)}`);
     await signOut(page);
     await page.close();
@@ -442,6 +451,7 @@ async function main() {
     const forgedStamp = await bindingFor(seeded.shiftId);
     const forged = await probePost(page, seeded.shiftId, "/confirmation", {
       expectedRevision: forgedStamp.expectedRevision, expectedSnapshotHash: forgedStamp.expectedSnapshotHash,
+      password: seeded.accounts.outgoingA.password,
       technicianUid: seeded.uids.incomingA });
     assert.equal(forged.status, 400, `A proxy body field must be rejected: ${JSON.stringify(forged.body)}`);
     assert.equal(forged.noStore, "no-store", "A denied confirmation response must not be cacheable.");
@@ -668,9 +678,42 @@ async function verifyFinalState({ shiftId, uids, fingerprint, baseline, browserV
   // Boundary proofs: confirmation/readiness never transfer, finalize or create.
   assert.equal(await collectionSnapshot("handover_task_transfers"), baseline.transfers,
     "No task may be transferred by confirmations.");
-  assert.equal(await collectionSnapshot("attendance_evidence_v2"), baseline.attendanceV2,
-    "Confirmations must not finalize attendance evidence.");
-  assert.equal(await collectionSnapshot("attendance_evidence_operations_v2"), baseline.attendanceOps);
+  // Each OUTGOING technician's verified password leaves exactly one personal
+  // confirmation record — deterministic per participant, so the exception-round
+  // re-confirmation adds no second record. It proves WHO authenticated and WHEN:
+  // never a clock-in, never a clock-out. Incoming confirmations establish no
+  // attendance at all; only their passworded acceptance does.
+  const confirmationEvidence = (await db.collection("attendance_evidence_v2").get()).docs.map((doc) => doc.data());
+  assert.deepEqual(
+    confirmationEvidence.map((item) => item.technicianUid).sort(),
+    [uids.outgoingA, uids.outgoingB].sort(),
+    "Only the two outgoing technicians hold personal confirmation evidence.",
+  );
+  for (const item of confirmationEvidence) {
+    assert.equal(item.kind, "outgoing_personal_confirmation");
+    assert.equal(item.handoverId, fingerprint);
+    assert.equal(item.clockIn, null, "A confirmation establishes no clock-in.");
+    assert.equal(item.clockOut, null, "A confirmation establishes no clock-out.");
+    assert.equal(item.reportedDepartureTime, null);
+    assert.equal(item.attestedByUid, null);
+    assert.equal(item.lateReason, null);
+    assert.equal(item.personallyAuthenticated, true);
+    assert.equal(attendanceEvidenceCountsAsClockIn(item), false,
+      "The domain's own clock-in predicate must never count a confirmation as arrival.");
+    // The method NAME is a fixed contract constant; every other field is scrubbed
+    // for credential material.
+    const { authenticationMethod, ...scrubbed } = item;
+    assert.equal(authenticationMethod, "personal_password_confirmation");
+    assert.ok(!JSON.stringify(scrubbed).match(/password|token|authorization/i), "Evidence must never carry credential material.");
+  }
+  assert.equal(new Set(confirmationEvidence.map((item) => item.slotId)).size, confirmationEvidence.length,
+    "Each outgoing position occupies exactly one deterministic slot.");
+  const confirmationOperations = (await db.collection("attendance_evidence_operations_v2").get()).docs.map((doc) => doc.data());
+  assert.deepEqual(
+    confirmationOperations.map((operation) => [operation.status, operation.evidenceId]).sort(),
+    confirmationEvidence.map((item) => ["finalized", item.id]).sort(),
+    "Every personal confirmation operation must be finalized against its evidence record.",
+  );
   assert.equal(await collectionSnapshot("operational_shift_control"), baseline.control,
     "Confirmations must not advance operational shift control.");
   assert.equal(await collectionSnapshot("technician_schedules"), baseline.schedules,

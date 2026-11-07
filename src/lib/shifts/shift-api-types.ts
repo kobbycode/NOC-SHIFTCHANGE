@@ -5,6 +5,10 @@ import type {
   Shift,
   ShiftMember,
 } from "@/types/shift";
+import type {
+  ReadOnlyDenial,
+  WriteAuthorityBasis,
+} from "@/lib/operations/technician-write-authority";
 
 /*
  * Shared authoritative shift retrieval
@@ -196,6 +200,37 @@ export interface TechnicianCurrentShiftResult {
 }
 
 /*
+ * Authoritative technician write-authority projection.
+ *
+ * A technician may change operational data only for the shift they entered
+ * with their own authenticated act (founding the shift, or accepting the
+ * handover with their own password). Every other technician login is
+ * read-only. The server is the only authority for this decision; the browser
+ * uses it to annotate and hide write actions, never to grant them.
+ */
+export interface TechnicianWriteAuthorityResult {
+  mayWrite: boolean;
+
+  governed: boolean;
+
+  basis:
+    | WriteAuthorityBasis
+    | null;
+
+  denial:
+    | ReadOnlyDenial
+    | null;
+
+  message: string;
+
+  activeShiftId: string | null;
+
+  personallyAcceptedShiftId:
+    | string
+    | null;
+}
+
+/*
  * Successful technician current-shift
  * retrieval response.
  */
@@ -204,6 +239,21 @@ export interface TechnicianCurrentShiftSuccessResponse {
 
   currentShift:
     TechnicianCurrentShiftResult | null;
+
+  writeAuthority:
+    TechnicianWriteAuthorityResult;
+}
+
+/*
+ * Technician current-shift snapshot
+ * returned to callers.
+ */
+export interface TechnicianCurrentShiftSnapshot {
+  currentShift:
+    TechnicianCurrentShiftResult | null;
+
+  writeAuthority:
+    TechnicianWriteAuthorityResult;
 }
 
 /*

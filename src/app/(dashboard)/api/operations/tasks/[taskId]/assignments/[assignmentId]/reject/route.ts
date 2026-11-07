@@ -18,6 +18,10 @@ import {
   respondToTaskAssignment,
 } from "@/lib/operations/respond-to-task-assignment";
 
+import {
+  requireTechnicianWriteAuthority,
+} from "@/lib/operations/technician-write-authority-firestore";
+
 export const runtime = "nodejs";
 
 type RouteContext = {
@@ -120,6 +124,11 @@ export async function POST(
      * PHASE 3:
      * Read the route identifiers.
      */
+
+    await requireTechnicianWriteAuthority({
+      uid: actor.uid,
+      role: actor.role,
+    });
 
     const {
       taskId,

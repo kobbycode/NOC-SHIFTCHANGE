@@ -859,6 +859,28 @@ test("createShift reads authorization before any writes and writes all bindings 
   );
 });
 
+test("shift creation validates the scheduling window before touching Firestore", async () => {
+  const source = await readFile(
+    new URL("../src/lib/operations/create-shift.ts", import.meta.url),
+    "utf8"
+  );
+  const windowCheckIndex = source.indexOf("findShiftWindowDeviation(");
+  const relaxationGate = source.indexOf("isShiftWindowPolicyRelaxed(process.env)");
+  const firestoreIndex = source.indexOf("const db = getAdminFirestore();");
+
+  assert.notEqual(windowCheckIndex, -1);
+  assert.notEqual(relaxationGate, -1, "only an isolated emulator stack may relax the rule");
+  assert.ok(
+    windowCheckIndex < firestoreIndex,
+    "the window rule must reject before any read or write",
+  );
+  assert.match(
+    source.slice(windowCheckIndex, firestoreIndex),
+    /if \(!isShiftWindowPolicyRelaxed\(process\.env\)\) \{\s*throw new AssignmentOperationError\(/s,
+    "a deviation must throw unless the sandbox gate is open",
+  );
+});
+
 test("shift creation API only accepts selected pair ID, never pair members or slot authority", async () => {
   const source = await readFile(
     new URL(

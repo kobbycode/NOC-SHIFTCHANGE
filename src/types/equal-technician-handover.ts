@@ -154,6 +154,11 @@ export type AttendanceClockOutProvenance =
 export const UNRESOLVED_POLICY = "policy_unresolved" as const;
 export type UnresolvedPolicy = typeof UNRESOLVED_POLICY;
 
+// Owner-set attendance grace (2026-11-06): arrival within 15 minutes of the
+// scheduled start is on time; anything later is LATE and needs a reason.
+// Shared so the server rule and the acceptance UI cannot drift apart.
+export const ATTENDANCE_LATENESS_GRACE_MS = 15 * 60 * 1000;
+
 export interface IncomingClockInEvaluation {
   technicianUid: string;
   clockInTimestamp: string;

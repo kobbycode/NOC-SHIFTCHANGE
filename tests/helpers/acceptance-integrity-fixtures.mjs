@@ -78,6 +78,9 @@ export async function acceptanceFixture(options = {}) {
     if (path === "lib/auth/session") return { getCurrentUser: async () => ({ uid: f.actor, role: "technician", email: `${f.actor}@fixture.invalid`, mustChangePassword: false }) };
     if (path === "lib/auth/password-reauthentication") return { PasswordReauthenticationError, reauthenticatePassword: async input => {
       f.authCalls.push(input.expectedUid); await f.hit("password", input.expectedUid); await f.hit("afterPassword", input.expectedUid);
+    }, authenticatePasswordForSession: async input => {
+      f.authCalls.push(input.expectedUid); await f.hit("password", input.expectedUid); await f.hit("afterPassword", input.expectedUid);
+      return { uid: input.expectedUid, idToken: "fixture-id-token" };
     } };
     if (path === "lib/notifications/notification-outbox") return { notificationsEnabled: () => false, writeOutboxEntries: () => { throw new Error("Disabled notification write"); } };
     if (path === "lib/notifications/notification-hooks") return {};
@@ -150,7 +153,10 @@ export async function acceptanceFixture(options = {}) {
   const route = load("app/(dashboard)/api/operations/shifts/[shiftId]/handover/v2/accept/route");
   f.post = async (uid = "in-a", binding = f.binding(), extra = {}) => {
     f.actor = uid;
-    const response = await route.POST({ nextUrl: { origin: "http://fixture.invalid" }, headers: { get: name => name === "origin" ? "http://fixture.invalid" : null }, json: async () => ({ password: "synthetic-only", ...binding, ...extra }) }, { params: Promise.resolve({ shiftId: "outgoing" }) });
+    // The shared console names the reserved incoming technician who is
+    // accepting now; the session cookie only authorizes the console as a
+    // participant of this reserved pair.
+    const response = await route.POST({ nextUrl: { origin: "http://fixture.invalid" }, headers: { get: name => name === "origin" ? "http://fixture.invalid" : null }, json: async () => ({ technicianUid: uid, password: "synthetic-only", ...binding, ...extra }) }, { params: Promise.resolve({ shiftId: "outgoing" }) });
     return { status: response.status, body: await response.json() };
   };
   f.entries = collection => [...f.records].filter(([p]) => p.startsWith(collection + "/"));

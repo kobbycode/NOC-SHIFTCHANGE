@@ -18,6 +18,14 @@
  * production writers — there is no parallel fake dataset. This milestone never
  * completes a transfer, creates the incoming shift or finalizes attendance, and
  * the tests prove those collections stay byte-unchanged.
+ *
+ * A confirmation is personal: the ROUTE verifies the confirming technician's OWN
+ * password server-side before any transaction, and an outgoing participant's
+ * verified password finalizes their `outgoing_personal_confirmation` attendance
+ * evidence. The confirmation SERVICE stays credential-free, so the workflows
+ * below drive it directly. This suite brings up no Auth emulator, so the route
+ * tests prove the password gate FAILS CLOSED — nothing is recorded when the
+ * credential cannot be verified — and never that a password was accepted.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -493,7 +501,7 @@ test("8. An outsider technician and a foreign origin are refused; only a reserve
   assert.equal((await getV2Document(f)).confirmations.length, 0);
 });
 
-test("9. Confirmation identity is session-only: the domain refuses proxy confirmation and the body cannot name a technician", async () => {
+test("9. Confirmation identity is session-only: the domain refuses proxy confirmation, the body cannot name a technician and must carry the actor's own password", async () => {
   await clearDb();
   const f = await makeFrozenFixture();
   const stamp = await confirmState(f);
@@ -506,9 +514,16 @@ test("9. Confirmation identity is session-only: the domain refuses proxy confirm
     confirmEqualHandoverParticipant(aggregate, { ...stamp, revision: aggregate.revision, snapshotHash: stamp.expectedSnapshotHash,
       recordedAt: new Date().toISOString(), actorUid: f.out[0], technicianUid: f.out[1] });
   }, (error) => error instanceof EqualHandoverDomainError && error.status === 403 && /must confirm for self/.test(error.message));
-  // The HTTP parser rejects any extra body field, so a client cannot inject a
-  // technician UID at all.
-  assert.throws(() => parseConfirmBody({ expectedRevision: stamp.expectedRevision, expectedSnapshotHash: stamp.expectedSnapshotHash, technicianUid: f.out[1] }), as400(/Missing or unsupported/));
+  // The HTTP parser accepts only the reviewed binding plus the actor's OWN
+  // password, so a client cannot inject a technician UID at all — and cannot
+  // confirm without a password.
+  assert.deepEqual(
+    parseConfirmBody({ ...stamp, password: "synthetic-only" }),
+    { password: "synthetic-only", expectedRevision: stamp.expectedRevision, expectedSnapshotHash: stamp.expectedSnapshotHash },
+  );
+  assert.throws(() => parseConfirmBody({ ...stamp, password: "synthetic-only", technicianUid: f.out[1] }), as400(/Missing or unsupported/));
+  assert.throws(() => parseConfirmBody(stamp), as400(/Missing or unsupported/), "a passwordless confirmation body is refused");
+  assert.throws(() => parseConfirmBody({ ...stamp, password: "" }), as400(/Your password is required to confirm this handover/));
 });
 
 test("10. Duplicate confirmation replay is idempotent: no second entry and no second audit event", async () => {
@@ -714,42 +729,59 @@ test("21. Confirmation and readiness routes return 404 with the dev gate disable
   assert.deepEqual(await operationalState(), before);
 });
 
-test("22. Enabled confirmation route: 401 without session, 403 for foreign origin, 403 for supervisor, always no-store", async () => {
+test("22. Enabled confirmation route: 401 without session, 403 for foreign origin, 403 for supervisor, 400 without a password, and fail-closed when the password cannot be verified", async () => {
   await clearDb();
   const f = await makeFrozenFixture();
   process.env.HANDOVER_V2_DEV = "true";
   const stamp = await confirmState(f);
-  const body = JSON.stringify(stamp);
+  const body = JSON.stringify({ ...stamp, password: "synthetic-only" });
   const params = { params: Promise.resolve({ shiftId: f.outgoing }) };
   const base = `http://localhost:3000/api/operations/shifts/${f.outgoing}/handover/v2/confirmation`;
+  const post = (session, payload = body, origin = "http://localhost:3000") => {
+    routeSessionUser = session;
+    return confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin }, body: payload }), params);
+  };
+  const technician = { uid: f.out[0], role: "technician", mustChangePassword: false, email: `${f.out[0]}@synthetic.test` };
+  const before = await operationalState();
   try {
     routeSessionUser = null;
     const anon = await confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin: "http://localhost:3000" }, body }), params);
     assert.equal(anon.status, 401);
     assert.equal(anon.headers.get("Cache-Control"), "no-store");
 
-    routeSessionUser = { uid: f.out[0], role: "technician", mustChangePassword: false };
-    const foreign = await confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin: "http://evil.example" }, body }), params);
+    const foreign = await post(technician, body, "http://evil.example");
     assert.equal(foreign.status, 403);
     assert.equal((await foreign.json()).error, "Invalid request origin.");
 
-    routeSessionUser = { uid: f.manager, role: "supervisor", mustChangePassword: false };
-    const supervisor = await confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin: "http://localhost:3000" }, body }), params);
+    const supervisor = await post({ uid: f.manager, role: "supervisor", mustChangePassword: false, email: `${f.manager}@synthetic.test` });
     assert.equal(supervisor.status, 403, "a supervisor cannot confirm");
 
-    routeSessionUser = { uid: f.out[0], role: "technician", mustChangePassword: true };
-    const forced = await confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin: "http://localhost:3000" }, body }), params);
+    const forced = await post({ uid: f.out[0], role: "technician", mustChangePassword: true, email: technician.email });
     assert.equal(forced.status, 403, "a forced-password session cannot confirm");
 
-    routeSessionUser = { uid: f.out[0], role: "technician", mustChangePassword: false };
-    const ok = await confirmationRoute.POST(new NextRequest(base, { method: "POST", headers: { origin: "http://localhost:3000" }, body }), params);
-    assert.equal(ok.status, 200);
-    assert.equal(ok.headers.get("Cache-Control"), "no-store");
-    assert.equal((await ok.json()).confirmation.replayed, false);
+    const passwordless = await post(technician, JSON.stringify(stamp));
+    assert.equal(passwordless.status, 400, "a confirmation without the actor's own password is refused");
+    assert.match((await passwordless.json()).error, /Missing or unsupported report request fields/);
+
+    // No Auth emulator is in scope for this suite, so point the credential
+    // helper at a closed loopback port: verification must fail CLOSED, the
+    // submitted password must never be echoed, and nothing may be recorded.
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:1";
+    const unverifiable = await post(technician);
+    assert.equal(unverifiable.status, 503, "an unverifiable password never confirms");
+    assert.equal(unverifiable.headers.get("Cache-Control"), "no-store");
+    const rejected = await unverifiable.json();
+    assert.match(rejected.error, /password/i);
+    assert.ok(!JSON.stringify(rejected).includes("synthetic-only"), "the submitted password is never echoed");
   } finally {
     routeSessionUser = null;
     delete process.env.HANDOVER_V2_DEV;
+    delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
   }
+  const after = await operationalState();
+  assert.deepEqual(after, before, "a refused confirmation changes nothing");
+  assert.equal((await getV2Document(f)).confirmations.length, 0, "no confirmation was recorded");
+  assert.equal((await auditsByAction("EQUAL_HANDOVER_CONFIRMED_V2")).length, 0, "no confirmation audit was written");
 });
 
 test("23. Readiness GET returns the authoritative derived readiness for a participant", async () => {

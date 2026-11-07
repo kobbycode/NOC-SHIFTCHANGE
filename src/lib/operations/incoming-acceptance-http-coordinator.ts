@@ -3,16 +3,25 @@
 //
 // This is the only place that turns an authenticated HTTP request into the
 // Phase 3 atomic application intent. It:
-//   * reads the authoritative acceptance context (authority, roster, guard),
-//   * verifies the caller's OWN password against the authoritative Auth account
-//     outside any transaction and binds the proof to the session UID,
+//   * authorizes the shared console as a participant of this handover,
+//   * reads the authoritative acceptance context for the NAMED reserved incoming
+//     technician (authority, roster, guard),
+//   * verifies that technician's OWN password against their authoritative Auth
+//     account outside any transaction and binds the proof to their UID,
 //   * derives every timestamp from the server clock (never the request body),
 //   * builds the reviewed binding and the personal late-arrival reason,
-//   * invokes the atomic service exactly once, and
-//   * re-verifies the persisted receipt through read-only reconciliation.
+//   * invokes the atomic service exactly once,
+//   * re-verifies the persisted receipt through read-only reconciliation, and
+//   * hands the one-shot id token back to the route so the acceptance can sign
+//     that technician in on this console.
+//
+// The console session is NOT the accepting technician: it is usually still an
+// outgoing technician, who may never accept for the incoming pair. Authority
+// comes only from the named incoming technician's own verified credential.
 //
 // It never falls back to the legacy split writer: if the atomic service refuses
-// or cannot prove its commit, the caller receives that outcome.
+// or cannot prove its commit, the caller receives that outcome. The credential
+// it returns is server-side only and is never part of a receipt or a response.
 
 import "server-only";
 
@@ -20,11 +29,14 @@ import { randomUUID } from "node:crypto";
 import type { Auth } from "firebase-admin/auth";
 import {
   PasswordReauthenticationError,
-  reauthenticatePassword,
+  authenticatePasswordForSession,
 } from "@/lib/auth/password-reauthentication";
 import { getAdminAuth } from "@/lib/firebase/admin";
 import { ATTENDANCE_EVIDENCE_KINDS } from "@/types/attendance-evidence";
-import type { IncomingAcceptanceApplicationReceipt } from "@/types/incoming-acceptance-application";
+import {
+  INCOMING_ACCEPTANCE_OUTCOMES,
+  type IncomingAcceptanceApplicationReceipt,
+} from "@/types/incoming-acceptance-application";
 import {
   INCOMING_ACCEPTANCE_ERROR_CODES,
   IncomingAcceptanceApplicationError,
@@ -36,6 +48,7 @@ import {
   type AtomicIncomingAcceptanceResult,
 } from "./incoming-acceptance-application-firestore";
 import {
+  authorizeHandoverConsoleActor,
   readEqualHandoverAcceptanceContext,
   type EqualHandoverAcceptanceContext,
 } from "./equal-handover-report-firestore";
@@ -49,6 +62,7 @@ import {
   buildReviewedBinding,
   type AtomicAcceptanceRequest,
 } from "./handover-v2-atomic-http";
+import { normalizeAttendanceLocationEvidence } from "./attendance-location-evidence";
 
 export interface AcceptanceHttpActor {
   uid: string;
@@ -73,16 +87,31 @@ const defaultClock: AcceptanceClock = {
 export interface AcceptanceCoordinatorDependencies {
   clock?: AcceptanceClock;
   auth?: Pick<Auth, "getUser">;
-  reauthenticate?: typeof reauthenticatePassword;
+  authenticate?: typeof authenticatePasswordForSession;
   createNonce?: () => string;
   apply?: typeof applyIncomingAcceptanceApplicationAtomically;
   reconcile?: typeof reconcileIncomingAcceptance;
+}
+
+// Server-side only. The route exchanges this one-shot id token for the accepting
+// technician's session cookie immediately after the acceptance commits; it is
+// never written to a receipt, a response body, an audit record or a log.
+export interface AcceptanceSessionCredential {
+  acceptingTechnicianUid: string;
+  consoleActorUid: string;
+  outgoingShiftId: string;
+  handoverDocumentId: string;
+  outgoingTechnicianIds: readonly string[];
+  idToken: string;
+  firstActivation: boolean;
+  acceptanceReceiptId: string;
 }
 
 export interface AtomicAcceptanceCoordinatorResult {
   result: AtomicIncomingAcceptanceResult;
   receipt: IncomingAcceptanceApplicationReceipt;
   reconciliation: IncomingAcceptanceReconciliationResult | null;
+  sessionCredential: AcceptanceSessionCredential;
 }
 
 function reject(input: {
@@ -113,7 +142,7 @@ export async function coordinateAtomicIncomingAcceptance(input: {
   const dependencies = input.dependencies ?? {};
   const clock = dependencies.clock ?? defaultClock;
   const auth = dependencies.auth ?? getAdminAuth();
-  const reauthenticate = dependencies.reauthenticate ?? reauthenticatePassword;
+  const authenticate = dependencies.authenticate ?? authenticatePasswordForSession;
   const apply = dependencies.apply ?? applyIncomingAcceptanceApplicationAtomically;
   const reconcile = dependencies.reconcile ?? reconcileIncomingAcceptance;
   const createNonce = dependencies.createNonce ?? (() => randomUUID());
@@ -123,8 +152,16 @@ export async function coordinateAtomicIncomingAcceptance(input: {
   // The request acceptance clock is captured BEFORE credential verification.
   const requestAcceptedAt = clock.nowIso();
 
+  // The shared console must belong to this reserved pair. It is never the
+  // accepting technician's authority, and a non-participant learns nothing here.
+  await authorizeHandoverConsoleActor(input.outgoingShiftId, actor.uid);
+
+  // Everything below is derived from the NAMED reserved incoming technician,
+  // whose own password is verified before any write. The roster constraint is
+  // enforced by the context reader, so a forged or outgoing UID cannot accept.
+  const acceptingTechnicianUid = reviewed.technicianUid;
   const context: EqualHandoverAcceptanceContext =
-    await readEqualHandoverAcceptanceContext(input.outgoingShiftId, actor.uid);
+    await readEqualHandoverAcceptanceContext(input.outgoingShiftId, acceptingTechnicianUid);
 
   if (context.lifecycleStatus === "collecting_confirmations") {
     reject({
@@ -214,12 +251,15 @@ export async function coordinateAtomicIncomingAcceptance(input: {
     });
   }
 
-  // Fresh personal password verification, strictly before any transaction, using
-  // the authoritative Auth account identity — never a body email or UID.
+  // Fresh personal password verification for the NAMED incoming technician,
+  // strictly before any transaction, using their authoritative Auth account
+  // email — never a body email, and never the console actor's identity. This is
+  // the only credential path that retains a one-shot id token, because the
+  // acceptance must also sign that technician in on this console.
+  let idToken: string;
   try {
-    const account = await auth.getUser(actor.uid);
-    if (account.uid !== actor.uid || account.disabled === true || !account.email ||
-        account.email.toLowerCase() !== actor.email.toLowerCase()) {
+    const account = await auth.getUser(acceptingTechnicianUid);
+    if (account.uid !== acceptingTechnicianUid || account.disabled === true || !account.email) {
       reject({
         code: ACCEPTANCE_RESPONSE_CODES.NOT_APPLIED,
         status: 403,
@@ -227,9 +267,14 @@ export async function coordinateAtomicIncomingAcceptance(input: {
       });
     }
     const email = account.email;
-    await reauthenticate({ expectedUid: actor.uid, email, password: reviewed.password });
-    const current = await auth.getUser(actor.uid);
-    if (current.uid !== actor.uid || current.disabled === true || current.email !== email) {
+    const verified = await authenticate({
+      expectedUid: acceptingTechnicianUid,
+      email,
+      password: reviewed.password,
+    });
+    idToken = verified.idToken;
+    const current = await auth.getUser(acceptingTechnicianUid);
+    if (current.uid !== acceptingTechnicianUid || current.disabled === true || current.email !== email) {
       reject({
         code: ACCEPTANCE_RESPONSE_CODES.NOT_APPLIED,
         status: 403,
@@ -269,7 +314,7 @@ export async function coordinateAtomicIncomingAcceptance(input: {
 
   const proof = createIncomingAcceptanceAuthenticationProof({
     requestNonce,
-    verifiedTechnicianUid: actor.uid,
+    verifiedTechnicianUid: acceptingTechnicianUid,
     verifiedAt: passwordVerifiedAt,
     authAccountCheckedAt,
     reviewedBinding,
@@ -279,13 +324,19 @@ export async function coordinateAtomicIncomingAcceptance(input: {
 
   const result = await apply({
     outgoingShiftId: input.outgoingShiftId,
-    actorUid: actor.uid,
+    actorUid: acceptingTechnicianUid,
     reviewedBinding,
     lateReason,
     requestNonce,
     proof,
     requestAcceptedAt,
     operationalAppliedAt,
+    // Coarse presence evidence captured at this personal act. It is derived
+    // against the trusted server clock and never blocks an acceptance.
+    locationEvidence: normalizeAttendanceLocationEvidence(
+      reviewed.locationEvidence,
+      requestAcceptedAt,
+    ),
     nowIso: clock.nowIso(),
     nowMonotonicMs: clock.monotonicMs(),
   });
@@ -296,7 +347,7 @@ export async function coordinateAtomicIncomingAcceptance(input: {
   try {
     reconciliation = await reconcile({
       outgoingShiftId: input.outgoingShiftId,
-      technicianUid: actor.uid,
+      technicianUid: acceptingTechnicianUid,
     });
   } catch {
     reconciliation = null;
@@ -313,5 +364,21 @@ export async function coordinateAtomicIncomingAcceptance(input: {
     });
   }
 
-  return { result, receipt: result.receipt, reconciliation };
+  return {
+    result,
+    receipt: result.receipt,
+    reconciliation,
+    sessionCredential: {
+      acceptingTechnicianUid,
+      consoleActorUid: actor.uid,
+      outgoingShiftId: input.outgoingShiftId,
+      handoverDocumentId: result.handoverDocumentId,
+      outgoingTechnicianIds: context.identity.outgoingTechnicianIds,
+      idToken,
+      firstActivation:
+        result.status === "APPLIED" &&
+        result.outcome === INCOMING_ACCEPTANCE_OUTCOMES.FIRST_ACTIVATION,
+      acceptanceReceiptId: result.receipt.id,
+    },
+  };
 }

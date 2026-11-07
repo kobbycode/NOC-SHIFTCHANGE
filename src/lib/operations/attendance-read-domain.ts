@@ -6,6 +6,10 @@ import {
   type AttendanceStatus,
 } from "@/types/attendance";
 
+import {
+  normalizeAttendanceLocationEvidence,
+} from "./attendance-location-evidence";
+
 export class AttendanceReadDomainError extends Error {
   public readonly status: number;
 
@@ -178,6 +182,16 @@ export function readAttendanceRecord(
       data.recordedAt,
     updatedAt:
       data.updatedAt,
+    ...(data.locationEvidence ===
+    undefined
+      ? {}
+      : {
+          locationEvidence:
+            normalizeAttendanceLocationEvidence(
+              data.locationEvidence,
+              data.updatedAt,
+            ),
+        }),
   };
 }
 

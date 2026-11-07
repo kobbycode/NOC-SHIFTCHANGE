@@ -45,7 +45,7 @@ function assertExactInjectedErrorClass(error, ExpectedClass) {
 }
 const body = () => ({ password: "  synthetic credential  ", expectedRevision: 1, expectedSnapshotHash: "a".repeat(64) });
 function fixture(options = {}) {
-  const calls = [], logs = [];
+  const calls = [], logs = [], authorityCalls = [];
   const actor = Object.hasOwn(options, "actor") ? options.actor : { uid: "actor", email: "actor@example.test", role: "technician", mustChangePassword: false };
   const account = { uid: "actor", email: "actor@example.test", disabled: false, ...options.account };
   const confirmation = { technicianUid: "actor", position: "incoming_primary_a", revision: 1, snapshotHash: "a".repeat(64), confirmedAt: "2030-01-01T00:00:00.000Z" };
@@ -76,6 +76,17 @@ function fixture(options = {}) {
       } };
       if (name.endsWith("/assignment-transaction")) return { AssignmentOperationError: errorExports.AssignmentOperationError };
       if (name.endsWith("/next-shift-authorization-domain")) return { NextShiftAuthorizationDomainError: errorExports.NextShiftAuthorizationDomainError };
+      if (name.endsWith("/technician-write-authority-firestore")) return {
+        requireTechnicianWriteAuthority: async (input) => {
+          authorityCalls.push(input);
+          if (options.authorityError) throw options.authorityError;
+          return {
+            mayWrite: true, governed: true, basis: "personal_handover_acceptance", denial: null,
+            message: "This technician accepted the handover with their own password.",
+            activeShiftId: "outgoing", personallyAcceptedShiftId: "outgoing",
+          };
+        },
+      };
       throw new Error(`Unexpected dependency ${name}`);
     },
   });
@@ -94,7 +105,7 @@ function fixture(options = {}) {
     }
     return result;
   };
-  return { run, calls, logs };
+  return { run, calls, logs, authorityCalls };
 }
 test("route error fixture preserves production error-class distinctions", () => {
   const entries = Object.entries(errorExports);
@@ -141,6 +152,23 @@ for (const password of ["  synthetic credential  ", " ", "x", "é\u0301"]) test(
   assert.equal(f.calls[3][1].actorUid, "actor"); assert.equal(f.calls[3][1].outgoingShiftId, "outgoing");
   assert.equal(result.headers["Cache-Control"], "no-store");
   assert.equal(JSON.stringify(result).includes('"password"'), false); assert.deepEqual(f.logs, []);
+  assert.equal(f.authorityCalls.length, 1);
+  assert.equal(f.authorityCalls[0].uid, "actor");
+  assert.equal(f.authorityCalls[0].role, "technician");
+});
+test("write-authority refusal stops before password verification and persistence", async () => {
+  const refusal = new MockAssignmentOperationError("Accept the handover with your own password to make changes; this view is read-only.", 403);
+  const f = fixture({ authorityError: refusal });
+  const result = await f.run();
+  assert.equal(result.status, 403);
+  assert.equal(result.body.error, refusal.message);
+  assert.equal(f.authorityCalls.length, 1);
+  assert.equal(f.authorityCalls[0].uid, "actor");
+  assert.equal(f.authorityCalls[0].role, "technician");
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.calls.filter(([kind]) => kind === "persist").length, 0);
+  assert.equal(JSON.stringify(result).includes(body().password), false);
+  assert.deepEqual(f.logs, []);
 });
 for (const [name, code, status, message] of [
   ["wrong password", "CREDENTIAL_REJECTED", 400, "Current password is incorrect or authentication was rejected."],
@@ -204,6 +232,13 @@ test("idempotent outcome returns success", async () => {
 });
 test("route reuses A7.4 boundary without a competing Identity Toolkit request", () => {
   assert.match(routeSource, /await reauthenticatePassword\(/); assert.doesNotMatch(routeSource, /identitytoolkit|signInWithPassword|fetch\(/);
+});
+test("route enforces technician write authority before any credential verification", () => {
+  const authority = routeSource.indexOf("await requireTechnicianWriteAuthority(");
+  const reauthentication = routeSource.indexOf("await reauthenticatePassword(");
+  assert.ok(authority >= 0);
+  assert.ok(reauthentication >= 0);
+  assert.ok(authority < reauthentication);
 });
 test("persistence input has only trusted identity and reviewed binding", () => {
   assert.doesNotMatch(serviceSource, /password|refreshToken|idToken|sessionCookie/i);

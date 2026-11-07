@@ -283,26 +283,33 @@ test("2. login, reservation and report events cannot establish clock-in", () => 
   );
 });
 
-// 3. Exactly five minutes after scheduled start is on time.
-test("3. exactly five minutes after scheduled start is on time", () => {
-  const evidence = buildFor({}, "2026-10-04T08:05:00.000Z");
-  assert.equal(evidence.clockIn, "2026-10-04T08:05:00.000Z");
+// 3. Exactly fifteen minutes after scheduled start is on time.
+test("3. exactly fifteen minutes after scheduled start is on time", () => {
+  assert.equal(attendance.ATTENDANCE_LATENESS_GRACE_MS, 15 * 60 * 1000);
+  const evidence = buildFor({}, "2026-10-04T08:15:00.000Z");
+  assert.equal(evidence.clockIn, "2026-10-04T08:15:00.000Z");
   const late = attendance.evaluateIncomingAttendanceLateness(
     scheduledStart,
-    "2026-10-04T08:05:00.000Z",
+    "2026-10-04T08:15:00.000Z",
   );
   assert.equal(late.isLate, false);
+  assert.equal(late.latenessMinutes, 15);
 });
 
-// 4. More than five minutes is late and keeps the server time.
-test("4. more than five minutes after scheduled start is late", () => {
+// 4. More than fifteen minutes is late and keeps the server time.
+test("4. more than fifteen minutes after scheduled start is late", () => {
+  // Inside the grace window the older 5-minute value must no longer trigger.
+  assert.equal(
+    attendance.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:05:00.001Z").isLate,
+    false,
+  );
   const late = attendance.evaluateIncomingAttendanceLateness(
     scheduledStart,
-    "2026-10-04T08:05:00.001Z",
+    "2026-10-04T08:15:00.001Z",
   );
   assert.equal(late.isLate, true);
   assert.throws(
-    () => buildFor({}, "2026-10-04T08:05:00.001Z"),
+    () => buildFor({}, "2026-10-04T08:15:00.001Z"),
     /meaningful late reason is required/,
   );
   const evidence = buildFor({ lateReason: "traffic closure on route 9" }, "2026-10-04T08:20:00.000Z");
@@ -715,5 +722,114 @@ test("extra. stale handover revision and cross-side evidence fail closed", () =>
         },
       }),
     /own verified authentication/,
+  );
+});
+
+// An outgoing technician's passworded handover confirmation is personal
+// attendance evidence: it proves WHO authenticated and WHEN, and nothing else.
+test("extra2. outgoing personal confirmation proves authentication only", () => {
+  const kind = evidenceTypes.ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CONFIRMATION;
+  const personalPassword = evidenceTypes.ATTENDANCE_AUTHENTICATION_METHODS.PERSONAL_PASSWORD_CONFIRMATION;
+  assert.equal(kind, "outgoing_personal_confirmation");
+  assert.ok(
+    !evidenceTypes.ATTENDANCE_CLOCK_IN_EVIDENCE_KINDS.includes(kind),
+    "a confirmation is never a clock-in kind",
+  );
+  assert.equal(evidenceTypes.ATTENDANCE_CLOCK_IN_EVIDENCE_KINDS.length, 2);
+
+  // The event identity is deterministic per outgoing participant, so a retried
+  // confirmation converges on one slot instead of stacking evidence.
+  const eventId = attendance.outgoingPersonalConfirmationEventId({ handoverId, technicianUid: "out-tech-1" });
+  assert.equal(eventId, attendance.outgoingPersonalConfirmationEventId({ handoverId, technicianUid: "out-tech-1" }));
+  assert.notEqual(eventId, attendance.outgoingPersonalConfirmationEventId({ handoverId, technicianUid: "out-tech-2" }));
+  assert.notEqual(eventId, attendance.outgoingPersonalConfirmationEventId({ handoverId: "other-handover", technicianUid: "out-tech-1" }));
+
+  const request = { kind, position: "outgoing_tech_a", technicianUid: "out-tech-1", eventId };
+  const authentication = { verifiedTechnicianUid: "out-tech-1", method: personalPassword };
+  const evidence = buildFor(request, "2026-10-04T16:59:00.000Z", authentication);
+  assert.equal(evidence.kind, kind);
+  assert.equal(evidence.position, "outgoing_tech_a");
+  assert.equal(evidence.clockIn, null, "a confirmation establishes no clock-in");
+  assert.equal(evidence.clockOut, null, "a confirmation establishes no clock-out");
+  assert.equal(evidence.reportedDepartureTime, null);
+  assert.equal(evidence.attestedByUid, null);
+  assert.equal(evidence.lateReason, null);
+  assert.equal(evidence.eventTime, "2026-10-04T16:59:00.000Z", "the server clock is authoritative");
+  assert.equal(evidence.authenticationMethod, personalPassword);
+  assert.equal(evidence.personallyAuthenticated, true);
+  assert.equal(attendance.attendanceEvidenceCountsAsClockIn(evidence), false);
+  assert.equal(evidence.slotId, attendance.attendanceEvidenceSlotId({ handoverId, technicianUid: "out-tech-1", kind }));
+  assert.notEqual(
+    evidence.slotId,
+    attendance.attendanceEvidenceSlotId({
+      handoverId,
+      technicianUid: "out-tech-1",
+      kind: evidenceTypes.ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CLOCK_OUT,
+    }),
+    "the confirmation never occupies the clock-out slot",
+  );
+
+  // Only the participant's own verified password can finalize it.
+  for (const method of [
+    evidenceTypes.ATTENDANCE_AUTHENTICATION_METHODS.SERVER_ISSUED_PERSONAL_CLOCK_OUT,
+    evidenceTypes.ATTENDANCE_AUTHENTICATION_METHODS.COLLEAGUE_ATTESTATION,
+    evidenceTypes.ATTENDANCE_AUTHENTICATION_METHODS.PERSONAL_PASSWORD_ACCEPTANCE,
+  ]) {
+    assert.throws(
+      () => buildFor(request, "2026-10-04T16:59:00.000Z", { verifiedTechnicianUid: "out-tech-1", method }),
+      /cannot finalize evidence kind/,
+    );
+  }
+  assert.throws(
+    () => buildFor(request, "2026-10-04T16:59:00.000Z", { verifiedTechnicianUid: "out-tech-2", method: personalPassword }),
+    /own verified authentication/,
+    "a colleague cannot confirm on the outgoing technician's behalf",
+  );
+  // The kind is outgoing-only.
+  assert.throws(
+    () => buildFor({ ...request, position: "incoming_tech_a", technicianUid: "in-tech-1" }, "2026-10-04T08:01:00.000Z",
+      { verifiedTechnicianUid: "in-tech-1", method: personalPassword }),
+    /does not match the participant side/,
+  );
+  // No incoming lateness semantics and no colleague attestation data.
+  assert.throws(
+    () => buildFor({ ...request, lateReason: "Traffic on the motorway" }, "2026-10-04T16:59:00.000Z", authentication),
+    /Outgoing evidence cannot carry an incoming late reason/,
+  );
+  assert.throws(
+    () => buildFor({ ...request, attestedByUid: "out-tech-2", attestationReason: "Left early" }, "2026-10-04T16:59:00.000Z", authentication),
+    /Personal attendance evidence cannot carry colleague attestation data/,
+  );
+  // A confirmation long after the scheduled start is still recorded as-is: the
+  // grace window gates clock-in lateness, never personal authentication.
+  const late = buildFor(request, "2026-10-04T13:00:00.000Z", authentication);
+  assert.equal(late.clockIn, null);
+  assert.equal(late.eventTime, "2026-10-04T13:00:00.000Z");
+
+  // Conflict classification: a standing confirmation neither blocks nor is
+  // blocked by the participant's later personal clock-out; a second, different
+  // confirmation event on the same slot fails closed.
+  const clockOutKind = evidenceTypes.ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CLOCK_OUT;
+  assert.equal(
+    attendance.classifyAttendanceEvidenceConflict({
+      existing: evidence, incomingKind: clockOutKind, incomingTechnicianUid: "out-tech-1",
+      incomingEventTime: "2026-10-04T17:00:00.000Z", incomingOperationId: "op-clock-out",
+    }),
+    null,
+  );
+  assert.equal(
+    attendance.classifyAttendanceEvidenceConflict({
+      existing: evidence, incomingKind: kind, incomingTechnicianUid: "out-tech-1",
+      incomingEventTime: "2026-10-04T16:59:00.000Z", incomingOperationId: evidence.operationId,
+    }),
+    null,
+    "a retry of the same operation is idempotent",
+  );
+  assert.equal(
+    attendance.classifyAttendanceEvidenceConflict({
+      existing: evidence, incomingKind: kind, incomingTechnicianUid: "out-tech-1",
+      incomingEventTime: "2026-10-04T17:10:00.000Z", incomingOperationId: "op-other",
+    }),
+    "slot_occupied",
   );
 });

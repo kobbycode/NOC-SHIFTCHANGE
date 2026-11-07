@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { FieldValue, type DocumentData, type Transaction } from "firebase-admin/firestore";
 import type { Attendance } from "@/types/attendance";
 import { ATTENDANCE_PARTICIPATION_AUTHORITIES } from "@/types/attendance";
+import type { AttendanceLocationEvidence } from "@/types/attendance-location";
 import { createShiftAttendanceRecord } from "./shift-join-domain";
 import type { Task, TaskAssignment } from "@/types/task";
 import type { Shift } from "@/types/shift";
@@ -41,6 +42,9 @@ import {
   assertAttendanceEvidence,
   attendanceEvidenceCountsAsClockIn,
   attendanceAuthenticationMethodForKind,
+  attendanceEvidenceId,
+  attendanceEvidenceSlotId,
+  outgoingPersonalConfirmationEventId,
 } from "./attendance-evidence-domain";
 import {
   ATTENDANCE_EVIDENCE_KINDS,
@@ -1728,6 +1732,8 @@ export interface EqualHandoverAcceptInput {
   expectedSnapshotHash: string;
   expectedGuardRevision: number;
   expectedFencingEpoch: number;
+  /** Coarse presence evidence for this personal attendance act. */
+  locationEvidence?: AttendanceLocationEvidence | null;
 }
 
 export interface EqualHandoverActivationReceipt {
@@ -1912,6 +1918,7 @@ export async function acceptEqualHandoverIncomingV2(
       transaction.create(actorAttendanceRef, createShiftAttendanceRecord({
         shiftId: incomingId, technicianUid: input.actorUid,
         participationAuthority: ATTENDANCE_PARTICIPATION_AUTHORITIES.PRIMARY, authorizationId: null, recordedAt: now,
+        locationEvidence: input.locationEvidence ?? null,
       }));
       transaction.update(technicianSchedules.doc(input.actorUid), {
         entries: actorScheduleEntries.map((entry) => (entry.shiftId === incomingId ? { ...entry, status: "active" } : entry)),
@@ -2053,6 +2060,7 @@ export async function acceptEqualHandoverIncomingV2(
     transaction.create(actorAttendanceRef, createShiftAttendanceRecord({
       shiftId: incomingId, technicianUid: input.actorUid,
       participationAuthority: ATTENDANCE_PARTICIPATION_AUTHORITIES.PRIMARY, authorizationId: null, recordedAt: now,
+      locationEvidence: input.locationEvidence ?? null,
     }));
     for (const [uid, entries] of schedules) {
       const incomingMember = identity.incomingTechnicianIds.includes(uid);
@@ -2192,6 +2200,49 @@ export interface EqualHandoverAcceptanceContext {
   alreadyAccepted: boolean;
 }
 
+// The reserved pair's roster, read on its own. The shared console offers the two
+// reserved incoming identities on the last page, so both the console
+// authorization and the read-only acceptance status of a named incoming
+// technician are constrained to this roster.
+export async function readHandoverConsoleRoster(
+  outgoingShiftId: string,
+): Promise<EqualHandoverIdentity> {
+  identifier(outgoingShiftId);
+  const { equalHandoversV2 } = getOperationalCollections();
+  const snapshot = await equalHandoversV2.doc(createEqualHandoverDocumentId(outgoingShiftId)).get();
+  if (!snapshot.exists) fail("The equal handover reservation was not found.", 404);
+  return readV2Aggregate(snapshot.data(), outgoingShiftId).identity;
+}
+
+// The shared console may still be signed in as an OUTGOING technician when the
+// incoming pair accepts on the last page of the A–E form, so the console actor is
+// authorized as a participant of THIS handover (either side) — never as the
+// accepting technician. Acceptance authority comes only from the named reserved
+// incoming technician's own verified password, and a non-participant learns
+// nothing about this handover from this check.
+export async function authorizeHandoverConsoleActor(
+  outgoingShiftId: string,
+  consoleActorUid: string,
+): Promise<EqualHandoverIdentity> {
+  identifier(consoleActorUid, 128);
+  const { db } = getOperationalCollections();
+  const [profileSnapshot, identity] = await Promise.all([
+    db.collection("users").doc(consoleActorUid).get(),
+    readHandoverConsoleRoster(outgoingShiftId),
+  ]);
+  authorizeTechnicianProfile(profileSnapshot.data() as Record<string, unknown> | undefined, consoleActorUid);
+  if (!identity.outgoingTechnicianIds.includes(consoleActorUid) &&
+      !identity.incomingTechnicianIds.includes(consoleActorUid)) {
+    fail("Only a technician of this reserved pair may use its handover console.", 403);
+  }
+  return identity;
+}
+
+// `acceptingTechnicianUid` is the reserved incoming technician who personally
+// accepts — at the HTTP boundary it is the request-named identity constrained to
+// this handover's incoming roster and proved by that person's own password, which
+// is why it may differ from the console session actor. Everything below is
+// derived from that technician, never from the console.
 export async function readEqualHandoverAcceptanceContext(
   outgoingShiftId: string,
   actorUid: string,
@@ -2212,7 +2263,8 @@ export async function readEqualHandoverAcceptanceContext(
     const identity = aggregate.identity;
     const incomingId = identity.incomingShiftId;
 
-    // §4/§10 authority is derived here, never inherited from the request.
+    // §4/§10 authority is re-derived here from the live profile and the reserved
+    // incoming roster; a caller's claim to be this technician is never trusted.
     authorizeTechnicianProfile(profileSnapshot.data() as Record<string, unknown> | undefined, actorUid);
     if (!identity.incomingTechnicianIds.includes(actorUid)) {
       fail("Only a reserved incoming technician may accept this handover.", 403);
@@ -2263,6 +2315,127 @@ export async function readEqualHandoverAcceptanceContext(
       lateReason: actorAbsence ? actorAbsence.reason : null,
       eventId,
       alreadyAccepted,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Trusted outgoing-coordinator read. A confirmation is a personal act, so the
+// route that accepts one verifies the participant's OWN password first and then
+// derives every evidence binding here, from the authoritative aggregate and the
+// live reservation guard — never from the request body. It records
+// `outgoing_personal_confirmation` evidence for an OUTGOING position only: an
+// incoming participant's confirmation establishes nothing about their
+// attendance, which is created solely by their passworded acceptance.
+//
+// Like the acceptance read above, this authorizes nothing and mutates nothing;
+// `confirmEqualHandoverParticipantV2` re-derives all of it inside its own
+// transaction. `evidenceBinding` is deliberately conservative: it is offered
+// only when the confirmation is still owed, the reviewed binding still matches
+// the live aggregate and guard, and the lifecycle still permits mutation. A
+// rejected confirmation therefore cannot leave orphan attendance evidence
+// behind, and a retried one converges on the single deterministic slot.
+// ---------------------------------------------------------------------------
+
+export interface EqualHandoverConfirmationEvidenceBinding {
+  kind: AttendanceEvidenceKind;
+  eventId: string;
+  authenticationMethod: AttendanceAuthenticationMethod;
+}
+
+export interface EqualHandoverConfirmationContext {
+  handoverDocumentId: string;
+  aggregate: EqualHandoverAggregate;
+  identity: EqualHandoverIdentity;
+  reservation: EqualHandoverReservation;
+  snapshotHash: string;
+  guardRevision: number;
+  fencingEpoch: number;
+  actorPosition: EqualHandoverPosition;
+  evidenceBinding: EqualHandoverConfirmationEvidenceBinding | null;
+}
+
+export async function readEqualHandoverConfirmationContext(
+  outgoingShiftId: string,
+  actorUid: string,
+  reviewed: { expectedRevision: number; expectedSnapshotHash: string },
+): Promise<EqualHandoverConfirmationContext> {
+  identifier(outgoingShiftId);
+  identifier(actorUid, 128);
+  const { db, equalHandoversV2, attendanceEvidenceV2 } = getOperationalCollections();
+  const documentId = createEqualHandoverDocumentId(outgoingShiftId);
+
+  return db.runTransaction(async (transaction): Promise<EqualHandoverConfirmationContext> => {
+    const [profileSnapshot, aggregateSnapshot, guardState] = await Promise.all([
+      transaction.get(db.collection("users").doc(actorUid)),
+      transaction.get(equalHandoversV2.doc(documentId)),
+      readReservationGuardState(transaction, outgoingShiftId),
+    ]);
+    if (!aggregateSnapshot.exists) fail("The equal handover reservation was not found.", 404);
+    const aggregate = readV2Aggregate(aggregateSnapshot.data(), outgoingShiftId);
+    const identity = aggregate.identity;
+
+    // The same authority the confirmation writer requires.
+    requireReservedTechnician(profileSnapshot.data() as Record<string, unknown> | undefined, actorUid, aggregate);
+    const participant = getEqualHandoverPositions(identity).find((item) => item.technicianUid === actorUid);
+    if (!participant) fail("The caller is not a reserved handover participant.", 403);
+
+    const guard = requireV2GuardBinding(
+      guardState.guardSnapshot.exists, guardState.guardSnapshot.data(), documentId, aggregate,
+    );
+
+    const snapshotHash = createEqualHandoverSnapshot(aggregate).snapshotHash;
+    const confirmationAlreadyStanding =
+      aggregate.confirmations.some((item) => item.position === participant.position);
+    // A participant declared absent by a colleague never confirms, so the
+    // standing-absence rule of the confirmation writer also blocks evidence.
+    const absentDeclarationStanding =
+      aggregate.absences.some((item) => item.position === participant.position);
+    // The guard binding offered to the coordinator is the live one, so a guard
+    // that moves before finalization is rejected by the evidence layer itself.
+    const bindingIsCurrent =
+      reviewed.expectedRevision === aggregate.revision &&
+      reviewed.expectedSnapshotHash === snapshotHash;
+
+    let evidenceBinding: EqualHandoverConfirmationEvidenceBinding | null = null;
+    if (
+      participant.side === "outgoing" &&
+      !confirmationAlreadyStanding &&
+      !absentDeclarationStanding &&
+      aggregate.reportBinding !== null &&
+      aggregate.lifecycleStatus === "collecting_confirmations" &&
+      bindingIsCurrent
+    ) {
+      const kind = ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CONFIRMATION;
+      const evidenceRef = attendanceEvidenceV2.doc(attendanceEvidenceId(attendanceEvidenceSlotId({
+        handoverId: aggregate.reservation.handoverId,
+        technicianUid: actorUid,
+        kind,
+      })));
+      // An already-finalized slot is never rewritten or re-timed; the retry
+      // only needs the confirmation itself to land.
+      if (!(await transaction.get(evidenceRef)).exists) {
+        evidenceBinding = {
+          kind,
+          eventId: outgoingPersonalConfirmationEventId({
+            handoverId: aggregate.reservation.handoverId,
+            technicianUid: actorUid,
+          }),
+          authenticationMethod: attendanceAuthenticationMethodForKind(kind),
+        };
+      }
+    }
+
+    return {
+      handoverDocumentId: documentId,
+      aggregate,
+      identity,
+      reservation: aggregate.reservation,
+      snapshotHash,
+      guardRevision: guard.guardRevision,
+      fencingEpoch: guard.fencingEpoch,
+      actorPosition: participant.position,
+      evidenceBinding,
     };
   });
 }

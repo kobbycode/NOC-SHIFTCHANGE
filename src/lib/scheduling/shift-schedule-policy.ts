@@ -8,10 +8,11 @@ import {
  * scheduling policy exposed by the supervisor
  * interface.
  *
- * The backend accepts any valid UTC window and
- * remains authoritative for eligibility,
- * overlap, activation and lifecycle rules.
- * These helpers only translate the standard
+ * The standard operating windows are enforced by
+ * the shift-creation path through
+ * findShiftWindowDeviation(); overlap, activation
+ * and lifecycle rules stay authoritative in the
+ * backend. These helpers translate the standard
  * operating windows into the canonical UTC ISO
  * values the shift-creation API requires.
  */
@@ -281,6 +282,88 @@ export function buildScheduledWindow(
       window.endMinute
     ),
   };
+}
+
+export interface ShiftWindowDeviation {
+  message: string;
+  expectedScheduledStart: string | null;
+  expectedScheduledEnd: string | null;
+}
+
+/**
+ * Owner-set scheduling policy (2026-11-06): a morning shift is 08:00–17:00 and
+ * a night shift is 17:00–08:00 on the following local day, in the scheduling
+ * timezone. Returns null only when the submitted window is exactly the policy
+ * window for the local date of its scheduled start.
+ */
+export function findShiftWindowDeviation(
+  shiftType: ShiftType,
+  scheduledStart: string,
+  scheduledEnd: string
+): ShiftWindowDeviation | null {
+  const startTimestamp = Date.parse(scheduledStart);
+  const endTimestamp = Date.parse(scheduledEnd);
+
+  if (
+    Number.isNaN(startTimestamp) ||
+    Number.isNaN(endTimestamp) ||
+    endTimestamp <= startTimestamp
+  ) {
+    return {
+      message:
+        "Please provide a valid shift start and end in UTC ISO format.",
+      expectedScheduledStart: null,
+      expectedScheduledEnd: null,
+    };
+  }
+
+  const policy = buildScheduledWindow(
+    shiftType,
+    getSchedulingCalendarDate(new Date(startTimestamp))
+  );
+
+  if (!policy) {
+    return {
+      message: "Please select a valid shift type.",
+      expectedScheduledStart: null,
+      expectedScheduledEnd: null,
+    };
+  }
+
+  if (
+    Date.parse(policy.scheduledStart) === startTimestamp &&
+    Date.parse(policy.scheduledEnd) === endTimestamp
+  ) {
+    return null;
+  }
+
+  return {
+    message:
+      `${shiftType} shifts run ${formatSchedulingDateTime(policy.scheduledStart)} to ` +
+      `${formatSchedulingDateTime(policy.scheduledEnd)} (${SCHEDULING_TIMEZONE}); ` +
+      "submit that window.",
+    expectedScheduledStart: policy.scheduledStart,
+    expectedScheduledEnd: policy.scheduledEnd,
+  };
+}
+
+/**
+ * The window shape rule may be relaxed only in a proven isolated emulator
+ * stack, so demonstration data can start a shift immediately instead of
+ * waiting for the next 08:00/17:00 boundary. Every condition is required:
+ * the explicit opt-in, the emulator flag, and a loopback Auth emulator host.
+ * Production sets none of them, and a stray `.env.local` cannot open this on
+ * its own, so the rule fails closed.
+ */
+export function isShiftWindowPolicyRelaxed(
+  env: Readonly<Record<string, string | undefined>>
+): boolean {
+  return (
+    env.SHIFT_WINDOW_POLICY_SANDBOX === "true" &&
+    env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === "true" &&
+    typeof env.FIREBASE_AUTH_EMULATOR_HOST === "string" &&
+    env.FIREBASE_AUTH_EMULATOR_HOST.startsWith("127.0.0.1:")
+  );
 }
 
 const displayFormatter =

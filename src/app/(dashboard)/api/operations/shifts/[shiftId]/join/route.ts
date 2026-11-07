@@ -15,6 +15,14 @@ import {
   joinShift,
 } from "@/lib/operations/join-shift";
 
+import {
+  requireTechnicianWriteAuthority,
+} from "@/lib/operations/technician-write-authority-firestore";
+
+import {
+  normalizeAttendanceLocationEvidence,
+} from "@/lib/operations/attendance-location-evidence";
+
 export const runtime = "nodejs";
 
 type RouteContext = {
@@ -98,9 +106,50 @@ export async function POST(
   }
 
   try {
+    await requireTechnicianWriteAuthority({
+      uid: actor.uid,
+      role: actor.role,
+    });
+
+    // Coarse presence evidence is optional and never blocks a join: a missing
+    // or malformed payload records an explicit not-captured state instead.
+    let locationPayload: unknown;
+    const text = await request.text();
+    if (text.trim()) {
+      let body: unknown;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return errorResponse(
+          "Please provide a valid JSON request body.",
+          400
+        );
+      }
+      if (
+        !body ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        Object.keys(body).some(
+          (key) => key !== "locationEvidence"
+        )
+      ) {
+        return errorResponse(
+          "The join request contains unsupported fields.",
+          400
+        );
+      }
+      locationPayload = (
+        body as Record<string, unknown>
+      ).locationEvidence;
+    }
+
     const attendance = await joinShift({
       shiftId,
       actorUid: actor.uid,
+      locationEvidence: normalizeAttendanceLocationEvidence(
+        locationPayload,
+        new Date().toISOString(),
+      ),
     });
 
     return NextResponse.json(

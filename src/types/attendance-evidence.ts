@@ -9,6 +9,7 @@ export const ATTENDANCE_EVIDENCE_SCHEMA =
 export const ATTENDANCE_EVIDENCE_KINDS = {
   INCOMING_CLOCK_IN: "incoming_clock_in",
   INCOMING_LATE_ACCEPTANCE: "incoming_late_acceptance",
+  OUTGOING_PERSONAL_CONFIRMATION: "outgoing_personal_confirmation",
   OUTGOING_PERSONAL_CLOCK_OUT: "outgoing_personal_clock_out",
   OUTGOING_ABSENT_DEPARTURE_ATTESTATION:
     "outgoing_absent_departure_attestation",
@@ -20,7 +21,9 @@ export type AttendanceEvidenceKind =
 // Only the first two kinds establish a clock-in. A login, a page open, a
 // shift reservation, report preparation and a report freeze establish
 // nothing; only a trusted personal confirmation/acceptance coordinator may
-// finalize those events.
+// finalize those events. `outgoing_personal_confirmation` proves that an
+// outgoing participant personally authenticated for their own handover
+// confirmation; it establishes no clock-in and no clock-out.
 export const ATTENDANCE_CLOCK_IN_EVIDENCE_KINDS: readonly AttendanceEvidenceKind[] = [
   ATTENDANCE_EVIDENCE_KINDS.INCOMING_CLOCK_IN,
   ATTENDANCE_EVIDENCE_KINDS.INCOMING_LATE_ACCEPTANCE,

@@ -3,6 +3,7 @@ import { assertEqualHandoverReportV2Binding } from "./equal-handover-report-doma
 import type { EqualHandoverReportV2Binding } from "@/types/handover-report-v2";
 import {
   ATTENDANCE_CLOCK_OUT_PROVENANCE,
+  ATTENDANCE_LATENESS_GRACE_MS,
   EQUAL_ABSENCE_TYPES,
   EQUAL_HANDOVER_LIFECYCLE_STATUSES,
   EQUAL_HANDOVER_PARTICIPANT_STATES,
@@ -27,6 +28,7 @@ import {
 
 export {
   ATTENDANCE_CLOCK_OUT_PROVENANCE,
+  ATTENDANCE_LATENESS_GRACE_MS,
   EQUAL_ABSENCE_TYPES,
   EQUAL_HANDOVER_LIFECYCLE_STATUSES,
   EQUAL_HANDOVER_PARTICIPANT_STATES,
@@ -1042,8 +1044,9 @@ export function replaceEqualHandoverReservation(
 
 /**
  * Lateness calculation rule:
- * - Exactly five minutes (300,000 ms) after scheduled start is ON TIME.
- * - More than five minutes (> 300,000 ms) after scheduled start is LATE.
+ * - Arrival up to and including the grace window (15 minutes, 900,000 ms)
+ *   after scheduled start is ON TIME.
+ * - More than the grace window after scheduled start is LATE.
  */
 export function evaluateIncomingAttendanceLateness(
   scheduledStart: string,
@@ -1061,8 +1064,8 @@ export function evaluateIncomingAttendanceLateness(
   const diffMs = timeMs - startMs;
   const latenessMinutes = diffMs > 0 ? diffMs / 60000 : 0;
 
-  // More than 5 minutes (300,000 ms) is late. Exactly 5 minutes is on time.
-  const isLate = diffMs > 5 * 60 * 1000;
+  // Exactly the grace window is on time; one millisecond past it is late.
+  const isLate = diffMs > ATTENDANCE_LATENESS_GRACE_MS;
 
   return {
     isLate,
@@ -1075,7 +1078,7 @@ export function evaluateIncomingAttendanceLateness(
  * Present incoming technician clock-in evaluation:
  * - Occurs at first successful personal authenticated handover confirmation.
  * - Reconfirmation cannot reset clock-in (idempotency rule).
- * - If late (> 5 minutes), mandatory late reason required.
+ * - If late (beyond the grace window), mandatory late reason required.
  */
 export function evaluateIncomingClockIn(input: {
   technicianUid: string;
@@ -1103,7 +1106,7 @@ export function evaluateIncomingClockIn(input: {
 
   if (isLate) {
     if (!input.lateReason || !input.lateReason.trim()) {
-      fail("A non-empty late reason is required when confirming more than five minutes after scheduled start.", 400);
+      fail("A non-empty late reason is required when confirming more than 15 minutes after scheduled start.", 400);
     }
   }
 

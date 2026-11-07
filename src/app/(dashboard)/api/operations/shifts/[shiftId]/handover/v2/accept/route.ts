@@ -2,17 +2,20 @@ import "server-only";
 import { NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getAdminAuth } from "@/lib/firebase/admin";
-import { PasswordReauthenticationError, reauthenticatePassword } from "@/lib/auth/password-reauthentication";
+import { PasswordReauthenticationError, authenticatePasswordForSession } from "@/lib/auth/password-reauthentication";
+import { applySessionCookie } from "@/lib/auth/session-cookie";
 import type {
   AttendanceEvidenceRequest,
   AttendanceTrustedAuthentication,
 } from "@/types/attendance-evidence";
 import {
   acceptEqualHandoverIncomingV2,
+  authorizeHandoverConsoleActor,
   finalizeEqualHandoverReservationV2,
   isEqualHandoverIncomingAttendanceResolved,
   readEqualHandoverAcceptanceContext,
 } from "@/lib/operations/equal-handover-report-firestore";
+import { issueIncomingHandoverSession } from "@/lib/operations/handover-session-issuance";
 import { markActionedByReference } from "@/lib/notifications/notification-service";
 import { NOTIFICATION_EVENT_KINDS } from "@/types/notification";
 import {
@@ -29,6 +32,7 @@ import {
   sameOrigin,
 } from "@/lib/operations/handover-v2-report-http";
 import { handoverV2AtomicAcceptanceEnabled } from "@/lib/operations/handover-v2-atomic-http";
+import { normalizeAttendanceLocationEvidence } from "@/lib/operations/attendance-location-evidence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,22 +40,33 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ shiftId: string }> };
 
 // Stage 2 / Stage 3 (§3-#5 addendum): a reserved INCOMING technician accepts the
-// handover with their OWN password. This route is the trusted acceptance
-// coordinator: it verifies the personal password event OUTSIDE any transaction,
-// captures the authoritative server clock at that instant, records the
-// technician's incoming attendance evidence against the still-ACTIVE reservation
-// guard, then lets the activation/join transaction re-derive every authority and
-// write the shift activation + `shift_attendance` atomically. It never trusts a
-// client technician UID, role, evidence kind or timestamp (§4): those come only
-// from the verified session and the authoritative context read. The FIRST
-// authorized acceptance activates the reserved incoming shift exactly once; a
-// LATER acceptance joins the already-active shift with its own independent
-// attendance time. Passwords are never persisted or logged.
+// handover with their OWN password on the last page of the A–E form, and that
+// acceptance is what signs them in on this shared console. The session holding
+// the console is NOT the accepting technician — it is usually still an outgoing
+// technician — so it is authorized only as a participant of this handover, while
+// every acceptance authority, evidence record and clock is derived from the
+// named incoming technician whose credential is verified here.
+//
+// This route is the trusted acceptance coordinator: it verifies that personal
+// password OUTSIDE any transaction, captures the authoritative server clock at
+// that instant, records the technician's incoming attendance evidence against
+// the still-ACTIVE reservation guard, then lets the activation/join transaction
+// re-derive every authority and write the shift activation + `shift_attendance`
+// atomically. It never trusts a client role, evidence kind or timestamp (§4), and
+// the named UID is constrained to the authoritative incoming roster before it
+// authorizes anything. The FIRST authorized acceptance activates the reserved
+// incoming shift exactly once; a LATER acceptance joins the already-active shift
+// with its own independent attendance time.
+//
+// Only after the acceptance commits does it exchange the one-shot id token for
+// the incoming technician's session cookie and revoke the outgoing pair. The
+// password and the id token are never persisted, logged or echoed, and no
+// credential ever reaches the service or the receipt.
 export async function POST(request: NextRequest, context: Context) {
   if (!handoverV2Enabled()) return respond({ success: false, error: "Not found." }, 404);
-  const actor = await getCurrentUser();
-  if (!actor) return respond({ success: false, error: "Please sign in to continue." }, 401);
-  if (actor.role !== "technician" || actor.mustChangePassword) {
+  const consoleActor = await getCurrentUser();
+  if (!consoleActor) return respond({ success: false, error: "Please sign in to continue." }, 401);
+  if (consoleActor.role !== "technician" || consoleActor.mustChangePassword) {
     return respond({ success: false, error: "Your account is not authorized to accept v2 handovers." }, 403);
   }
   if (!sameOrigin(request)) return respond({ success: false, error: "Invalid request origin." }, 403);
@@ -71,23 +86,33 @@ export async function POST(request: NextRequest, context: Context) {
   let body: unknown;
   try { body = await request.json(); }
   catch { return respond({ success: false, error: "Invalid acceptance JSON." }, 400); }
-  // Malformed acceptance bodies (missing password or any reviewed binding
-  // field) are refused with their proper 400 here, matching the commit route —
-  // they must never escape the handler as an unhandled 500 (§11).
+  // Malformed acceptance bodies (missing password, missing accepting technician
+  // or any reviewed binding field) are refused with their proper 400 here,
+  // matching the commit route — they must never escape as an unhandled 500 (§11).
   let reviewed;
   try {
     reviewed = parseAcceptBody(body);
   } catch (error) {
     return mapHandoverV2ReportError(error, "Equal handover v2 acceptance request rejected:");
   }
+  const { technicianUid: acceptingTechnicianUid, password } = reviewed;
 
-  // Authoritative context: derives the caller's incoming-technician authority,
-  // the evidence kind (personal clock-in vs audited late acceptance), the
-  // deterministic event id and the live guard/snapshot binding. It authorizes
+  // The console itself must belong to this reserved pair. This discloses nothing
+  // about another shift and is never a substitute for the accepting technician's
+  // own credential below.
+  try {
+    await authorizeHandoverConsoleActor(shiftId, consoleActor.uid);
+  } catch (error) {
+    return mapHandoverV2ReportError(error, "Equal handover v2 acceptance console authorization failed:");
+  }
+
+  // Authoritative context for the ACCEPTING technician: derives their incoming
+  // authority, the evidence kind (personal clock-in vs audited late acceptance),
+  // the deterministic event id and the live guard/snapshot binding. It authorizes
   // nothing and changes nothing — the accept transaction re-derives all of it.
   let ctx;
   try {
-    ctx = await readEqualHandoverAcceptanceContext(shiftId, actor.uid);
+    ctx = await readEqualHandoverAcceptanceContext(shiftId, acceptingTechnicianUid);
   } catch (error) {
     return mapHandoverV2ReportError(error, "Equal handover v2 acceptance context read failed:");
   }
@@ -107,20 +132,22 @@ export async function POST(request: NextRequest, context: Context) {
     return respond({ success: false, error: "The reservation guard changed since this handover was reviewed." }, 409);
   }
 
-  // Fresh personal password reauthentication, completed strictly BEFORE any
-  // transaction, using the authoritative Auth account email — never a client
-  // email or UID. Mirrors the proven confirmation route and discards all tokens.
+  // Fresh personal password verification for the NAMED incoming technician,
+  // strictly BEFORE any transaction, using their authoritative Auth account
+  // email — never a client email. This is the only credential path that retains
+  // a one-shot id token, because acceptance must also sign that person in.
+  let idToken: string;
   try {
     const auth = getAdminAuth();
-    const account = await auth.getUser(actor.uid);
-    if (account.uid !== actor.uid || account.disabled === true || !account.email ||
-        account.email.toLowerCase() !== actor.email.toLowerCase()) {
+    const account = await auth.getUser(acceptingTechnicianUid);
+    if (account.uid !== acceptingTechnicianUid || account.disabled === true || !account.email) {
       return respond({ success: false, error: "This account cannot accept the handover." }, 403);
     }
     const email = account.email;
-    await reauthenticatePassword({ expectedUid: actor.uid, email, password: reviewed.password });
-    const current = await auth.getUser(actor.uid);
-    if (current.uid !== actor.uid || current.disabled === true || current.email !== email) {
+    const verified = await authenticatePasswordForSession({ expectedUid: acceptingTechnicianUid, email, password });
+    idToken = verified.idToken;
+    const current = await auth.getUser(acceptingTechnicianUid);
+    if (current.uid !== acceptingTechnicianUid || current.disabled === true || current.email !== email) {
       return respond({ success: false, error: "Your account changed. Sign in again before accepting." }, 403);
     }
   } catch (error) {
@@ -129,7 +156,7 @@ export async function POST(request: NextRequest, context: Context) {
       return respond({ success: false, error: "This account cannot accept the handover." }, 403);
     }
     // Upstream exceptions can carry credentials; never log the raw payload.
-    console.error("Equal handover v2 acceptance password reauthentication failed.");
+    console.error("Equal handover v2 acceptance password verification failed.");
     return respond({ success: false, error: "Unable to verify your password. Please try again later." }, 503);
   }
 
@@ -156,7 +183,7 @@ export async function POST(request: NextRequest, context: Context) {
       handoverDocumentId: ctx.handoverDocumentId,
       eventId: ctx.eventId,
       position: ctx.actorPosition,
-      technicianUid: actor.uid,
+      technicianUid: acceptingTechnicianUid,
       kind: ctx.evidenceKind,
       scheduledStart: ctx.identity.scheduledStart,
       scheduledEnd: ctx.identity.scheduledEnd,
@@ -170,7 +197,7 @@ export async function POST(request: NextRequest, context: Context) {
       expectedFencingEpoch: ctx.fencingEpoch,
     };
     const trustedAuthentication: AttendanceTrustedAuthentication = {
-      verifiedTechnicianUid: actor.uid,
+      verifiedTechnicianUid: acceptingTechnicianUid,
       method: ctx.authenticationMethod,
     };
     try {
@@ -196,12 +223,18 @@ export async function POST(request: NextRequest, context: Context) {
   try {
     const result = await acceptEqualHandoverIncomingV2({
       outgoingShiftId: shiftId,
-      actorUid: actor.uid,
+      actorUid: acceptingTechnicianUid,
       serverAuthenticationTime,
       expectedRevision: reviewed.expectedRevision,
       expectedSnapshotHash: reviewed.expectedSnapshotHash,
       expectedGuardRevision: reviewed.expectedGuardRevision,
       expectedFencingEpoch: reviewed.expectedFencingEpoch,
+      // Coarse presence evidence for this personal act; a missing or malformed
+      // payload records an explicit not-captured state and never blocks.
+      locationEvidence: normalizeAttendanceLocationEvidence(
+        reviewed.locationEvidence,
+        serverAuthenticationTime,
+      ),
     });
 
     // Terminalize the deferred guard only once BOTH incoming technicians have
@@ -210,7 +243,7 @@ export async function POST(request: NextRequest, context: Context) {
     let guardFinalized = false;
     try {
       if (await isEqualHandoverIncomingAttendanceResolved(shiftId)) {
-        await finalizeEqualHandoverReservationV2({ outgoingShiftId: shiftId, actorUid: actor.uid });
+        await finalizeEqualHandoverReservationV2({ outgoingShiftId: shiftId, actorUid: acceptingTechnicianUid });
         guardFinalized = true;
       }
     } catch (error) {
@@ -219,12 +252,29 @@ export async function POST(request: NextRequest, context: Context) {
 
     // Best-effort ONLY after the authoritative acceptance committed. Never in the
     // transaction; a failure here cannot affect the accepted handover.
-    await markActionedByReference(actor.uid, {
+    await markActionedByReference(acceptingTechnicianUid, {
       eventKinds: [NOTIFICATION_EVENT_KINDS.INCOMING_ACCEPTANCE_REQUIRED],
       outgoingShiftId: shiftId,
     }, new Date().toISOString()).catch(() => {});
 
-    return respond({
+    // The shared console becomes the accepting technician's session, and the
+    // outgoing pair is signed out — once, on the first committed acceptance.
+    // Post-commit and best-effort: a failure here is reported truthfully and can
+    // never un-commit the acceptance. The one-shot token is consumed here and
+    // never appears in the response body, a receipt or a log.
+    const issuance = await issueIncomingHandoverSession({
+      outgoingShiftId: shiftId,
+      handoverDocumentId: ctx.handoverDocumentId,
+      acceptingTechnicianUid,
+      consoleActorUid: consoleActor.uid,
+      outgoingTechnicianIds: ctx.identity.outgoingTechnicianIds,
+      idToken,
+      firstActivation: result.status === "ACTIVATED",
+      acceptanceReceiptId: result.receipt?.id ?? null,
+      nowIso: new Date().toISOString(),
+    });
+
+    const response = respond({
       success: true,
       status: result.status,
       outcome: result.outcome,
@@ -236,7 +286,20 @@ export async function POST(request: NextRequest, context: Context) {
       replayed: result.replayed,
       evidenceWritten,
       guardFinalized,
+      session: {
+        issued: issuance.issued,
+        firstActivation: result.status === "ACTIVATED",
+        acceptingTechnicianUid,
+        consoleActorUid: consoleActor.uid,
+        issuanceId: issuance.issuanceId,
+        issuanceRecorded: issuance.issuanceRecorded,
+        replayed: issuance.replayed,
+        outgoingSessionsRevoked: issuance.outgoingSessionsRevoked,
+        revokedOutgoingTechnicianUids: issuance.revokedOutgoingTechnicianUids,
+      },
     }, 200);
+    if (issuance.sessionCookie !== null) applySessionCookie(response, issuance.sessionCookie);
+    return response;
   } catch (error) {
     return mapHandoverV2ReportError(error, "Equal handover v2 incoming acceptance failed:");
   }

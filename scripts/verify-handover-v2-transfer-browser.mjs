@@ -30,16 +30,21 @@
  *
  * §4 authorization is proved from the browser: a supervisor, an unrelated
  * technician and a client-forged body carrying an actor or timestamp are denied
- * on every stage; an incoming technician's commit is refused; the wrong-
- * password acceptance is refused. §5 idempotency is proved: a second outgoing
- * technician's commit returns ALREADY_COMMITTED 200; a re-acceptance returns
- * ALREADY_JOINED; a second finalize returns ALREADY_FINALIZED.
+ * on every stage; an incoming technician's commit is refused; a commit without
+ * the committing technician's OWN password, and with a wrong one, is refused
+ * with nothing committed; the wrong-password acceptance is refused. §5
+ * idempotency is proved: a second outgoing technician's commit returns
+ * ALREADY_COMMITTED 200; a re-acceptance returns ALREADY_JOINED; a second
+ * finalize returns ALREADY_FINALIZED.
  *
  * Boundary invariants preserved from M07: V1 handover documents are byte-
  * unchanged, no task transfer is created, the bound frozen report is immutable,
  * and the commit alone synthesizes neither a Shift document, a membership, an
  * attendance record nor a v2 evidence document — acceptance is the sole event
- * that can produce any of those.
+ * that can produce any of those. The per-position `outgoing_personal_confirmation`
+ * evidence is written by the passworded CONFIRMATION route and is proved by the
+ * confirmation harness; this harness seeds the four confirmations through the
+ * credential-free service so the commit stage stays isolated.
  *
  * Safety: refuses to run outside the synthetic "demo-shiftchange-v2" emulator
  * project, refuses a busy port, refuses an account file that already exists,
@@ -334,34 +339,46 @@ async function main() {
     await signOut(page); await page.close();
     page = await context.newPage(); attachErrorCapture(page);
     await signIn(page, seeded.accounts.supervisor);
-    const supervisorDenial = await probePost(page, commitPath, reviewedCommit);
+    const supervisorDenial = await probePost(page, commitPath, { ...reviewedCommit, password: seeded.accounts.supervisor.password });
     assert.equal(supervisorDenial.status, 403, `A supervisor must not commit: ${JSON.stringify(supervisorDenial.body)}`);
 
     await signOut(page); await page.close();
     page = await context.newPage(); attachErrorCapture(page);
     await signIn(page, seeded.accounts.incomingA);
-    const incomingCommitDenial = await probePost(page, commitPath, reviewedCommit);
+    const incomingCommitDenial = await probePost(page, commitPath, { ...reviewedCommit, password: seeded.accounts.incomingA.password });
     assert.equal(incomingCommitDenial.status, 403, `An incoming technician must not commit the outgoing handover: ${JSON.stringify(incomingCommitDenial.body)}`);
 
     await signOut(page); await page.close();
     page = await context.newPage(); attachErrorCapture(page);
     await signIn(page, seeded.accounts.outsider);
-    const outsiderDenial = await probePost(page, commitPath, reviewedCommit);
+    const outsiderDenial = await probePost(page, commitPath, { ...reviewedCommit, password: seeded.accounts.outsider.password });
     assert.equal(outsiderDenial.status, 403, `An outsider must not commit: ${JSON.stringify(outsiderDenial.body)}`);
 
     await signOut(page); await page.close();
     page = await openV2Page(context, seeded.accounts.outgoingA, seeded.shiftId);
-    const forged = await probePost(page, commitPath, { ...reviewedCommit, actorUid: seeded.uids.incomingA, committedAt: new Date().toISOString() });
+    const forged = await probePost(page, commitPath, { ...reviewedCommit, password: seeded.accounts.outgoingA.password, actorUid: seeded.uids.incomingA, committedAt: new Date().toISOString() });
     assert.equal(forged.status, 400, `A client-forged body must be rejected: ${JSON.stringify(forged.body)}`);
     assert.equal(forged.noStore, "no-store", "A denied commit response must not be cacheable.");
-    record(2, "supervisor, incoming technician, outsider and forged-body commit attempts are denied", {
-      supervisor: supervisorDenial.status, incoming: incomingCommitDenial.status, outsider: outsiderDenial.status, forged: forged.status,
+
+    // Closing a handover is an outgoing action taken AS that person, so the
+    // commit carries the committing technician's OWN password. Missing and wrong
+    // passwords must both fail closed with nothing committed.
+    const noPassword = await probePost(page, commitPath, reviewedCommit);
+    assert.equal(noPassword.status, 400, `A commit without the actor's own password is refused: ${JSON.stringify(noPassword.body)}`);
+    const wrongPassword = await probePost(page, commitPath, { ...reviewedCommit, password: "wrong-password-x" });
+    assert.equal(wrongPassword.status, 400, `A wrong password must fail closed with 400: ${JSON.stringify(wrongPassword.body)}`);
+    assert.ok(!JSON.stringify(wrongPassword.body).includes("wrong-password-x"), "A denial must never echo the submitted password.");
+    assert.equal((await ref("equal_handovers_v2", createEqualHandoverDocumentId(seeded.shiftId)).get()).data().lifecycleStatus,
+      "collecting_confirmations", "A refused commit must leave the lifecycle untouched.");
+    record(2, "supervisor, incoming technician, outsider, forged-body, passwordless and wrong-password commit attempts are denied", {
+      supervisor: supervisorDenial.status, incoming: incomingCommitDenial.status, outsider: outsiderDenial.status,
+      forged: forged.status, noPassword: noPassword.status, wrongPassword: wrongPassword.status,
     });
 
-    // 3 — outgoing A commits through the real route; the aggregate flips to
-    //     `awaiting_incoming_acceptance` and NO shift/membership/attendance is
-    //     created. Committing is the outgoing action; it requires no password.
-    const committed = await probePost(page, commitPath, reviewedCommit);
+    // 3 — outgoing A commits through the real route with their OWN password; the
+    //     aggregate flips to `awaiting_incoming_acceptance` and NO
+    //     shift/membership/attendance is created.
+    const committed = await probePost(page, commitPath, { ...reviewedCommit, password: seeded.accounts.outgoingA.password });
     assert.equal(committed.status, 200, `Fresh commit must return 200: ${JSON.stringify(committed.body)}`);
     assert.equal(committed.body.success, true);
     assert.equal(committed.body.status, "COMMITTED");
@@ -391,6 +408,7 @@ async function main() {
     const replay = await probePost(page, commitPath, {
       expectedRevision: replayStamp.expectedRevision, expectedSnapshotHash: replayStamp.expectedSnapshotHash,
       expectedGuardRevision: replayStamp.guard.guardRevision, expectedFencingEpoch: replayStamp.guard.fencingEpoch,
+      password: seeded.accounts.outgoingA.password,
     });
     assert.equal(replay.status, 200, `A replay of the committed handover returns 200: ${JSON.stringify(replay.body)}`);
     assert.equal(replay.body.replayed, true);
@@ -472,7 +490,7 @@ async function main() {
     assert.deepEqual(authoritative.browserErrors, [], "The browser must report no uncaught errors.");
     assert.equal(authoritative.commitReceipts, 1, "Exactly one commitment receipt across the browser flow and replay.");
     assert.equal(authoritative.activationReceipts, 1, "Exactly one activation receipt across both acceptances.");
-    assert.equal(deliberateProbes, 13, "Four commit denials + commit + replay + two accept denials + accept A + accept B + self replay + finalize + finalize replay are expected.");
+    assert.equal(deliberateProbes, 15, "Six commit denials + commit + replay + two accept denials + accept A + accept B + self replay + finalize + finalize replay are expected.");
 
     await browser.close();
 

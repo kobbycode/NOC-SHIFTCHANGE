@@ -1,6 +1,7 @@
 import "server-only";
 import { NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
+import { applySessionCookie } from "@/lib/auth/session-cookie";
 import {
   ACCEPTANCE_RESPONSE_CODES,
   atomicRespond,
@@ -11,6 +12,7 @@ import {
   reconciliationView,
 } from "@/lib/operations/handover-v2-atomic-http";
 import { coordinateAtomicIncomingAcceptance } from "@/lib/operations/incoming-acceptance-http-coordinator";
+import { issueIncomingHandoverSession } from "@/lib/operations/handover-session-issuance";
 import { sameOrigin } from "@/lib/operations/handover-v2-report-http";
 
 export const runtime = "nodejs";
@@ -31,13 +33,20 @@ function committedAtIso(receipt: { committedAt: { state: string; seconds?: numbe
 // `HANDOVER_V2_ATOMIC_ACCEPTANCE` switch) and defaults to 404. The route never
 // falls back to the legacy split writer: an atomic attempt either produces a
 // validated receipt or an explicit non-committed/unknown outcome.
+//
+// Phase 3 session issuance: the console session authorizes use of this console
+// but is NOT the accepting technician. The coordinator verifies the named
+// reserved incoming technician's own password; only after the acceptance has
+// committed does this route exchange that one-shot token for their session
+// cookie and revoke the outgoing pair on the first activation. The receipt, its
+// hash and the reconciliation view are unchanged by issuance.
 export async function POST(request: NextRequest, context: Context) {
   if (!handoverV2AtomicAcceptanceEnabled()) {
     return atomicRespond({ success: false, error: "Not found." }, 404);
   }
-  const actor = await getCurrentUser();
-  if (!actor) return atomicRespond({ success: false, error: "Please sign in to continue." }, 401);
-  if (actor.role !== "technician" || actor.mustChangePassword) {
+  const consoleActor = await getCurrentUser();
+  if (!consoleActor) return atomicRespond({ success: false, error: "Please sign in to continue." }, 401);
+  if (consoleActor.role !== "technician" || consoleActor.mustChangePassword) {
     return atomicRespond(
       { success: false, error: "Your account is not authorized to accept v2 handovers." },
       403,
@@ -60,13 +69,13 @@ export async function POST(request: NextRequest, context: Context) {
   }
 
   try {
-    const { result, receipt, reconciliation } = await coordinateAtomicIncomingAcceptance({
+    const { result, receipt, reconciliation, sessionCredential } = await coordinateAtomicIncomingAcceptance({
       outgoingShiftId: shiftId,
       actor: {
-        uid: actor.uid,
-        email: actor.email,
-        role: actor.role,
-        mustChangePassword: actor.mustChangePassword,
+        uid: consoleActor.uid,
+        email: consoleActor.email,
+        role: consoleActor.role,
+        mustChangePassword: consoleActor.mustChangePassword,
       },
       reviewed,
     });
@@ -79,7 +88,21 @@ export async function POST(request: NextRequest, context: Context) {
     const partnerApplied =
       reconciliation?.partnerApplied ?? (result.outcome === "subsequent_join");
 
-    return atomicRespond({
+    // Post-commit only, and never inside a transaction. Issuance cannot fail the
+    // acceptance: it reports its own outcome truthfully instead of throwing.
+    const issuance = await issueIncomingHandoverSession({
+      outgoingShiftId: sessionCredential.outgoingShiftId,
+      handoverDocumentId: sessionCredential.handoverDocumentId,
+      acceptingTechnicianUid: sessionCredential.acceptingTechnicianUid,
+      consoleActorUid: sessionCredential.consoleActorUid,
+      outgoingTechnicianIds: sessionCredential.outgoingTechnicianIds,
+      idToken: sessionCredential.idToken,
+      firstActivation: sessionCredential.firstActivation,
+      acceptanceReceiptId: sessionCredential.acceptanceReceiptId,
+      nowIso: new Date().toISOString(),
+    });
+
+    const response = atomicRespond({
       success: true,
       code,
       status: result.status,
@@ -113,7 +136,20 @@ export async function POST(request: NextRequest, context: Context) {
       },
       notifications: notificationPosture(result.notificationDelivery),
       reconciliation: reconciliation === null ? null : reconciliationView(reconciliation),
+      session: {
+        issued: issuance.issued,
+        firstActivation: sessionCredential.firstActivation,
+        acceptingTechnicianUid: sessionCredential.acceptingTechnicianUid,
+        consoleActorUid: sessionCredential.consoleActorUid,
+        issuanceId: issuance.issuanceId,
+        issuanceRecorded: issuance.issuanceRecorded,
+        replayed: issuance.replayed,
+        outgoingSessionsRevoked: issuance.outgoingSessionsRevoked,
+        revokedOutgoingTechnicianUids: issuance.revokedOutgoingTechnicianUids,
+      },
     }, 200);
+    if (issuance.sessionCookie !== null) applySessionCookie(response, issuance.sessionCookie);
+    return response;
   } catch (error) {
     return mapAtomicAcceptanceError(error, "Atomic incoming acceptance failed:");
   }

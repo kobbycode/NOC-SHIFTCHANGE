@@ -1,4 +1,8 @@
 
+import type {
+  AttendanceLocationEvidence,
+} from "./attendance-location";
+
 export const ATTENDANCE_STATUSES = {
   PRESENT: "present",
   ABSENT: "absent",
@@ -39,4 +43,13 @@ export interface Attendance {
 
   recordedAt: string;
   updatedAt: string;
+
+  /**
+   * Coarse browser presence evidence captured at the personal attendance act.
+   * Absent on records written before this evidence existed, and on records
+   * created by a supervisor transfer that had no personal browser act.
+   */
+  locationEvidence?:
+    | AttendanceLocationEvidence
+    | null;
 }

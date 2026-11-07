@@ -7,6 +7,7 @@ import { AssignmentOperationError } from "@/lib/operations/assignment-transactio
 import { HandoverDomainError, createHandoverDocumentId } from "@/lib/operations/handover-domain";
 import { NextShiftAuthorizationDomainError } from "@/lib/operations/next-shift-authorization-domain";
 import { persistFormalHandoverConfirmation } from "@/lib/operations/formal-handover-confirmation";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 type Context = { params: Promise<{ shiftId: string }> };
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest, context: Context) {
     }
     const expectedOrigin = process.env.APP_ORIGIN ?? request.nextUrl.origin;
     if (request.headers.get("origin") !== expectedOrigin) return failure("Invalid request origin.", 403);
+    await requireTechnicianWriteAuthority({ uid: actor.uid, role: actor.role });
     const { shiftId } = await context.params;
     createHandoverDocumentId(shiftId);
     let body: unknown;

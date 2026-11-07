@@ -67,8 +67,11 @@ export interface AtomicAcceptanceRequest {
   expectedSnapshotHash: string;
   expectedGuardRevision: number;
   expectedFencingEpoch: number;
+  technicianUid: string;
   password: string;
   lateReason: string | null;
+  /** Untrusted coarse browser evidence; normalized against the server clock. */
+  locationEvidence: unknown;
 }
 
 export interface GuardClosureRequest {
@@ -125,8 +128,10 @@ function optionalLateReason(value: unknown): string | null {
 
 // The technician's own late-arrival reason is optional in the body; the service
 // decides whether it is REQUIRED from authoritative time and absence records.
-// The body still never carries a technician UID, role, evidence kind, receipt,
-// shift state or clock.
+// The body names the reserved incoming technician accepting on the shared console
+// and their own password, and nothing else: no role, evidence kind, receipt, shift
+// state or clock. The named UID is constrained to the incoming roster and proved
+// by that person's credential before it authorizes anything.
 export function parseAtomicAcceptBody(body: unknown): AtomicAcceptanceRequest {
   const data = objectBody(body);
   rejectUnknownKeys(data, [
@@ -134,16 +139,20 @@ export function parseAtomicAcceptBody(body: unknown): AtomicAcceptanceRequest {
     "expectedSnapshotHash",
     "expectedGuardRevision",
     "expectedFencingEpoch",
+    "technicianUid",
     "password",
     "lateReason",
+    "locationEvidence",
   ]);
   return {
     expectedRevision: requireRevision(data.expectedRevision, "expected revision"),
     expectedSnapshotHash: requireHex64(data.expectedSnapshotHash, "expected snapshot hash"),
     expectedGuardRevision: requireRevision(data.expectedGuardRevision, "expected guard revision"),
     expectedFencingEpoch: requireRevision(data.expectedFencingEpoch, "expected fencing epoch"),
+    technicianUid: requireIdentifier(data.technicianUid, "accepting technician UID"),
     password: requirePassword(data.password),
     lateReason: optionalLateReason(data.lateReason),
+    locationEvidence: data.locationEvidence,
   };
 }
 

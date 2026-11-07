@@ -9,8 +9,8 @@
  * lifecycle is now split:
  *
  *     collecting_confirmations
- *        │  commitEqualHandoverOutgoingV2   (outgoing technician; NO password)
- *        ▼
+ *        │  commitEqualHandoverOutgoingV2   (outgoing technician; the ROUTE
+ *        ▼                                   verifies their OWN password first)
  *     awaiting_incoming_acceptance
  *        │  acceptEqualHandoverIncomingV2   (first incoming acceptance — the
  *        ▼                                   ONLY event that creates + activates
@@ -30,11 +30,16 @@
  * the commit derives its own authorization (§4), replays idempotently from a
  * deterministic receipt rather than a client random id (§5), carries reviewed
  * evidence and never authority, and never touches attendance at commit, task
- * transfers or the V1 lifecycle (§7/§8). The commit and finalize ROUTES need no
- * password, so they are exercised through the real route handlers; the incoming
- * acceptance is driven through the same service the password-accept route calls
- * (the personal password step belongs to the acceptance + browser suites, which
- * bring up the Auth emulator).
+ * transfers or the V1 lifecycle (§7/§8). Closing a handover is an outgoing action
+ * taken as that person, so the commit ROUTE verifies the committing technician's
+ * OWN password before any transaction; this suite brings up no Auth emulator, so
+ * it proves that gate FAILS CLOSED — no commitment receipt and no lifecycle
+ * movement without verified credentials — and drives the committed workflow
+ * through the same service the password-commit route calls. The finalize route
+ * needs no password and is exercised directly. The incoming acceptance is driven
+ * through the same service the password-accept route calls (the personal password
+ * step belongs to the acceptance + browser suites, which bring up the Auth
+ * emulator).
  *
  * Run via: tests/run-handover-v2-transfer-emulator.ps1
  *
@@ -876,21 +881,33 @@ test("23. Cancelling the reservation blocks the commit and creates no shift", as
 // §5 — the request carries reviewed evidence, never authority.
 // ===========================================================================
 
-test("24. The commit/transfer parsers refuse any field other than reviewed evidence", () => {
+test("24. The commit/transfer parsers refuse any field other than reviewed evidence, and only the route parser accepts a password", () => {
   const base = { expectedRevision: 1, expectedSnapshotHash: "a".repeat(64), expectedGuardRevision: 1, expectedFencingEpoch: 1 };
   assert.deepEqual(parseEqualHandoverTransferRequest(base), base);
-  assert.deepEqual(parseCommitBody(base), base);
+  assert.deepEqual(parseCommitBody({ ...base, password: "synthetic-only" }), { password: "synthetic-only", ...base });
+  // The commit body is the reviewed binding plus the committing technician's OWN
+  // password and nothing else: no actor, role, technician or timestamp can be
+  // injected, and the SERVICE parser still refuses a credential outright because
+  // no service may ever see a password.
   for (const injected of ["actorUid", "role", "committedAt", "technicianUid", "transferAuthorized", "password"]) {
     assert.throws(() => parseEqualHandoverTransferRequest({ ...base, [injected]: "x" }), as400(/only the reviewed revision/));
-    assert.throws(() => parseCommitBody({ ...base, [injected]: "x" }), as400(/Missing or unsupported report request fields/));
   }
+  for (const injected of ["actorUid", "role", "committedAt", "technicianUid", "transferAuthorized"]) {
+    assert.throws(() => parseCommitBody({ ...base, password: "synthetic-only", [injected]: "x" }), as400(/Missing or unsupported report request fields/));
+  }
+  // A passwordless commit is refused before any credential exchange, and an
+  // empty password never satisfies the personal gate.
+  assert.throws(() => parseCommitBody(base), as400(/Missing or unsupported report request fields/));
+  assert.throws(() => parseCommitBody({ ...base, password: "" }), as400(/Your password is required to commit this handover/));
   assert.throws(() => parseEqualHandoverTransferRequest({ ...base, expectedSnapshotHash: "not-a-hash" }), as400(/Invalid transfer revision/));
   assert.throws(() => parseEqualHandoverTransferRequest({ ...base, expectedRevision: 0 }), as400(/Invalid transfer revision/));
 });
 
 // ===========================================================================
-// §9 — API surface (gate, session, origin, status). The commit + finalize
-// routes need no password, so the real handlers are exercised directly.
+// §9 — API surface (gate, session, origin, status). The finalize route needs no
+// password and is exercised directly; the commit route verifies the committing
+// technician's OWN password, which this suite cannot satisfy without an Auth
+// emulator, so it is proven to FAIL CLOSED instead.
 // ===========================================================================
 
 test("25. The commit route returns 404 with the dev gate disabled and runs no workflow", async () => {
@@ -908,11 +925,11 @@ test("25. The commit route returns 404 with the dev gate disabled and runs no wo
   assert.deepEqual(await operationalState(), before);
 });
 
-test("26. Enabled commit route: 401 anon, 403 foreign origin, 403 supervisor, 403 forced password, 200 fresh then 200 replay", async () => {
+test("26. Enabled commit route: 401 anon, 403 foreign origin, 403 supervisor, 403 forced password, 400 without a password, and fail-closed when credentials cannot be verified", async () => {
   await clearDb();
   const f = await makeReadyFixture();
   process.env.HANDOVER_V2_DEV = "true";
-  const body = JSON.stringify(await commitBinding(f));
+  const body = JSON.stringify({ ...(await commitBinding(f)), password: "synthetic-only" });
   try {
     routeSessionUser = null;
     const anon = await commitRoute.POST(sameOrigin(commitUrl(f), "POST", body), commitParams(f));
@@ -934,21 +951,31 @@ test("26. Enabled commit route: 401 anon, 403 foreign origin, 403 supervisor, 40
     assert.equal(forced.status, 403, "a forced-password session cannot commit");
 
     routeSessionUser = { uid: f.out[0], role: "technician", mustChangePassword: false };
-    const ok = await commitRoute.POST(sameOrigin(commitUrl(f), "POST", body), commitParams(f));
-    assert.equal(ok.status, 200, "a fresh commitment is 200");
-    assert.equal(ok.headers.get("Cache-Control"), "no-store");
-    const payload = await ok.json();
-    assert.equal(payload.success, true);
-    assert.equal(payload.status, "COMMITTED");
-    assert.equal(payload.replayed, false);
-    assert.equal(payload.reservation.aggregate.lifecycleStatus, "awaiting_incoming_acceptance");
+    // The reviewed binding alone no longer commits anything: closing a handover
+    // is an outgoing action taken as that person, so the password is mandatory
+    // and its absence is refused before any credential exchange.
+    const passwordless = await commitRoute.POST(
+      sameOrigin(commitUrl(f), "POST", JSON.stringify(await commitBinding(f))), commitParams(f),
+    );
+    assert.equal(passwordless.status, 400, "a binding-only commit body is refused");
+    assert.match((await passwordless.json()).error, /Missing or unsupported report request fields/);
 
-    const replay = await commitRoute.POST(sameOrigin(commitUrl(f), "POST", JSON.stringify(await commitBinding(f))), commitParams(f));
-    assert.equal(replay.status, 200, "a replay of the committed handover is 200");
-    assert.equal((await replay.json()).replayed, true);
+    // No Auth emulator is in scope for this suite, so point the credential
+    // helper at a closed loopback port: verification must fail CLOSED, the
+    // submitted password must never be echoed, and nothing may commit.
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:1";
+    const unverified = await commitRoute.POST(sameOrigin(commitUrl(f), "POST", body), commitParams(f));
+    assert.equal(unverified.status, 503, "an unverifiable password never commits a handover");
+    const unverifiedPayload = await unverified.json();
+    assert.match(unverifiedPayload.error, /password/i);
+    assert.ok(!JSON.stringify(unverifiedPayload).includes("synthetic-only"), "the response must not echo the submitted password");
+    assert.equal((await getV2Document(f)).lifecycleStatus, "collecting_confirmations", "the handover did not commit");
+    assert.equal((await auditsByAction("EQUAL_HANDOVER_OUTGOING_COMMITTED_V2")).length, 0, "no commitment receipt without verified credentials");
+    assert.equal((await ref("shifts", (await getV2Document(f)).identity.incomingShiftId).get()).exists, false, "no incoming shift without a committed handover");
   } finally {
     routeSessionUser = null;
     delete process.env.HANDOVER_V2_DEV;
+    delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
   }
 });
 

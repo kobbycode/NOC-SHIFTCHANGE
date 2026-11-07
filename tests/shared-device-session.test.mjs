@@ -20,6 +20,12 @@ const sessionSource = await readFile(
   new URL("../src/lib/auth/session.ts", import.meta.url),
   "utf8",
 );
+// The ONE session policy shared with the login route and the handover
+// acceptance; loaded for real so a drift in the constant is caught here.
+const sessionCookieSource = await readFile(
+  new URL("../src/lib/auth/session-cookie.ts", import.meta.url),
+  "utf8",
+);
 
 function compile(source) {
   return ts.transpileModule(source, {
@@ -57,6 +63,18 @@ function loadSession({ verifySessionCookie, getUser, getProfile }) {
         return { getAdminAuth: () => adminAuth, getAdminFirestore: () => adminDb };
       }
       if (specifier === "@/types/auth") return { isUserRole };
+      if (specifier === "./session-cookie") {
+        const policy = { exports: {} };
+        runInNewContext(compile(sessionCookieSource), {
+          exports: policy.exports,
+          process: { env: { NODE_ENV: "test" } },
+          require: (dependency) => {
+            if (dependency === "server-only") return {};
+            throw new Error(`Unexpected session policy dependency: ${dependency}`);
+          },
+        });
+        return policy.exports;
+      }
       throw new Error(`Unexpected session dependency: ${specifier}`);
     },
   });

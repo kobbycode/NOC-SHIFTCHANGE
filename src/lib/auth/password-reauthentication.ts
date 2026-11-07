@@ -57,6 +57,14 @@ export interface PasswordReauthenticationResult {
   uid: string;
 }
 
+export interface PasswordSessionResult {
+  uid: string;
+  // One-shot Identity Toolkit id token, good only for the single
+  // createSessionCookie exchange that signs the verified technician in. It is
+  // never persisted, logged, echoed, or handed to any operational service.
+  idToken: string;
+}
+
 interface PasswordReauthenticationDependencies {
   apiKey?: string;
   fetch?: (url: string, init: RequestInit) => Promise<
@@ -74,6 +82,35 @@ export async function reauthenticatePassword(
   input: PasswordReauthenticationInput,
   dependencies: PasswordReauthenticationDependencies = {}
 ): Promise<PasswordReauthenticationResult> {
+  const verified = await verifyPasswordCredential(input, dependencies);
+  // Explicit projection discards the credential response, including all tokens.
+  return { uid: verified.uid };
+}
+
+/**
+ * The ONLY credential path that retains a token: the shared-console handover
+ * acceptance, which must sign the verified incoming technician in at the moment
+ * they personally accept. It returns a one-shot id token bound to the exact
+ * verified UID for an immediate createSessionCookie exchange. Every other
+ * personal action keeps reauthenticatePassword, which discards all tokens.
+ */
+export async function authenticatePasswordForSession(
+  input: PasswordReauthenticationInput,
+  dependencies: PasswordReauthenticationDependencies = {}
+): Promise<PasswordSessionResult> {
+  const verified = await verifyPasswordCredential(input, dependencies);
+  // Without a usable id token no session can be minted, so this fails closed
+  // rather than accepting a credential it cannot turn into a login.
+  if (typeof verified.idToken !== "string" || !verified.idToken) {
+    throw new PasswordReauthenticationError("SERVICE_UNAVAILABLE");
+  }
+  return { uid: verified.uid, idToken: verified.idToken };
+}
+
+async function verifyPasswordCredential(
+  input: PasswordReauthenticationInput,
+  dependencies: PasswordReauthenticationDependencies
+): Promise<{ uid: string; idToken: unknown }> {
   if (
     !input ||
     typeof input.expectedUid !== "string" ||
@@ -224,10 +261,13 @@ export async function reauthenticatePassword(
     throw new PasswordReauthenticationError("SERVICE_UNAVAILABLE");
   }
 
-  if ((verification as Record<string, unknown>).localId !== expectedUid) {
+  const credential = verification as Record<string, unknown>;
+  if (credential.localId !== expectedUid) {
     throw new PasswordReauthenticationError("IDENTITY_MISMATCH");
   }
 
-  // Explicit projection discards the credential response, including all tokens.
-  return { uid: expectedUid };
+  // Only the exact verified UID and the one-shot id token survive this
+  // projection. The refresh token and the rest of the credential response are
+  // discarded here, and reauthenticatePassword drops the id token as well.
+  return { uid: expectedUid, idToken: credential.idToken };
 }

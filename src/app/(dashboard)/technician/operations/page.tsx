@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import { getTechnicianCurrentShift } from "@/lib/operations/get-technician-current-shift";
 import { getShiftOperations } from "@/lib/operations/shift-operations";
+import { readTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 import { AssignmentOperationError } from "@/lib/operations/assignment-transaction";
 import { resolveOperationalSection } from "@/config/operational-sections";
 import { ShiftOperationsWorkspace } from "@/components/operations/shift-operations-workspace";
@@ -42,6 +43,28 @@ export default async function ShiftOperationsPage({
     return (
       <ShiftOperationsAccessNotice
         reason={{ kind: "scheduled", scheduledStart: current.scheduledStart }}
+      />
+    );
+  }
+
+  let authority;
+
+  try {
+    authority = await readTechnicianWriteAuthority(actor);
+  } catch (error) {
+    if (!(error instanceof AssignmentOperationError)) throw error;
+
+    return (
+      <ShiftOperationsAccessNotice
+        reason={{ kind: "unavailable", message: error.message }}
+      />
+    );
+  }
+
+  if (!authority.mayWrite) {
+    return (
+      <ShiftOperationsAccessNotice
+        reason={{ kind: "read_only", message: authority.message }}
       />
     );
   }

@@ -136,6 +136,52 @@ function validCurrentShift(
   };
 }
 
+function writableWriteAuthority(
+  overrides:
+    Record<string, unknown> = {},
+) {
+  return {
+    mayWrite: true,
+    governed: true,
+    basis:
+      "personal_handover_acceptance",
+    denial: null,
+    message:
+      "This technician accepted the handover with their own password.",
+    activeShiftId: SHIFT_ID,
+    personallyAcceptedShiftId:
+      SHIFT_ID,
+    ...overrides,
+  };
+}
+
+function readOnlyWriteAuthority(
+  overrides:
+    Record<string, unknown> = {},
+) {
+  return {
+    mayWrite: false,
+    governed: true,
+    basis: null,
+    denial:
+      "participation_without_acceptance",
+    message:
+      "Accept the handover with your own password to make changes; this view is read-only.",
+    activeShiftId: SHIFT_ID,
+    personallyAcceptedShiftId:
+      null,
+    ...overrides,
+  };
+}
+
+function scheduledReadOnlyAuthority() {
+  return readOnlyWriteAuthority({
+    denial: "shift_not_running",
+    message:
+      "This shift no longer accepts changes, so operational data is read-only.",
+  });
+}
+
 test(
   "retrieves no current technician shift using the narrow GET endpoint",
   { concurrency: false },
@@ -172,12 +218,35 @@ test(
         return jsonResponse({
           success: true,
           currentShift: null,
+          writeAuthority:
+            readOnlyWriteAuthority({
+              denial:
+                "no_active_shift",
+              message:
+                "No shift is currently running, so operational data is read-only.",
+              activeShiftId: null,
+            }),
         });
       },
       async () => {
+        const snapshot =
+          await getTechnicianCurrentShift();
+
         assert.equal(
-          await getTechnicianCurrentShift(),
+          snapshot.currentShift,
           null,
+        );
+
+        assert.equal(
+          snapshot.writeAuthority
+            .mayWrite,
+          false,
+        );
+
+        assert.equal(
+          snapshot.writeAuthority
+            .denial,
+          "no_active_shift",
         );
       },
     );
@@ -200,16 +269,23 @@ test(
         canJoin: false,
       });
 
+    const writeAuthority =
+      scheduledReadOnlyAuthority();
+
     await withFetch(
       async () =>
         jsonResponse({
           success: true,
           currentShift,
+          writeAuthority,
         }),
       async () => {
         assert.deepEqual(
           await getTechnicianCurrentShift(),
-          currentShift,
+          {
+            currentShift,
+            writeAuthority,
+          },
         );
       },
     );
@@ -229,16 +305,23 @@ test(
         canJoin: false,
       });
 
+    const writeAuthority =
+      scheduledReadOnlyAuthority();
+
     await withFetch(
       async () =>
         jsonResponse({
           success: true,
           currentShift,
+          writeAuthority,
         }),
       async () => {
         assert.deepEqual(
           await getTechnicianCurrentShift(),
-          currentShift,
+          {
+            currentShift,
+            writeAuthority,
+          },
         );
       },
     );
@@ -262,16 +345,23 @@ test(
         canJoin: false,
       });
 
+    const writeAuthority =
+      scheduledReadOnlyAuthority();
+
     await withFetch(
       async () =>
         jsonResponse({
           success: true,
           currentShift,
+          writeAuthority,
         }),
       async () => {
         assert.deepEqual(
           await getTechnicianCurrentShift(),
-          currentShift,
+          {
+            currentShift,
+            writeAuthority,
+          },
         );
       },
     );
@@ -294,6 +384,8 @@ test(
               canStart: true,
               canJoin: false,
             }),
+          writeAuthority:
+            scheduledReadOnlyAuthority(),
         }),
       async () => {
         await assert.rejects(
@@ -327,6 +419,8 @@ test(
         jsonResponse({
           success: true,
           currentShift: withoutBootstrap,
+          writeAuthority:
+            scheduledReadOnlyAuthority(),
         }),
       async () => {
         await assert.rejects(
@@ -355,6 +449,8 @@ test(
               firstShiftBootstrapAvailable: true,
               canStart: false,
             }),
+          writeAuthority:
+            writableWriteAuthority(),
         }),
       async () => {
         await assert.rejects(
@@ -385,16 +481,23 @@ test(
         canJoin: false,
       });
 
+    const writeAuthority =
+      writableWriteAuthority();
+
     await withFetch(
       async () =>
         jsonResponse({
           success: true,
           currentShift,
+          writeAuthority,
         }),
       async () => {
         assert.deepEqual(
           await getTechnicianCurrentShift(),
-          currentShift,
+          {
+            currentShift,
+            writeAuthority,
+          },
         );
       },
     );
@@ -413,6 +516,8 @@ test(
             validCurrentShift({
               canJoin: false,
             }),
+          writeAuthority:
+            writableWriteAuthority(),
         }),
       async () => {
         await assert.rejects(
@@ -448,12 +553,220 @@ test(
                 RECORDED_AT,
               canJoin: false,
             }),
+          writeAuthority:
+            writableWriteAuthority(),
         }),
       async () => {
         await assert.rejects(
           () =>
             getTechnicianCurrentShift(),
           isShiftApiError(200),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects a current-shift response without the write-authority projection",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects writable authority that also carries a denial",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+          writeAuthority:
+            writableWriteAuthority({
+              denial:
+                "participation_without_acceptance",
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects read-only authority that still claims a write basis",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+          writeAuthority:
+            readOnlyWriteAuthority({
+              basis:
+                "founding_shift_participant",
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects a non-governed authority projection for a technician endpoint",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+          writeAuthority:
+            writableWriteAuthority({
+              governed: false,
+              basis:
+                "role_not_governed",
+              personallyAcceptedShiftId:
+                null,
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects personal acceptance evidence for a different shift",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+          writeAuthority:
+            writableWriteAuthority({
+              personallyAcceptedShiftId:
+                "another-shift",
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects founding authority that claims a personal acceptance",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift:
+            validCurrentShift(),
+          writeAuthority:
+            writableWriteAuthority({
+              basis:
+                "founding_shift_participant",
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects an active-shift denial without an active shift identity",
+  { concurrency: false },
+  async () => {
+    await withFetch(
+      async () =>
+        jsonResponse({
+          success: true,
+          currentShift: null,
+          writeAuthority:
+            readOnlyWriteAuthority({
+              activeShiftId: null,
+            }),
+        }),
+      async () => {
+        await assert.rejects(
+          () =>
+            getTechnicianCurrentShift(),
+          isShiftApiError(
+            200,
+            "The technician current-shift response is invalid.",
+          ),
         );
       },
     );
@@ -663,7 +976,7 @@ test(
 );
 
 test(
-  "joins an active shift using POST and returns authoritative attendance summary",
+  "joins an active shift using POST with coarse location evidence and returns authoritative attendance summary",
   { concurrency: false },
   async () => {
     const attendance = {
@@ -704,9 +1017,37 @@ test(
           "no-store",
         );
 
+        assert.deepEqual(
+          init?.headers,
+          {
+            "Content-Type":
+              "application/json",
+          },
+        );
+
+        // Node has no browser geolocation, so the client must still send the
+        // explicit not-captured state rather than omitting the evidence.
+        const body =
+          JSON.parse(
+            String(init?.body),
+          ) as {
+            locationEvidence?: {
+              state?: string;
+              source?: string;
+              reason?: string;
+            };
+          };
+
         assert.equal(
-          init?.body,
-          undefined,
+          body.locationEvidence
+            ?.state,
+          "not_captured",
+        );
+
+        assert.equal(
+          body.locationEvidence
+            ?.source,
+          "browser_geolocation",
         );
 
         return jsonResponse(

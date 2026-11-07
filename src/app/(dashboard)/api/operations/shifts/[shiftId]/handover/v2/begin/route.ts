@@ -8,6 +8,7 @@ import { HandoverReservationGuardError } from "@/lib/operations/handover-reserva
 import { NextShiftAuthorizationDomainError } from "@/lib/operations/next-shift-authorization-domain";
 import { OperationalEvidenceIncompleteError } from "@/lib/operations/handover-begin-preflight";
 import { beginEqualTechnicianShiftHandover } from "@/lib/operations/begin-shift-handover";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest, context: Context) {
   if (request.headers.get("origin") !== expectedOrigin) return respond("Invalid request origin.", 403);
 
   try {
+    await requireTechnicianWriteAuthority({ uid: actor.uid, role: actor.role });
     const { shiftId } = await context.params;
     const body = await request.json().catch(() => null);
     if (body !== null && Object.keys(body as object).length > 0) {

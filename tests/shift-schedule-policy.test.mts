@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   buildScheduledWindow,
+  findShiftWindowDeviation,
   formatSchedulingDateTime,
   getSchedulingCalendarDate,
+  isShiftWindowPolicyRelaxed,
   isValidCalendarDate,
   SCHEDULING_TIMEZONE,
   SHIFT_SCHEDULE_WINDOWS,
@@ -163,4 +165,119 @@ test("display aligns the UTC window with the scheduling timezone", () => {
     ),
     /08:00/
   );
+});
+
+test("the exact policy window for its own date is accepted", () => {
+  assert.equal(
+    findShiftWindowDeviation(
+      "morning",
+      "2026-11-02T08:00:00.000Z",
+      "2026-11-02T17:00:00.000Z"
+    ),
+    null
+  );
+  assert.equal(
+    findShiftWindowDeviation(
+      "night",
+      "2026-11-02T17:00:00.000Z",
+      "2026-11-03T08:00:00.000Z"
+    ),
+    null
+  );
+  assert.equal(
+    findShiftWindowDeviation(
+      "night",
+      "2026-11-30T17:00:00.000Z",
+      "2026-12-01T08:00:00.000Z"
+    ),
+    null
+  );
+});
+
+test("a drifted start or end is reported against the policy window", () => {
+  const lateStart = findShiftWindowDeviation(
+    "morning",
+    "2026-11-02T08:30:00.000Z",
+    "2026-11-02T17:00:00.000Z"
+  );
+
+  assert.ok(lateStart);
+  assert.equal(
+    lateStart.expectedScheduledStart,
+    "2026-11-02T08:00:00.000Z"
+  );
+  assert.equal(
+    lateStart.expectedScheduledEnd,
+    "2026-11-02T17:00:00.000Z"
+  );
+  assert.match(lateStart.message, /morning shifts run/i);
+
+  const shortEnd = findShiftWindowDeviation(
+    "night",
+    "2026-11-02T17:00:00.000Z",
+    "2026-11-03T06:00:00.000Z"
+  );
+
+  assert.equal(
+    shortEnd?.expectedScheduledEnd,
+    "2026-11-03T08:00:00.000Z"
+  );
+});
+
+test("a window supplied under the wrong shift type is rejected", () => {
+  const deviation = findShiftWindowDeviation(
+    "night",
+    "2026-11-02T08:00:00.000Z",
+    "2026-11-02T17:00:00.000Z"
+  );
+
+  assert.ok(deviation);
+  assert.equal(
+    deviation.expectedScheduledStart,
+    "2026-11-02T17:00:00.000Z"
+  );
+  assert.equal(
+    deviation.expectedScheduledEnd,
+    "2026-11-03T08:00:00.000Z"
+  );
+});
+
+test("an unparseable or inverted window never passes policy validation", () => {
+  for (const [start, end] of [
+    ["not-a-date", "2026-11-02T17:00:00.000Z"],
+    ["2026-11-02T08:00:00.000Z", "2026-11-02T08:00:00.000Z"],
+    ["2026-11-02T08:00:00.000Z", "2026-11-02T07:00:00.000Z"],
+  ]) {
+    const deviation = findShiftWindowDeviation(
+      "morning",
+      start,
+      end
+    );
+
+    assert.ok(deviation, `${start} -> ${end}`);
+    assert.equal(deviation.expectedScheduledStart, null);
+  }
+});
+
+test("the window rule is relaxed only in a proven isolated emulator stack", () => {
+  const isolated = {
+    SHIFT_WINDOW_POLICY_SANDBOX: "true",
+    NEXT_PUBLIC_USE_FIREBASE_EMULATORS: "true",
+    FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+  };
+
+  assert.equal(isShiftWindowPolicyRelaxed(isolated), true);
+
+  for (const env of [
+    {},
+    { ...isolated, SHIFT_WINDOW_POLICY_SANDBOX: undefined },
+    { ...isolated, SHIFT_WINDOW_POLICY_SANDBOX: "false" },
+    { ...isolated, NEXT_PUBLIC_USE_FIREBASE_EMULATORS: undefined },
+    { ...isolated, NEXT_PUBLIC_USE_FIREBASE_EMULATORS: "1" },
+    { ...isolated, FIREBASE_AUTH_EMULATOR_HOST: undefined },
+    { ...isolated, FIREBASE_AUTH_EMULATOR_HOST: "" },
+    { ...isolated, FIREBASE_AUTH_EMULATOR_HOST: "emulator.example:9099" },
+  ]) {
+    assert.equal(isShiftWindowPolicyRelaxed(env), false, JSON.stringify(env));
+  }
 });

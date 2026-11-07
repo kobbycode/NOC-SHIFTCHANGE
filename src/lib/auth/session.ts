@@ -16,7 +16,9 @@ import {
 
 import { redirect } from "next/navigation";
 
-export const SESSION_COOKIE = "__session";
+import { SESSION_COOKIE } from "./session-cookie";
+
+export { SESSION_COOKIE };
 
 export async function getCurrentUser(): Promise<AppUser | null> {
   const cookieStore = await cookies();

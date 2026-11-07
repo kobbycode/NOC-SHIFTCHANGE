@@ -24,6 +24,7 @@ import type {
 } from "@/types/equal-technician-handover";
 import {
   assertEqualHandoverReservation,
+  ATTENDANCE_LATENESS_GRACE_MS,
   createEqualHandoverDocumentId,
   createEqualHandoverIdentity,
   evaluateIncomingAttendanceLateness,
@@ -162,6 +163,7 @@ function digest(value: unknown): string {
 export const ALL_ATTENDANCE_EVIDENCE_KINDS: readonly AttendanceEvidenceKind[] = [
   ATTENDANCE_EVIDENCE_KINDS.INCOMING_CLOCK_IN,
   ATTENDANCE_EVIDENCE_KINDS.INCOMING_LATE_ACCEPTANCE,
+  ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CONFIRMATION,
   ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CLOCK_OUT,
   ATTENDANCE_EVIDENCE_KINDS.OUTGOING_ABSENT_DEPARTURE_ATTESTATION,
 ];
@@ -173,16 +175,21 @@ const authenticationMethods: readonly AttendanceAuthenticationMethod[] = [
   ATTENDANCE_AUTHENTICATION_METHODS.COLLEAGUE_ATTESTATION,
 ];
 
-// Only these evidence kinds establish a clock-in, and only through a trusted
-// personal confirmation/acceptance coordinator. Login, page opening, shift
-// reservation, report preparation and report freeze are not attendance
-// events and produce no evidence here.
+// Each evidence kind names the authentication methods allowed to finalize it,
+// and only a trusted personal confirmation/acceptance coordinator may present
+// one. Login, page opening, shift reservation, report preparation and report
+// freeze are not attendance events and produce no evidence here; an outgoing
+// personal confirmation records only that the participant personally
+// authenticated for their own confirmation.
 const allowedKindMethods: Record<AttendanceEvidenceKind, readonly AttendanceAuthenticationMethod[]> = {
   [ATTENDANCE_EVIDENCE_KINDS.INCOMING_CLOCK_IN]: [
     ATTENDANCE_AUTHENTICATION_METHODS.PERSONAL_PASSWORD_CONFIRMATION,
   ],
   [ATTENDANCE_EVIDENCE_KINDS.INCOMING_LATE_ACCEPTANCE]: [
     ATTENDANCE_AUTHENTICATION_METHODS.PERSONAL_PASSWORD_ACCEPTANCE,
+  ],
+  [ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CONFIRMATION]: [
+    ATTENDANCE_AUTHENTICATION_METHODS.PERSONAL_PASSWORD_CONFIRMATION,
   ],
   [ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CLOCK_OUT]: [
     ATTENDANCE_AUTHENTICATION_METHODS.SERVER_ISSUED_PERSONAL_CLOCK_OUT,
@@ -192,7 +199,7 @@ const allowedKindMethods: Record<AttendanceEvidenceKind, readonly AttendanceAuth
   ],
 };
 
-export const ATTENDANCE_LATENESS_GRACE_MS = 5 * 60 * 1000;
+export { ATTENDANCE_LATENESS_GRACE_MS };
 
 export function isAttendanceClockInEvidenceKind(kind: AttendanceEvidenceKind): boolean {
   return ATTENDANCE_CLOCK_IN_EVIDENCE_KINDS.includes(kind);
@@ -229,6 +236,23 @@ export function attendanceEvidenceSlotId(input: {
     fail("Unknown attendance evidence kind.", 400);
   }
   return `att2_slot_${digest({ handoverId: input.handoverId, technicianUid: input.technicianUid, kind: input.kind })}`;
+}
+
+// The outgoing personal confirmation coordinator derives its attendance
+// evidence event (and therefore operation) identifier from this exact
+// material, so a retried confirmation converges on one operation instead of
+// duplicating the slot.
+export function outgoingPersonalConfirmationEventId(input: {
+  handoverId: string;
+  technicianUid: string;
+}): string {
+  identifier(input.handoverId, "handover ID");
+  identifier(input.technicianUid, "technician UID", 128);
+  return `outgoing_confirmation_v2_${digest({
+    handoverId: input.handoverId,
+    technicianUid: input.technicianUid,
+    kind: ATTENDANCE_EVIDENCE_KINDS.OUTGOING_PERSONAL_CONFIRMATION,
+  })}`;
 }
 
 export function attendanceOperationId(eventId: string): string {
@@ -727,13 +751,13 @@ export function buildAttendanceEvidence(input: {
   const eventTime = input.serverTime;
 
   if (isClockIn) {
-    // Server-timing lateness gate: scheduled start plus exactly five minutes
-    // is on time; anything later is late and requires a meaningful reason.
+    // Server-timing lateness gate: scheduled start plus the grace window is on
+    // time; anything later is late and requires a meaningful reason.
     const diffMs = Date.parse(eventTime) - Date.parse(request.scheduledStart);
     if (diffMs > ATTENDANCE_LATENESS_GRACE_MS) {
       if (request.lateReason === null) {
         fail(
-          "Server confirmation time is more than five minutes after scheduled start; a meaningful late reason is required.",
+          "Server confirmation time is more than 15 minutes after scheduled start; a meaningful late reason is required.",
           400,
         );
       }

@@ -72,6 +72,59 @@ test("matching localId succeeds with only the expected UID and does not mutate i
   assert.equal("password" in result, false);
   assert.equal("email" in result, false);
 });
+test("the session authenticator returns the verified UID and one-shot token only", async () => {
+  const input = validInput();
+  const original = structuredClone(input);
+  const result = await helper.authenticatePasswordForSession(input);
+  assert.deepEqual(structuredClone(result), { uid: expectedUid, idToken });
+  assert.deepEqual(input, original);
+  for (const absent of ["refreshToken", "expiresIn", "password", "email", "localId"]) {
+    assert.equal(absent in result, false, `the session credential must not expose ${absent}`);
+  }
+});
+test("the session authenticator fails closed when the credential response carries no usable id token", async () => {
+  for (const token of [undefined, null, "", 123]) {
+    await assert.rejects(() => helper.authenticatePasswordForSession(validInput(), {
+      fetch: async () => response(200, { localId: expectedUid, idToken: token }),
+    }), error => {
+      assert.equal(error.code, "SERVICE_UNAVAILABLE");
+      assert.equal(error.status, 503);
+      assert.equal("cause" in error, false);
+      return true;
+    });
+  }
+});
+test("the session authenticator shares the discarding authenticator's request shape", async () => {
+  const calls = [];
+  const apiKey = "key with spaces&?/#=unicode-é";
+  await helper.authenticatePasswordForSession(validInput(), {
+    apiKey,
+    fetch: async (...args) => { calls.push(args); return response(); },
+  });
+  assert.equal(calls.length, 1);
+  const [url, init] = calls[0];
+  assert.equal(url, "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(apiKey));
+  assert.equal(init.method, "POST");
+  assert.equal(init.cache, "no-store");
+  assert.deepEqual(JSON.parse(init.body), { email, password, returnSecureToken: true });
+});
+test("the session authenticator shares input, configuration and identity classification", async () => {
+  let calls = 0;
+  await assert.rejects(() => helper.authenticatePasswordForSession({ ...validInput(), password: "" }, {
+    fetch: async () => { calls++; return response(); },
+  }), error => error.code === "INVALID_INPUT" && error.status === 400);
+  assert.equal(calls, 0);
+  const missing = loadHelper({ apiKey: undefined, fetch: async () => { calls++; return response(); } });
+  await assert.rejects(() => missing.authenticatePasswordForSession(validInput()), error => error.code === "CONFIGURATION_UNAVAILABLE" && error.status === 503);
+  assert.equal(calls, 0);
+  await assert.rejects(() => helper.authenticatePasswordForSession(validInput(), {
+    fetch: async () => response(200, { localId: "technician-B", idToken }),
+  }), error => error.code === "IDENTITY_MISMATCH" && error.status === 403);
+  await assert.rejects(() => helper.authenticatePasswordForSession(validInput(), {
+    fetch: async () => ({ ok: false, status: 400, async json() { throw new Error("must not be read"); } }),
+  }), error => error.code === "CREDENTIAL_REJECTED" && error.status === 400);
+});
+
 test("request uses Identity Toolkit POST JSON no-store, encoded key and exact transient password", async () => {
   const calls = [];
   const apiKey = "key with spaces&?/#=unicode-é";

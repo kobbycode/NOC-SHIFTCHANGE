@@ -544,9 +544,19 @@ test("authentication proofs must match the request nonce and stay fresh", async 
   assert.equal(world.writes.length, 0);
 });
 
+test("acceptance inside the fifteen-minute grace needs no late reason", async () => {
+  const world = await atomicAcceptanceWorld();
+  const insideGrace = Date.parse(world.scheduledStart) + 6 * 60_000;
+
+  const result = await world.apply("in-a", { appliedMs: insideGrace });
+  assert.equal(result.outcome, FIRST);
+  assert.equal(result.receipt.lateReason, null);
+  assert.equal(result.receipt.lateReasonSource, "not_required");
+});
+
 test("late acceptance requires and records a meaningful reason", async () => {
   const world = await atomicAcceptanceWorld();
-  const appliedMs = Date.parse(world.scheduledStart) + 6 * 60_000;
+  const appliedMs = Date.parse(world.scheduledStart) + 16 * 60_000;
 
   await rejectWithCode(world.apply("in-a", { appliedMs }), "LATE_REASON_REQUIRED");
   assert.equal(world.writes.length, 0);

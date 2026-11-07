@@ -20,6 +20,7 @@ import {
   type Transaction,
 } from "firebase-admin/firestore";
 import { ATTENDANCE_PARTICIPATION_AUTHORITIES } from "@/types/attendance";
+import type { AttendanceLocationEvidence } from "@/types/attendance-location";
 import {
   ATTENDANCE_EVIDENCE_SCHEMA,
   ATTENDANCE_EVIDENCE_KINDS,
@@ -172,6 +173,8 @@ export interface AtomicIncomingAcceptanceInput {
   requestAcceptedAt: string;
   /** Fresh application clock for this attempt; stable across SDK retries. */
   operationalAppliedAt: string;
+  /** Coarse presence evidence for the accepting technician's attendance act. */
+  locationEvidence?: AttendanceLocationEvidence | null;
   /** Freshness clock of the final pre-write check. */
   nowIso: string;
   nowMonotonicMs: number;
@@ -1432,6 +1435,7 @@ export async function applyIncomingAcceptanceApplicationAtomically(
           participationAuthority: ATTENDANCE_PARTICIPATION_AUTHORITIES.PRIMARY,
           authorizationId: null,
           recordedAt: input.operationalAppliedAt,
+          locationEvidence: input.locationEvidence ?? null,
         }),
       );
       for (const [uid, entries] of scheduleWrites) {
@@ -1604,6 +1608,7 @@ export async function applyIncomingAcceptanceApplicationAtomically(
           participationAuthority: ATTENDANCE_PARTICIPATION_AUTHORITIES.PRIMARY,
           authorizationId: null,
           recordedAt: input.operationalAppliedAt,
+          locationEvidence: input.locationEvidence ?? null,
         }),
       );
       transaction.update(technicianSchedules.doc(input.actorUid), {

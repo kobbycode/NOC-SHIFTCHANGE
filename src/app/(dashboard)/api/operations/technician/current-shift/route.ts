@@ -14,6 +14,10 @@ import {
   getTechnicianCurrentShift,
 } from "@/lib/operations/get-technician-current-shift";
 
+import {
+  readTechnicianWriteAuthority,
+} from "@/lib/operations/technician-write-authority-firestore";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -66,15 +70,24 @@ export async function GET() {
   }
 
   try {
-    const currentShift =
-      await getTechnicianCurrentShift(
+    const [
+      currentShift,
+      writeAuthority,
+    ] = await Promise.all([
+      getTechnicianCurrentShift(
         actor,
-      );
+      ),
+      readTechnicianWriteAuthority({
+        uid: actor.uid,
+        role: actor.role,
+      }),
+    ]);
 
     return NextResponse.json(
       {
         success: true,
         currentShift,
+        writeAuthority,
       },
       {
         status: 200,

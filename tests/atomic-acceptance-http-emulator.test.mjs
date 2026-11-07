@@ -264,10 +264,18 @@ async function api(path, options = {}) {
 }
 
 async function acceptAs(uid, overrides = {}) {
+  // The shared console NAMES the reserved incoming technician accepting now; the
+  // session cookie only authorizes the console as a participant of this pair.
   return api(acceptPath(), {
     method: "POST",
     cookie: sessions[uid],
-    body: { ...(await binding()), password: USERS[uid].password, lateReason: null, ...overrides },
+    body: {
+      ...(await binding()),
+      technicianUid: uid,
+      password: USERS[uid].password,
+      lateReason: null,
+      ...overrides,
+    },
   });
 }
 
@@ -285,6 +293,12 @@ async function guardAudits(action = GUARD_AUDIT_ACTION) {
   return (await db.collection("audit_logs").get()).docs.filter(
     (doc) => doc.data().action === action,
   ).length;
+}
+
+async function sessionIssuances() {
+  return (await db.collection("audit_logs").get()).docs
+    .filter((doc) => doc.data().action === "HANDOVER_SESSION_ISSUED_V2")
+    .map((doc) => doc.data());
 }
 
 async function incomingAttendance() {
@@ -335,14 +349,14 @@ test("2. mutations reject a foreign or missing origin before any write", async (
     method: "POST",
     cookie: sessions["in-a"],
     origin: "http://attacker.example",
-    body: { ...(await binding()), password: USERS["in-a"].password, lateReason: null },
+    body: { ...(await binding()), technicianUid: "in-a", password: USERS["in-a"].password, lateReason: null },
   });
   assert.equal(foreign.status, 403);
   const missing = await api(acceptPath(), {
     method: "POST",
     cookie: sessions["in-a"],
     origin: null,
-    body: { ...(await binding()), password: USERS["in-a"].password, lateReason: null },
+    body: { ...(await binding()), technicianUid: "in-a", password: USERS["in-a"].password, lateReason: null },
   });
   assert.equal(missing.status, 403);
   const guard = await api(guardPath(), {
@@ -408,13 +422,14 @@ test("6. an expired password proof is refused before the transaction", async () 
       },
       reviewed: {
         ...current,
+        technicianUid: "in-a",
         password: USERS["in-a"].password,
         lateReason: null,
       },
       dependencies: {
         clock,
         auth: { getUser: async (uid) => ({ uid, email: emailFor(uid), disabled: false }) },
-        reauthenticate: async () => ({ uid: "in-a" }),
+        authenticate: async () => ({ uid: "in-a", idToken: "test-id-token" }),
       },
     }),
     (error) =>
@@ -464,6 +479,22 @@ test("8. the first acceptance activates the incoming shift and leaves the guard 
   assert.equal((await read(GUARD)).ownerLifecycleState, "active");
   assert.equal(await applicationAudits(), 1);
   assert.equal(await incomingAttendance(), 1);
+
+  // Phase 3 — the committed acceptance also signs the NAMED incoming technician
+  // in on this shared console and revokes the outgoing pair exactly once.
+  assert.equal(result.body.session.issued, true);
+  assert.equal(result.body.session.firstActivation, true);
+  assert.equal(result.body.session.acceptingTechnicianUid, "in-a");
+  assert.equal(result.body.session.outgoingSessionsRevoked, true);
+  assert.deepEqual(result.body.session.revokedOutgoingTechnicianUids, ["out-a", "out-b"]);
+  const issuance = await sessionIssuances();
+  assert.equal(issuance.length, 1);
+  assert.equal(issuance[0].acceptingTechnicianUid, "in-a");
+  assert.equal(issuance[0].consoleActorUid, "in-a");
+  assert.equal(issuance[0].firstActivation, true);
+  assert.deepEqual(issuance[0].revokedOutgoingTechnicianUids, ["out-a", "out-b"]);
+  assert.ok(!JSON.stringify(issuance[0]).match(/idToken|refreshToken|password|__session/i),
+    "no credential material may reach the issuance record");
 });
 
 test("9. the second acceptance joins, then normal guard finalization is explicit and idempotent", async () => {
@@ -479,6 +510,15 @@ test("9. the second acceptance joins, then normal guard finalization is explicit
   // No automatic single-technician closure happened during acceptance.
   assert.equal((await read(GUARD)).ownerLifecycleState, "active");
   assert.equal(await incomingAttendance(), 2);
+
+  // A later join signs in the joining technician but revokes nothing: the first
+  // incoming technician's session must stay valid.
+  assert.equal(joined.body.session.issued, true);
+  assert.equal(joined.body.session.firstActivation, false);
+  assert.equal(joined.body.session.acceptingTechnicianUid, "in-b");
+  assert.deepEqual(joined.body.session.revokedOutgoingTechnicianUids, []);
+  const joinedIssuances = await sessionIssuances();
+  assert.deepEqual(joinedIssuances.map((item) => item.acceptingTechnicianUid).sort(), ["in-a", "in-b"]);
 
   const finalized = await api(guardPath(), { method: "POST", cookie: sessions["in-a"], body: {} });
   assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
@@ -517,12 +557,12 @@ test("11. simultaneous acceptances converge to one activation and two personal r
     api(acceptPath(), {
       method: "POST",
       cookie: sessions["in-a"],
-      body: { ...bindingA, password: USERS["in-a"].password, lateReason: null },
+      body: { ...bindingA, technicianUid: "in-a", password: USERS["in-a"].password, lateReason: null },
     }),
     api(acceptPath(), {
       method: "POST",
       cookie: sessions["in-b"],
-      body: { ...bindingB, password: USERS["in-b"].password, lateReason: null },
+      body: { ...bindingB, technicianUid: "in-b", password: USERS["in-b"].password, lateReason: null },
     }),
   ]);
   // The losing request either observed the activation in the coordinator
@@ -630,7 +670,7 @@ test("14. an unresolved commit marker is reported as unverifiable, never as a ro
 test("15. a late arrival requires and preserves the technician's own reason", async () => {
   await seed();
   const aggregate = await read(AGGREGATE);
-  // 30 minutes past the scheduled start: beyond the five-minute grace.
+  // 30 minutes past the scheduled start: beyond the 15-minute grace.
   const lateMs = Date.parse(aggregate.identity.scheduledStart) + 30 * 60_000;
   const coordinator = async (lateReason) => {
     let isoCount = 0;
@@ -641,11 +681,11 @@ test("15. a late arrival requires and preserves the technician's own reason", as
     return coordinateAtomicIncomingAcceptance({
       outgoingShiftId: OUTGOING,
       actor: { uid: "in-a", email: emailFor("in-a"), role: "technician", mustChangePassword: false },
-      reviewed: { ...(await binding()), password: USERS["in-a"].password, lateReason },
+      reviewed: { ...(await binding()), technicianUid: "in-a", password: USERS["in-a"].password, lateReason },
       dependencies: {
         clock,
         auth: { getUser: async (uid) => ({ uid, email: emailFor(uid), disabled: false }) },
-        reauthenticate: async () => ({ uid: "in-a" }),
+        authenticate: async () => ({ uid: "in-a", idToken: "test-id-token" }),
       },
     });
   };
@@ -815,7 +855,7 @@ test("23. the atomic protocol is 404 on an application where its gate is disable
     cookie: sessions["in-a"],
     base: appOriginGatedOff,
     origin: appOriginGatedOff,
-    body: { ...current, password: USERS["in-a"].password, lateReason: null },
+    body: { ...current, technicianUid: "in-a", password: USERS["in-a"].password, lateReason: null },
   });
   assert.equal(accept.status, 404);
   const status = await api(statusPath(), {

@@ -19,6 +19,10 @@ import {
   AssignmentOperationError,
 } from "@/lib/operations/assignment-transaction";
 
+import {
+  requireTechnicianWriteAuthority,
+} from "@/lib/operations/technician-write-authority-firestore";
+
 export const runtime = "nodejs";
 
 /*
@@ -285,6 +289,11 @@ export async function POST(
    */
 
   try {
+    await requireTechnicianWriteAuthority({
+      uid: user.uid,
+      role: user.role,
+    });
+
     const result =
       await transitionTask({
         taskId,

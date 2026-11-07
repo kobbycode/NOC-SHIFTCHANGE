@@ -9,6 +9,7 @@ import {
   respond,
   sameOrigin,
 } from "@/lib/operations/handover-v2-report-http";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest, context: Context) {
   if (session.error) return session.error;
   if (!sameOrigin(request)) return respond({ success: false, error: "Invalid request origin." }, 403);
   try {
+    await requireTechnicianWriteAuthority({ uid: session.actor.uid, role: session.actor.role });
     const { shiftId } = await context.params;
     let body: unknown;
     try { body = await request.json(); }

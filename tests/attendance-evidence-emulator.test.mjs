@@ -534,7 +534,8 @@ test("14. late acceptance stores the acceptance time and keeps the receipt untou
   assert.equal(result.evidence.lateReason, "road closure delayed the route");
   assert.equal(result.evidence.personallyAuthenticated, true);
 
-  // Exactly five minutes stays on time and needs no reason.
+  // Five minutes is inside the 15-minute grace window, so it stays on time
+  // and needs no reason.
   const onTime = await finalize(
     f,
     makeRequest(f, { eventId: `${f.prefix}-ontime`, kind: "incoming_clock_in" }),

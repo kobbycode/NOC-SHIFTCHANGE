@@ -9,6 +9,7 @@ import {
 } from "@/lib/operations/handover-v2-atomic-http";
 import { reconcileIncomingAcceptance } from "@/lib/operations/incoming-acceptance-reconciliation";
 import { readIncomingAcceptanceGuardLifecycle } from "@/lib/operations/incoming-acceptance-guard-finalization";
+import { authorizeHandoverConsoleActor } from "@/lib/operations/equal-handover-report-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,10 +17,13 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ shiftId: string }> };
 
 // 09M-R3B.2 Phase 5 — read-only acceptance status. It performs no writes and
-// reports only receipt-backed state. A technician may read ONLY their own
-// acceptance; an active supervisor may read a reserved incoming technician of
-// this handover. Cross-technician disclosure by a technician is refused before
-// any read.
+// reports only receipt-backed state. A technician may read their own acceptance,
+// and — because the last page of the A–E form is a shared console that offers
+// both reserved incoming identities — a participant of this reserved pair may
+// also read a NAMED reserved incoming technician of the same handover. That
+// discloses nothing the participant cannot already read from `/report`. Anyone
+// outside the pair, or any uid outside the incoming roster, is refused before any
+// acceptance read. An active supervisor may read a reserved incoming technician.
 export async function GET(request: NextRequest, context: Context) {
   if (!handoverV2AtomicAcceptanceEnabled()) {
     return atomicRespond({ success: false, error: "Not found." }, 404);
@@ -34,32 +38,37 @@ export async function GET(request: NextRequest, context: Context) {
   }
 
   const requested = request.nextUrl.searchParams.get("technicianUid");
-  let technicianUid: string;
-  if (actor.role === "technician") {
-    if (requested !== null && requested !== actor.uid) {
+  try {
+    const { shiftId } = await context.params;
+    let technicianUid: string;
+    if (actor.role === "technician") {
+      if (requested === null || requested === actor.uid) {
+        technicianUid = actor.uid;
+      } else {
+        const roster = await authorizeHandoverConsoleActor(shiftId, actor.uid);
+        if (!roster.incomingTechnicianIds.includes(requested)) {
+          return atomicRespond(
+            { success: false, error: "You may only read acceptance status for this handover's reserved incoming technicians." },
+            403,
+          );
+        }
+        technicianUid = requested;
+      }
+    } else if (actor.role === "supervisor") {
+      if (requested === null || requested.length === 0 || requested.length > 128) {
+        return atomicRespond(
+          { success: false, error: "A technician UID is required to read acceptance status." },
+          400,
+        );
+      }
+      technicianUid = requested;
+    } else {
       return atomicRespond(
-        { success: false, error: "You may only read your own acceptance status." },
+        { success: false, error: "Your account is not authorized to read acceptance status." },
         403,
       );
     }
-    technicianUid = actor.uid;
-  } else if (actor.role === "supervisor") {
-    if (requested === null || requested.length === 0 || requested.length > 128) {
-      return atomicRespond(
-        { success: false, error: "A technician UID is required to read acceptance status." },
-        400,
-      );
-    }
-    technicianUid = requested;
-  } else {
-    return atomicRespond(
-      { success: false, error: "Your account is not authorized to read acceptance status." },
-      403,
-    );
-  }
 
-  try {
-    const { shiftId } = await context.params;
     const status = await reconcileIncomingAcceptance({
       outgoingShiftId: shiftId,
       technicianUid,

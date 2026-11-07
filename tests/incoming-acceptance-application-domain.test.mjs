@@ -752,13 +752,19 @@ test("late-arrival reason is trimmed, bounded and required only after the grace 
     domain.INCOMING_ACCEPTANCE_ERROR_CODES.LATE_REASON_INVALID,
   );
 
-  assert.equal(domain.isIncomingAcceptanceLateReasonRequired({
-    scheduledStart: START,
-    operationalAppliedAt: "2026-10-28T08:05:00.000Z",
-  }), false);
+  // Owner-set 15-minute grace: anything up to and including start + 15 min is
+  // on time; the first millisecond past it needs a reason.
   assert.equal(domain.isIncomingAcceptanceLateReasonRequired({
     scheduledStart: START,
     operationalAppliedAt: "2026-10-28T08:05:00.001Z",
+  }), false);
+  assert.equal(domain.isIncomingAcceptanceLateReasonRequired({
+    scheduledStart: START,
+    operationalAppliedAt: "2026-10-28T08:15:00.000Z",
+  }), false);
+  assert.equal(domain.isIncomingAcceptanceLateReasonRequired({
+    scheduledStart: START,
+    operationalAppliedAt: "2026-10-28T08:15:00.001Z",
   }), true);
 });
 

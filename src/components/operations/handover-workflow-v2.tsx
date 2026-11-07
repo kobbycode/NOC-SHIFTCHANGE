@@ -5,6 +5,12 @@ import type { EqualHandoverReportState } from "@/lib/operations/equal-handover-r
 import type { EqualHandoverReportV2Content } from "@/types/handover-report-v2";
 import { reportAttendanceLabels, reportNoticeCategory } from "@/lib/operations/handover-report-attendance-view";
 import { IncomingAcceptanceAtomicPanel } from "./incoming-acceptance-atomic";
+import {
+  HandoverSessionNotice,
+  IncomingIdentityPicker,
+  type ConsoleIncomingIdentity,
+  type HandoverSessionOutcome,
+} from "./handover-console-session";
 const field = "block w-full rounded-lg border bg-transparent p-2";
 
 const POSITION_LABELS: { position: string; side: "outgoing" | "incoming"; label: string }[] = [
@@ -34,6 +40,24 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
   const isOutgoing = aggregate.identity.outgoingTechnicianIds.includes(uid);
   const isIncoming = aggregate.identity.incomingTechnicianIds.includes(uid);
   const content: EqualHandoverReportV2Content = (frozenReport?.content ?? preparation?.content ?? live.content);
+  // The last page of the A–E form is a shared console: whoever is signed in may
+  // hand it to one of the TWO reserved incoming identities, and only those two
+  // are ever offered. An incoming technician starts on their own identity; an
+  // outgoing console must name the person accepting before anything is read.
+  const [acceptingUid, setAcceptingUid] = useState(() => (isIncoming ? uid : ""));
+  // Identity-scoped local receipts: a committed acceptance stays closed for that
+  // person even when its status can no longer be re-read from this console.
+  const [acceptedUids, setAcceptedUids] = useState<string[]>([]);
+  const [acceptedSession, setAcceptedSession] = useState<{ session: HandoverSessionOutcome; label: string } | null>(null);
+  const incomingIdentities: ConsoleIncomingIdentity[] = aggregate.identity.incomingTechnicianIds.map((id, index) => {
+    const participant = content.participants.find((item) => item.uid === id && item.side === "incoming");
+    return { uid: id, label: `${participant?.name ?? id} (incoming technician ${index === 0 ? "A" : "B"})` };
+  });
+  const declaredLateReasons: Record<string, string> = Object.fromEntries(
+    aggregate.absences
+      .filter((item) => item.absenceType === "not_yet_in" && aggregate.identity.incomingTechnicianIds.includes(item.technicianUid))
+      .map((item) => [item.technicianUid, item.reason]),
+  );
   const base = `/api/operations/shifts/${encodeURIComponent(aggregate.identity.outgoingShiftId)}/handover/v2`;
   const run = async (path: string, method: "POST" | "DELETE", body: Record<string, unknown>, success: string) => {
     if (lock.current) return;
@@ -113,18 +137,34 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     }, frozenReport ? "Corrected report frozen as a new immutable version." : "Report frozen. It is now immutable.");
   };
 
-  const confirmSelf = () => run("/confirmation", "POST", {
-    expectedRevision: aggregate.revision,
-    expectedSnapshotHash: state.snapshotHash,
-  }, "Your personal confirmation has been recorded.");
+  // §4 — confirming is a personal act: the participant submits their OWN
+  // current password, verified server-side outside any transaction. For an
+  // outgoing participant that verified password also finalizes their personal
+  // confirmation attendance evidence. The password lives only in the transient
+  // form field, is never logged, and is cleared as soon as the request settles.
+  const confirmSelf = async (form: HTMLFormElement) => {
+    const password = String(new FormData(form).get("password") ?? "");
+    if (!password) { setError("Your password is required to confirm this handover."); return; }
+    try {
+      await run("/confirmation", "POST", {
+        expectedRevision: aggregate.revision,
+        expectedSnapshotHash: state.snapshotHash,
+        password,
+      }, "Your personal confirmation has been recorded.");
+    } finally {
+      form.reset();
+    }
+  };
 
   // The two-stage lifecycle (§1 addendum) replaces M07's atomic transfer. The
   // outgoing commit closes the reviewed handover into `awaiting_incoming_acceptance`
   // without creating any shift, membership or attendance; the incoming
   // acceptance is what activates the reserved shift with the technician's own
-  // password. The button enable state below is only a display convenience — the
-  // server re-derives every authority and prerequisite inside its own
-  // transaction (§10), so a client-forged flag cannot bypass either step.
+  // password. Closing the handover is an outgoing action taken as that person,
+  // so the committing technician submits their OWN current password too. The
+  // button enable state below is only a display convenience — the server
+  // re-derives every authority and prerequisite inside its own transaction
+  // (§10), so a client-forged flag cannot bypass either step.
   const reviewedBinding = () => ({
     expectedRevision: aggregate.revision,
     expectedSnapshotHash: state.snapshotHash,
@@ -132,14 +172,16 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     expectedFencingEpoch: guard?.fencingEpoch ?? 0,
   });
 
-  const commitOutgoing = async () => {
+  const commitOutgoing = async (form: HTMLFormElement) => {
     if (lock.current || !guard) return;
+    const password = String(new FormData(form).get("password") ?? "");
+    if (!password) { setError("Your password is required to commit this handover."); return; }
     lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`${base}/commit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reviewedBinding()),
+        body: JSON.stringify({ ...reviewedBinding(), password }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover commit failed.");
@@ -153,25 +195,28 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The v2 handover commit failed.");
     } finally {
+      form.reset();
       lock.current = false; setBusy(false);
     }
   };
 
-  // §4 — the accept button submits the technician's OWN current password,
-  // verified server-side outside any transaction. The password is never stored
-  // by this component beyond the transient form field and never logged; the
-  // session cookie alone is not enough to accept a personal handover.
+  // §4 — the accept console submits the SELECTED incoming technician's OWN
+  // current password, verified server-side outside any transaction, and always
+  // names that technician: accepting signs them in on this shared console.
   const acceptIncoming = async (form: HTMLFormElement) => {
     if (lock.current || !guard) return;
+    if (!acceptingUid) { setError("Select the incoming technician who is accepting at this console."); return; }
     const values = new FormData(form);
     const password = String(values.get("password") ?? "");
     if (!password) { setError("Your password is required to accept this handover."); return; }
+    const submittingUid = acceptingUid;
+    const label = incomingIdentities.find((identity) => identity.uid === submittingUid)?.label ?? submittingUid;
     lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`${base}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...reviewedBinding(), password }),
+        body: JSON.stringify({ ...reviewedBinding(), technicianUid: submittingUid, password }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || "The v2 handover acceptance failed.");
@@ -181,13 +226,17 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       if (result.status === "ACTIVATED") {
         setNotice(`Handover accepted. The incoming shift ${result.incomingShiftId} is now active from ${accra(result.receipt?.activatedAt ?? null)}.`);
       } else if (result.status === "JOINED") {
-        setNotice(`Joined the active incoming shift ${result.incomingShiftId}. Your attendance is recorded independently at the acceptance clock.`);
+        setNotice(`Joined the active incoming shift ${result.incomingShiftId}. Attendance is recorded independently at the acceptance clock.`);
       } else if (result.status === "ALREADY_JOINED") {
-        setNotice("Your earlier acceptance is already recorded — no duplicate shift or attendance was created.");
+        setNotice("This acceptance is already recorded — no duplicate shift or attendance was created.");
       } else {
         setNotice("Handover acceptance succeeded.");
       }
-      form.reset();
+      setAcceptedUids((current) => current.includes(submittingUid) ? current : [...current, submittingUid]);
+      if (result.session) setAcceptedSession({ session: result.session as HandoverSessionOutcome, label });
+      // The acceptance may have replaced this console session. Re-reading the
+      // report through a session that was just revoked would only fail.
+      if (result.session?.issued === false) return;
       const refreshed = await fetch(`${base}/report`, { headers: { Accept: "application/json" } });
       const refreshResult = await refreshed.json();
       if (refreshed.ok && refreshResult.success) setState(refreshResult.report);
@@ -195,6 +244,9 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The v2 handover acceptance failed.");
     } finally {
+      // The credential never outlives the request.
+      const passwordInput = form.elements.namedItem("password");
+      if (passwordInput instanceof HTMLInputElement) passwordInput.value = "";
       lock.current = false; setBusy(false);
     }
   };
@@ -233,10 +285,12 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
   const canCommit = isConfirmedOutgoing && guard !== null &&
     aggregate.lifecycleStatus === "collecting_confirmations" && aggregate.reportBinding !== null &&
     readiness.ready && blockers.length === 0 && !preparationDrifted;
-  // An incoming technician may accept once the outgoing commit has opened the
-  // acceptance window; a later acceptance after completion is a JOIN on the same
-  // active shift. The server decides which branch fires and re-derives authority.
-  const canAccept = isIncoming && guard !== null && (isAwaitingAcceptance || isCompleted);
+  // The acceptance console is available to ANY participant of the reserved pair,
+  // because it is a shared console: an outgoing technician hands it over by
+  // letting one of the two reserved incoming identities accept here.
+  const isConsoleParticipant = isOutgoing || isIncoming;
+  const canAccept = isConsoleParticipant && guard !== null && acceptingUid !== "" &&
+    !acceptedUids.includes(acceptingUid) && (isAwaitingAcceptance || isCompleted);
 
   return <div className="space-y-6">
     <header className="space-y-1">
@@ -269,7 +323,11 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
       {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against report {short(myConfirmation.reportBinding.id)} (digest {short(myConfirmation.reportBinding.digest)}).</p>}
       {myAbsence && <p>A colleague recorded you as {myAbsence.absenceType.replaceAll("_", " ")}; an absence is not a personal confirmation.</p>}
-      {canConfirm && <button disabled={busy} onClick={() => void confirmSelf()} className="rounded-lg bg-blue-700 p-2 text-white">{busy ? "Working…" : "Confirm this handover for myself"}</button>}
+      {canConfirm && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void confirmSelf(event.currentTarget as HTMLFormElement); }}>
+        <p className="text-sm text-neutral-600">Confirming is a personal act: it requires <strong>your own current password</strong>, verified server-side before any write and never stored, logged or included in a receipt (§4). A colleague or a supervisor cannot confirm for you.</p>
+        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+        <button disabled={busy} className="w-fit rounded-lg bg-blue-700 p-2 text-white">{busy ? "Working…" : "Confirm this handover for myself"}</button>
+      </form>}
       {aggregate.reportBinding === null && <p>Confirmation is available only after the consolidated report is frozen.</p>}
     </section>}
 
@@ -335,37 +393,49 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         <li>{preparationDrifted ? "• Sources changed since review — re-prepare and freeze" : "• Review is current"}</li>
       </ul>
       {!isConfirmedOutgoing && <p className="text-sm">Only an outgoing technician who has personally confirmed (not declared absent) can commit this handover for incoming acceptance.</p>}
-      <button
-        disabled={!canCommit || busy}
-        onClick={() => void commitOutgoing()}
-        className="w-fit rounded-lg bg-green-700 p-2 text-white"
-      >{busy ? "Working…" : "Commit handover — await incoming acceptance"}</button>
+      <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void commitOutgoing(event.currentTarget as HTMLFormElement); }}>
+        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+        <button
+          disabled={!canCommit || busy}
+          className="w-fit rounded-lg bg-green-700 p-2 text-white"
+        >{busy ? "Working…" : "Commit handover — await incoming acceptance"}</button>
+      </form>
       {!canCommit && !busy && <p className="text-sm text-neutral-600">Committing is available only when every prerequisite above is satisfied.</p>}
-      <p className="text-sm text-neutral-600">This display gate is not an authorization: the server re-derives your authority, the reviewed evidence, readiness and completeness inside its own transaction and can still reject the request even when this button is enabled. Committing does NOT create the incoming shift — that only happens on a reserved incoming technician&rsquo;s own password acceptance.</p>
+      <p className="text-sm text-neutral-600">Committing closes the handover as <em>you</em>, so it requires your own current password; the password is verified server-side before any write and is never stored, logged or included in the commitment receipt. This display gate is not an authorization: the server re-derives your authority, the reviewed evidence, readiness and completeness inside its own transaction and can still reject the request even when this button is enabled. Committing does NOT create the incoming shift — that only happens on a reserved incoming technician&rsquo;s own password acceptance.</p>
       {!isConfirmedOutgoing && !myConfirmation && !myAbsence && myPosition && <p className="text-sm">You have not confirmed yet — use the confirmation section above.</p>}
     </section>}
 
-    {isIncoming && (isAwaitingAcceptance || isCompleted) && (atomicAcceptanceEnabled
+    {isConsoleParticipant && (isAwaitingAcceptance || isCompleted) && (atomicAcceptanceEnabled
       ? <IncomingAcceptanceAtomicPanel
           base={base}
+          consoleUid={uid}
+          incomingIdentities={incomingIdentities}
+          declaredLateReasons={declaredLateReasons}
           scheduledStart={aggregate.reservation.scheduledStart}
           lifecycleSignature={`${aggregate.lifecycleStatus}:${aggregate.revision}:${state.snapshotHash}`}
-          declaredLateReason={myAbsence?.absenceType === "not_yet_in" ? myAbsence.reason : null}
           onAuthoritativeChange={refreshReport}
         />
       : <section aria-label="Accept handover" className="space-y-3 rounded-xl border border-green-600 p-5">
-        <h2 className="text-lg font-semibold">Accept handover with your password</h2>
+        <h2 className="text-lg font-semibold">Accept handover with a password</h2>
         <p className="text-sm">
           {isAwaitingAcceptance
-            ? <>You are a reserved incoming technician. Accepting with <strong>your own current password</strong> will activate the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and record <em>your</em> attendance at the authoritative acceptance clock. Your partner will join the same active shift when they accept later.</>
-            : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with your own independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
+            ? <>This is the shared console. The selected reserved incoming technician accepts with <strong>their own current password</strong>; that acceptance activates the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and records <em>their</em> attendance at the authoritative acceptance clock. Their partner joins the same active shift when they accept later.</>
+            : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with an independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
         </p>
-        <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for you (§10).</p>
+        <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for the incoming technician (§10). The accepting technician is signed in on this console by their acceptance.</p>
+        <IncomingIdentityPicker
+          identities={incomingIdentities}
+          value={acceptingUid}
+          disabled={busy}
+          onChange={(identityUid) => { setAcceptingUid(identityUid); setError(""); setNotice(""); }}
+        />
         {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
-          <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+          <label className="text-sm">{incomingIdentities.find((identity) => identity.uid === acceptingUid)?.label ?? acceptingUid}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
           <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
         </form>}
-        {!canAccept && <p className="text-sm text-neutral-600">Acceptance is available only to a reserved incoming technician on an active reservation.</p>}
+        {acceptedUids.includes(acceptingUid) && <p className="text-sm text-green-700">This acceptance was recorded from this console. A further attempt for the same technician would replay it.</p>}
+        {!canAccept && !acceptedUids.includes(acceptingUid) && <p className="text-sm text-neutral-600">Acceptance is available only for a reserved incoming technician of this pair on an active reservation.</p>}
+        {acceptedSession && <HandoverSessionNotice session={acceptedSession.session} label={acceptedSession.label} />}
       </section>)}
 
     {!isOutgoing && !isIncoming && <div className="rounded-xl border p-4 text-sm">You are not a participant in this reserved pair. This report is read-only for you.</div>}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getShiftOperations, recordShiftOperation } from "@/lib/operations/shift-operations";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 import { ShiftOperationsError } from "@/lib/operations/shift-operations-domain";
 export const runtime="nodejs";
 type Context={params:Promise<{shiftId:string}>};
@@ -13,6 +14,7 @@ async function handle(request:NextRequest,context:Context,write:boolean) {
     if(write && request.headers.get("origin") !== (process.env.APP_ORIGIN ?? request.nextUrl.origin)) return response({success:false,error:"This request is not allowed."},403);
     const {shiftId}=await context.params;
     if(write) {
+      await requireTechnicianWriteAuthority({ uid: actor.uid, role: actor.role });
       let body:unknown;try {body=await request.json();}catch {return response({success:false,error:"Provide valid JSON."},400);}
       const event=await recordShiftOperation(actor,shiftId,body);return response({success:true,event},201);
     }

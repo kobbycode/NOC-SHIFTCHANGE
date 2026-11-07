@@ -27,7 +27,17 @@ import type {
   ShiftStartResult,
   TechnicianCurrentShiftApiResponse,
   TechnicianCurrentShiftResult,
+  TechnicianCurrentShiftSnapshot,
 } from "./shift-api-types";
+
+import {
+  READ_ONLY_DENIALS,
+  WRITE_AUTHORITY_BASES,
+} from "@/lib/operations/technician-write-authority";
+
+import {
+  captureCoarseLocationEvidence,
+} from "./coarse-location";
 
 /*
  * Shared Shift API error.
@@ -843,6 +853,151 @@ function isTechnicianCurrentShift(
   );
 }
 
+function isShiftApiIdentifier(
+  value: unknown,
+  maxLength: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    value.trim() === value &&
+    value !== "." &&
+    value !== ".." &&
+    !value.includes("/")
+  );
+}
+
+const WRITE_AUTHORITY_BASIS_VALUES:
+readonly unknown[] =
+  Object.values(
+    WRITE_AUTHORITY_BASES,
+  );
+
+const READ_ONLY_DENIAL_VALUES:
+readonly unknown[] =
+  Object.values(
+    READ_ONLY_DENIALS,
+  );
+
+/*
+ * Validate the server's write-authority projection.
+ *
+ * The decision itself is made on the server; this only rejects a response
+ * that cannot be internally consistent, so the browser never renders a
+ * stronger (writable) view than the server granted.
+ */
+function isTechnicianWriteAuthority(
+  value: unknown,
+): boolean {
+  if (!isShiftApiRecord(value)) {
+    return false;
+  }
+
+  const {
+    mayWrite,
+    governed,
+    basis,
+    denial,
+    message,
+    activeShiftId,
+    personallyAcceptedShiftId,
+  } = value;
+
+  if (
+    typeof mayWrite !== "boolean" ||
+    governed !== true ||
+    typeof message !== "string" ||
+    !message.trim() ||
+    !(
+      activeShiftId === null ||
+      isShiftApiIdentifier(
+        activeShiftId,
+        512,
+      )
+    ) ||
+    !(
+      personallyAcceptedShiftId ===
+        null ||
+      isShiftApiIdentifier(
+        personallyAcceptedShiftId,
+        512,
+      )
+    ) ||
+    !(
+      basis === null ||
+      WRITE_AUTHORITY_BASIS_VALUES.some(
+        (allowedBasis) =>
+          allowedBasis === basis,
+      )
+    ) ||
+    !(
+      denial === null ||
+      READ_ONLY_DENIAL_VALUES.some(
+        (allowedDenial) =>
+          allowedDenial === denial,
+      )
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    personallyAcceptedShiftId !== null &&
+    personallyAcceptedShiftId !==
+      activeShiftId
+  ) {
+    return false;
+  }
+
+  if (mayWrite) {
+    if (
+      denial !== null ||
+      activeShiftId === null ||
+      (
+        basis !==
+          WRITE_AUTHORITY_BASES
+            .FOUNDING_SHIFT_PARTICIPANT &&
+        basis !==
+          WRITE_AUTHORITY_BASES
+            .PERSONAL_HANDOVER_ACCEPTANCE
+      )
+    ) {
+      return false;
+    }
+
+    // The founding shift has no handover acceptance evidence by definition.
+    return (
+      basis !==
+        WRITE_AUTHORITY_BASES
+          .FOUNDING_SHIFT_PARTICIPANT ||
+      personallyAcceptedShiftId ===
+        null
+    );
+  }
+
+  if (
+    basis !== null ||
+    denial === null
+  ) {
+    return false;
+  }
+
+  if (
+    denial ===
+      READ_ONLY_DENIALS
+        .NO_ACTIVE_SHIFT
+  ) {
+    return (
+      activeShiftId === null &&
+      personallyAcceptedShiftId ===
+        null
+    );
+  }
+
+  return activeShiftId !== null;
+}
+
 /*
  * Retrieve only the operational shift that
  * is authoritative and relevant to the
@@ -853,7 +1008,7 @@ function isTechnicianCurrentShift(
  * remains restricted to supervisors/admins.
  */
 export async function getTechnicianCurrentShift():
-Promise<TechnicianCurrentShiftResult | null> {
+Promise<TechnicianCurrentShiftSnapshot> {
   const response =
     await fetch(
       "/api/operations/technician/current-shift",
@@ -884,6 +1039,9 @@ Promise<TechnicianCurrentShiftResult | null> {
       isTechnicianCurrentShift(
         result.currentShift,
       )
+    ) ||
+    !isTechnicianWriteAuthority(
+      result.writeAuthority,
     )
   ) {
     throw new ShiftApiError(
@@ -892,7 +1050,12 @@ Promise<TechnicianCurrentShiftResult | null> {
     );
   }
 
-  return result.currentShift;
+  return {
+    currentShift:
+      result.currentShift,
+    writeAuthority:
+      result.writeAuthority,
+  };
 }
 
 /*
@@ -989,6 +1152,9 @@ export async function joinShift(
       shiftId,
     );
 
+  const locationEvidence =
+    await captureCoarseLocationEvidence();
+
   const response =
     await fetch(
       `/api/operations/shifts/${encodeURIComponent(
@@ -998,6 +1164,13 @@ export async function joinShift(
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          locationEvidence,
+        }),
       },
     );
 

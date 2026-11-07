@@ -6,6 +6,7 @@ export type ShiftOperationsAccessReason =
   | { kind: "join_available" }
   | { kind: "join_closed"; shiftStatus: string }
   | { kind: "clocked_out" }
+  | { kind: "read_only"; message: string }
   | { kind: "unavailable"; message: string };
 
 function formatTime(value: string): string {
@@ -44,6 +45,11 @@ function copyFor(
       return {
         title: "You have clocked out of this shift",
         body: "Operational records are attributed to the technicians who are present on shift. Ask your supervisor to review anything that still needs recording.",
+      };
+    case "read_only":
+      return {
+        title: "This view is read-only",
+        body: `${reason.message} You can still review your own shifts, your attendance and lateness, the records and tasks you authored, and your own handover receipts from My Shift.`,
       };
     case "unavailable":
       return {

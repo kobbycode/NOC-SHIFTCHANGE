@@ -11,6 +11,7 @@ import {
   respond,
   sameOrigin,
 } from "@/lib/operations/handover-v2-report-http";
+import { requireTechnicianWriteAuthority } from "@/lib/operations/technician-write-authority-firestore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest, context: Context) {
     if (body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length > 0) {
       return respond({ success: false, error: "Handover finalization takes no fields." }, 400);
     }
+    await requireTechnicianWriteAuthority({ uid: actor.uid, role: actor.role });
     if (!(await isEqualHandoverIncomingAttendanceResolved(shiftId))) {
       return respond({
         success: false,

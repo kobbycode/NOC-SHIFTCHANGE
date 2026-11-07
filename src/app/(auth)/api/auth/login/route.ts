@@ -8,11 +8,9 @@ import {
 
 import { isUserRole } from "@/types/auth";
 
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { SESSION_DURATION_MS, applySessionCookie } from "@/lib/auth/session-cookie";
 
 export const runtime = "nodejs";
-
-const SESSION_DURATION = 60 * 60 * 24 * 5 * 1000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -82,7 +80,7 @@ export async function POST(request: NextRequest) {
     const sessionCookie = await auth.createSessionCookie(
       idToken,
       {
-        expiresIn: SESSION_DURATION,
+        expiresIn: SESSION_DURATION_MS,
       }
     );
 
@@ -97,15 +95,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    response.cookies.set({
-      name: SESSION_COOKIE,
-      value: sessionCookie,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_DURATION / 1000,
-    });
+    applySessionCookie(response, sessionCookie);
 
     return response;
   } catch {

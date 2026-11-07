@@ -151,11 +151,19 @@ test("stale reviewed binding is rejected before password verification or any wri
   assert.equal((await f.post("in-a", { ...f.binding(), expectedSnapshotHash: "0".repeat(64) })).status, 409);
   assert.equal(f.authCalls.length, 0); assert.deepEqual(f.summary(), none);
 });
-test("DEFECT: an ordinary confirmed incoming technician beyond five minutes cannot submit a late reason through this route", async () => {
-  const f = await acceptanceFixture(); f.advance(6 * 60000);
+test("DEFECT: an ordinary confirmed incoming technician beyond the 15-minute grace cannot submit a late reason through this route", async () => {
+  // Scheduled start is one minute before the fixture clock, so a 16-minute
+  // advance puts the acceptance 17 minutes late — past the owner-set grace —
+  // while still inside the activation window.
+  const f = await acceptanceFixture(); f.advance(16 * 60000);
   const result = await f.post(); assert.equal(result.status, 400); assert.match(result.body.error, /late reason is required/);
   assert.deepEqual(f.summary(), { ...none, operations: 1 });
   assert.equal((await f.post("in-a", f.binding(), { lateReason: "Synthetic delay" })).status, 400);
+});
+test("an ordinary confirmed incoming technician inside the 15-minute grace needs no late reason", async () => {
+  const f = await acceptanceFixture(); f.advance(6 * 60000);
+  const result = await f.post(); assert.equal(result.status, 200); assert.equal(result.body.status, "ACTIVATED");
+  assert.deepEqual(f.summary(), completed);
 });
 test("DEFECT: operational attendance existence alone short-circuits evidence, membership and attendance validation on replay", async () => {
   const f = await acceptanceFixture(); assert.equal((await f.post()).status, 200);

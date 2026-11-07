@@ -640,9 +640,9 @@ test("12. preservation of immutable historical evidence", () => {
 });
 
 // ----------------------------------------------------------------------------
-// 13. Correct five-minute lateness boundary
+// 13. Correct fifteen-minute lateness boundary
 // ----------------------------------------------------------------------------
-test("13. correct five-minute lateness boundary: exactly 5 min is on time; > 5 min is late", () => {
+test("13. correct fifteen-minute lateness boundary: exactly 15 min is on time; > 15 min is late", () => {
   const scheduledStart = "2026-10-04T08:00:00.000Z";
 
   // Early confirmation (7:55 AM)
@@ -656,42 +656,62 @@ test("13. correct five-minute lateness boundary: exactly 5 min is on time; > 5 m
   assert.equal(exact.isLate, false);
   assert.equal(exact.latenessMinutes, 0);
 
-  // Exactly 5 minutes after scheduled start (8:05:00.000 AM)
-  const onTimeBoundary = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:05:00.000Z");
+  // 5 minutes after scheduled start — inside the owner-set grace window.
+  const fiveMinutes = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:05:00.000Z");
+  assert.equal(fiveMinutes.isLate, false);
+  assert.equal(fiveMinutes.latenessMinutes, 5);
+  assert.equal(fiveMinutes.lateReasonRequired, false);
+
+  // Exactly 15 minutes after scheduled start (8:15:00.000 AM) is still on time
+  const onTimeBoundary = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:15:00.000Z");
   assert.equal(onTimeBoundary.isLate, false);
-  assert.equal(onTimeBoundary.latenessMinutes, 5);
+  assert.equal(onTimeBoundary.latenessMinutes, 15);
   assert.equal(onTimeBoundary.lateReasonRequired, false);
 
-  // 1 millisecond past 5 minutes (8:05:00.001 AM) -> LATE
-  const late1ms = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:05:00.001Z");
+  // 1 millisecond past the grace window (8:15:00.001 AM) -> LATE
+  const late1ms = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:15:00.001Z");
   assert.equal(late1ms.isLate, true);
   assert.equal(late1ms.lateReasonRequired, true);
 
-  // 1 second past 5 minutes (8:05:01.000 AM) -> LATE
-  const late1sec = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:05:01.000Z");
+  // 1 second past the grace window (8:15:01.000 AM) -> LATE
+  const late1sec = domain.evaluateIncomingAttendanceLateness(scheduledStart, "2026-10-04T08:15:01.000Z");
   assert.equal(late1sec.isLate, true);
   assert.equal(late1sec.lateReasonRequired, true);
+
+  // The grace window is shared with the client-safe contract constant, so the
+  // server rule and the acceptance UI cannot drift apart.
+  assert.equal(domain.ATTENDANCE_LATENESS_GRACE_MS, 15 * 60 * 1000);
 
   // Mandatory late reason when evaluating clock-in for late arrival
   assert.throws(
     () => domain.evaluateIncomingClockIn({
       technicianUid: "in-tech-1",
-      confirmedAt: "2026-10-04T08:06:00.000Z",
+      confirmedAt: "2026-10-04T08:16:00.000Z",
       scheduledStart,
       lateReason: "",
     }),
-    /A non-empty late reason is required when confirming more than five minutes after scheduled start/,
+    /A non-empty late reason is required when confirming more than 15 minutes after scheduled start/,
   );
+
+  // Inside the grace window, no reason is demanded.
+  const onTimeClockIn = domain.evaluateIncomingClockIn({
+    technicianUid: "in-tech-1",
+    confirmedAt: "2026-10-04T08:06:00.000Z",
+    scheduledStart,
+  });
+  assert.equal(onTimeClockIn.isLate, false);
+  assert.equal(onTimeClockIn.lateReasonRequired, false);
+  assert.equal(onTimeClockIn.lateReason, null);
 
   const lateClockIn = domain.evaluateIncomingClockIn({
     technicianUid: "in-tech-1",
-    confirmedAt: "2026-10-04T08:06:00.000Z",
+    confirmedAt: "2026-10-04T08:16:00.000Z",
     scheduledStart,
     lateReason: "Traffic delay on main road",
   });
   assert.equal(lateClockIn.isLate, true);
   assert.equal(lateClockIn.lateReason, "Traffic delay on main road");
-  assert.equal(lateClockIn.clockInTimestamp, "2026-10-04T08:06:00.000Z");
+  assert.equal(lateClockIn.clockInTimestamp, "2026-10-04T08:16:00.000Z");
 });
 
 // ----------------------------------------------------------------------------

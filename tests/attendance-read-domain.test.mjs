@@ -19,37 +19,97 @@ const authorities = {
     "temporary_authorized",
 };
 
-const source = await readFile(
-  new URL(
-    "../src/lib/operations/attendance-read-domain.ts",
-    import.meta.url,
-  ),
-  "utf8",
-);
-
-const javascript =
-  ts.transpileModule(
-    source,
-    {
-      compilerOptions: {
-        module:
-          ts.ModuleKind.CommonJS,
-        target:
-          ts.ScriptTarget.ES2022,
-      },
-    },
-  ).outputText;
-
-const loaded = {
-  exports: {},
+const locationStates = {
+  CAPTURED: "captured",
+  NOT_CAPTURED:
+    "not_captured",
 };
 
-runInNewContext(
-  javascript,
-  {
-    exports: loaded.exports,
+const locationReasons = {
+  PERMISSION_DENIED:
+    "permission_denied",
+  POSITION_UNAVAILABLE:
+    "position_unavailable",
+  TIMEOUT: "timeout",
+  UNSUPPORTED: "unsupported",
+  NOT_PROVIDED:
+    "not_provided",
+};
 
-    require(specifier) {
+const locationSources = {
+  BROWSER_GEOLOCATION:
+    "browser_geolocation",
+};
+
+async function loadTranspiledModule(
+  relativePath,
+  requireShim,
+) {
+  const source = await readFile(
+    new URL(
+      relativePath,
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  const javascript =
+    ts.transpileModule(
+      source,
+      {
+        compilerOptions: {
+          module:
+            ts.ModuleKind.CommonJS,
+          target:
+            ts.ScriptTarget.ES2022,
+        },
+      },
+    ).outputText;
+
+  const loaded = {
+    exports: {},
+  };
+
+  runInNewContext(
+    javascript,
+    {
+      exports: loaded.exports,
+      require: requireShim,
+    },
+  );
+
+  return loaded.exports;
+}
+
+// The real server normalizer is loaded, not re-implemented here.
+const locationEvidenceModule =
+  await loadTranspiledModule(
+    "../src/lib/operations/attendance-location-evidence.ts",
+    (specifier) => {
+      if (
+        specifier ===
+        "@/types/attendance-location"
+      ) {
+        return {
+          ATTENDANCE_LOCATION_EVIDENCE_STATES:
+            locationStates,
+          ATTENDANCE_LOCATION_NOT_CAPTURED_REASONS:
+            locationReasons,
+          ATTENDANCE_LOCATION_SOURCES:
+            locationSources,
+        };
+      }
+
+      throw new Error(
+        `Unexpected import: ${specifier}`,
+      );
+    },
+  );
+
+const domain =
+  await loadTranspiledModule(
+    "../src/lib/operations/attendance-read-domain.ts",
+    (specifier) => {
       if (
         specifier ===
         "@/types/attendance"
@@ -63,14 +123,18 @@ runInNewContext(
         };
       }
 
+      if (
+        specifier ===
+        "./attendance-location-evidence"
+      ) {
+        return locationEvidenceModule;
+      }
+
       throw new Error(
         `Unexpected import: ${specifier}`,
       );
     },
-  },
-);
-
-const domain = loaded.exports;
+  );
 
 const shiftId =
   "synthetic-shift";
@@ -309,6 +373,150 @@ test(
           attendance,
         ),
       /clock-out cannot precede/i,
+    );
+  },
+);
+
+test(
+  "omits location evidence for records written before it existed",
+  () => {
+    const result =
+      domain.readAttendanceRecord(
+        documentId,
+        validAttendance(),
+      );
+
+    assert.equal(
+      result.locationEvidence,
+      undefined,
+    );
+  },
+);
+
+test(
+  "normalizes captured location evidence onto the trusted read clock",
+  () => {
+    const attendance =
+      validAttendance();
+
+    attendance.locationEvidence = {
+      state: "captured",
+      source:
+        "browser_geolocation",
+      capturedAt:
+        "2026-10-01T07:58:00.000Z",
+      latitude: 5.556789,
+      longitude: -0.196789,
+      accuracyMeters: 37.4,
+    };
+
+    const result =
+      domain.readAttendanceRecord(
+        documentId,
+        attendance,
+      );
+
+    assert.equal(
+      result.locationEvidence
+        ?.state,
+      "captured",
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.latitude,
+      5.56,
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.longitude,
+      -0.2,
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.accuracyMeters,
+      100,
+    );
+
+    // A browser-supplied timestamp is never trusted.
+    assert.equal(
+      result.locationEvidence
+        ?.capturedAt,
+      recordedAt,
+    );
+  },
+);
+
+test(
+  "records an explicit not-captured state for unusable location evidence",
+  () => {
+    const attendance =
+      validAttendance();
+
+    attendance.locationEvidence = {
+      state: "captured",
+      source:
+        "browser_geolocation",
+      capturedAt:
+        "2026-10-01T07:58:00.000Z",
+      latitude: 999,
+      longitude: 0,
+      accuracyMeters: 10,
+    };
+
+    const result =
+      domain.readAttendanceRecord(
+        documentId,
+        attendance,
+      );
+
+    assert.equal(
+      result.locationEvidence
+        ?.state,
+      "not_captured",
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.reason,
+      "not_provided",
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.capturedAt,
+      recordedAt,
+    );
+  },
+);
+
+test(
+  "records a not-provided state when location evidence is explicitly null",
+  () => {
+    const attendance =
+      validAttendance();
+
+    attendance.locationEvidence =
+      null;
+
+    const result =
+      domain.readAttendanceRecord(
+        documentId,
+        attendance,
+      );
+
+    assert.equal(
+      result.locationEvidence
+        ?.state,
+      "not_captured",
+    );
+
+    assert.equal(
+      result.locationEvidence
+        ?.reason,
+      "not_provided",
     );
   },
 );
