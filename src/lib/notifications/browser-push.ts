@@ -64,16 +64,13 @@ async function registerServiceWorker(): Promise<ServiceWorkerRegistration> {
   });
 }
 
-// Requests permission and registers this device's token with the server.
-// Returns the registration result, or null when push is unavailable here.
-export async function enablePush(): Promise<{ registered: boolean; permission: NotificationPermission }> {
-  if (!notificationsEnabled()) return { registered: false, permission: "default" };
-
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") return { registered: false, permission };
-
+// Registers this browser's current FCM token under the authenticated session's
+// uid. The server binds an installation to exactly one technician, so calling
+// this again after a shared-console account switch deactivates the previous
+// technician's binding instead of leaving push pointed at them.
+async function registerCurrentSessionToken(): Promise<boolean> {
   const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
-  if (!vapidKey) return { registered: false, permission };
+  if (!vapidKey) return false;
 
   // A missing VAPID key, an unconfigured project, or an FCM error must leave the
   // technician on a usable screen with an honest "not enabled" state, never a
@@ -84,7 +81,7 @@ export async function enablePush(): Promise<{ registered: boolean; permission: N
     const messaging = getMessaging(ensureFirebaseApp());
 
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
-    if (!token) return { registered: false, permission };
+    if (!token) return false;
 
     const response = await fetch("/api/notifications/devices", {
       method: "POST",
@@ -96,10 +93,30 @@ export async function enablePush(): Promise<{ registered: boolean; permission: N
         platform: navigator.userAgent.slice(0, 64),
       }),
     });
-    return { registered: response.ok, permission };
+    return response.ok;
   } catch {
-    return { registered: false, permission };
+    return false;
   }
+}
+
+// Requests permission and registers this device's token with the server.
+// Returns the registration result, or null when push is unavailable here.
+export async function enablePush(): Promise<{ registered: boolean; permission: NotificationPermission }> {
+  if (!notificationsEnabled()) return { registered: false, permission: "default" };
+
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") return { registered: false, permission };
+
+  return { registered: await registerCurrentSessionToken(), permission };
+}
+
+// A shared console keeps one installation id across technicians. After the
+// acceptance issues a new session, this moves the binding to the technician now
+// signed in without prompting (permission was already granted for push).
+export async function rebindPushForSessionOwner(): Promise<boolean> {
+  if (!notificationsEnabled()) return false;
+  if (Notification.permission !== "granted") return false;
+  return registerCurrentSessionToken();
 }
 
 // Foreground handler: shows an in-app notification and lets the inbox refresh.

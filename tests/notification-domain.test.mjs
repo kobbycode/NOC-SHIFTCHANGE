@@ -126,6 +126,30 @@ test("task events still route to the task surface, not a handover page", () => {
   }
 });
 
+test("shift started routes the partner to the technician shift surface", async () => {
+  const hooks = await import("../src/lib/notifications/notification-hooks.ts");
+  const intents = hooks.shiftStartedIntents({
+    shiftId: "shift-1",
+    partnerUid: "tech-b",
+    createdAt: "2026-11-07T08:00:00.000Z",
+  });
+  assert.equal(intents.length, 1);
+  const [intent] = intents;
+  assert.equal(intent.eventKind, "shift_started");
+  assert.equal(intent.recipientUid, "tech-b");
+  assert.equal(intent.title, "Your shift has started");
+  assert.equal(intent.deepLink.target, "technician_shift");
+  assert.equal(resolveNotificationRoute(intent), "/technician");
+  assert.equal(intent.idempotencyKey, "shift_started:shift-1:started:tech-b");
+  assert.equal(intent.incomingShiftId, "shift-1");
+  // A partner who does not exist (temporary technician acting alone) yields no
+  // notification to nobody.
+  assert.deepEqual(
+    hooks.shiftStartedIntents({ shiftId: "shift-1", partnerUid: null, createdAt: "2026-11-07T08:00:00.000Z" }),
+    [],
+  );
+});
+
 test("an unknown stored target falls back to the neutral route, never a handover URL", () => {
   assert.equal(
     resolveNotificationRoute({ deepLink: { target: "handover_v1_ghost", params: { outgoingShiftId: "s-1" } } }),

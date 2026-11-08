@@ -49,7 +49,10 @@ import {
 } from "@/types/incoming-acceptance-application";
 import type { NotificationIntent } from "@/types/notification";
 import { notificationDocumentId, outboxDocumentId } from "@/lib/notifications/notification-domain";
-import { completionIntents } from "@/lib/notifications/notification-hooks";
+import {
+  completionIntents,
+  shiftStartedIntents,
+} from "@/lib/notifications/notification-hooks";
 import { notificationsEnabled, writeOutboxEntries } from "@/lib/notifications/notification-outbox";
 import { AssignmentOperationError } from "./assignment-transaction";
 import {
@@ -1322,8 +1325,21 @@ export async function applyIncomingAcceptanceApplicationAtomically(
         scheduledEnd: identity.scheduledEnd,
       });
 
+      // The activation makes the reserved shift live: the partner of the
+      // accepting technician is told so (owner-approved SHIFT_STARTED). The
+      // partner also receives HANDOVER_COMPLETED; both intents are distinct.
+      const partnerUid =
+        identity.incomingTechnicianIds.find((uid) => uid !== input.actorUid) ??
+        null;
       const outboxIntents = notification.enabled
-        ? completionIntents(completed, input.operationalAppliedAt)
+        ? [
+            ...completionIntents(completed, input.operationalAppliedAt),
+            ...shiftStartedIntents({
+              shiftId: incomingId,
+              partnerUid,
+              createdAt: input.operationalAppliedAt,
+            }),
+          ]
         : [];
       if (outboxIntents.length > MAX_OUTBOX_PRE_READS) {
         throw new AtomicAcceptanceServiceError(
@@ -1583,12 +1599,55 @@ export async function applyIncomingAcceptanceApplicationAtomically(
         scheduledEnd: identity.scheduledEnd,
       });
 
+      // The partner of the joining technician is told their shift is live
+      // (owner-approved SHIFT_STARTED). The partner already on shift may have
+      // been notified at activation; the recipient keys differ, so both
+      // technicians receive exactly one notice each.
+      const partnerUid =
+        identity.incomingTechnicianIds.find((uid) => uid !== input.actorUid) ??
+        null;
+      const joinIntents = notification.enabled
+        ? shiftStartedIntents({
+            shiftId: incomingId,
+            partnerUid,
+            createdAt: input.operationalAppliedAt,
+          })
+        : [];
+      const outboxTargets = await readFreshOutboxTargets(transaction, db, joinIntents);
+      const freshIntents: NotificationIntent[] = [];
+      for (const target of outboxTargets) {
+        if (target.notification.exists || target.outbox.exists) {
+          assertExistingOutboxPair(target.intent, target.notification, target.outbox);
+          continue;
+        }
+        freshIntents.push(target.intent);
+      }
+      const existingIntents = outboxTargets.length - freshIntents.length;
+      notification = notification.enabled
+        ? freshIntents.length > 0
+          ? {
+              enabled: true,
+              outboxState: "written",
+              intentsQueued: freshIntents.length,
+              intentsExisting: existingIntents,
+            }
+          : existingIntents > 0
+            ? {
+                enabled: true,
+                outboxState: "existing",
+                intentsQueued: 0,
+                intentsExisting: existingIntents,
+              }
+            : { enabled: true, outboxState: "not_required", intentsQueued: 0, intentsExisting: 0 }
+        : { enabled: false, outboxState: "disabled", intentsQueued: 0, intentsExisting: 0 };
+
       stage({ actor: true }, 2); // membership + attendance
       stage({ schedule: true });
       stage(applicationReceipt);
       stage(createApplicationAuditRecord(applicationReceipt));
       stage(plan.evidence);
       stage(plan.operation);
+      stage({ outbox: true }, freshIntents.length * 2);
 
       assertApplicationBudget(stagedWrites, stagedBytes);
 
@@ -1626,6 +1685,7 @@ export async function applyIncomingAcceptanceApplicationAtomically(
         committedAt: FieldValue.serverTimestamp(),
       });
       transaction.create(auditRef, createApplicationAuditRecord(applicationReceipt));
+      if (freshIntents.length > 0) writeOutboxEntries(transaction, db, freshIntents);
     }
 
     applyAtomicAcceptanceEvidencePlan(transaction, plan);

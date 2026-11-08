@@ -717,17 +717,19 @@ test("guard finalization is audit- and outbox-idempotent and never announces acc
   assert.deepEqual({ ...first.notificationDelivery }, {
     enabled: true,
     outboxState: "written",
-    intentsQueued: 4,
+    // Four HANDOVER_COMPLETED intents plus the partner's SHIFT_STARTED intent.
+    intentsQueued: 5,
     intentsExisting: 0,
   });
   assert.deepEqual({ ...join.notificationDelivery }, {
     enabled: true,
-    outboxState: "not_required",
-    intentsQueued: 0,
+    // The joining technician's partner (the activator) gets SHIFT_STARTED.
+    outboxState: "written",
+    intentsQueued: 1,
     intentsExisting: 0,
   });
-  assert.equal(world.entries("notification_outbox").length, 4);
-  assert.equal(world.entries("notifications").length, 4);
+  assert.equal(world.entries("notification_outbox").length, 6);
+  assert.equal(world.entries("notifications").length, 6);
   const outboxSnapshot = world.entries("notification_outbox")
     .map(([path, value]) => [path, value])
     .sort(([left], [right]) => (left < right ? -1 : 1));
@@ -737,8 +739,8 @@ test("guard finalization is audit- and outbox-idempotent and never announces acc
   const replay = await world.finalizeGuard({ nowIso: finalizeAt(world, 240_000) });
   assert.equal(replay.status, "ALREADY_FINALIZED");
 
-  assert.equal(world.entries("notification_outbox").length, 4, "finalization emits no notification");
-  assert.equal(world.entries("notifications").length, 4);
+  assert.equal(world.entries("notification_outbox").length, 6, "finalization emits no notification");
+  assert.equal(world.entries("notifications").length, 6);
   assert.deepEqual(
     world.entries("notification_outbox")
       .map(([path, value]) => [path, value])

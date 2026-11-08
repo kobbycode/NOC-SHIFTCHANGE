@@ -97,6 +97,24 @@ export function completionIntents(aggregate: EqualHandoverAggregate, now: string
   });
 }
 
+// A shift is live. Owner-approved recipients: the partner of whichever
+// technician acted (started or joined), never the acting technician. A partner
+// absent from the roster (e.g. a temporary technician acting alone) yields no
+// intent rather than a notification to nobody.
+export function shiftStartedIntents(input: {
+  shiftId: string;
+  partnerUid: string | null;
+  createdAt: string;
+}): NotificationIntent[] {
+  return buildNotificationIntents({
+    eventKind: NOTIFICATION_EVENT_KINDS.SHIFT_STARTED,
+    eventId: `${input.shiftId}:started`,
+    recipientUids: input.partnerUid ? [input.partnerUid] : [],
+    refs: { incomingShiftId: input.shiftId },
+    createdAt: input.createdAt,
+  });
+}
+
 // Handover initiated (shift locked into handover): notify the outgoing pair.
 // The incoming roster is not authoritative until reservation, so it is not used.
 export function initiationIntents(outgoingShiftId: string, outgoingTechnicianIds: string[], now: string): NotificationIntent[] {

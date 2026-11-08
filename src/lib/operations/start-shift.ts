@@ -48,6 +48,15 @@ import {
 } from "./shift-activation-window";
 
 import {
+  notificationsEnabled,
+  writeOutboxEntries,
+} from "@/lib/notifications/notification-outbox";
+
+import {
+  shiftStartedIntents,
+} from "@/lib/notifications/notification-hooks";
+
+import {
   assertShiftOwnsOperationalSlot,
   transitionOperationalShiftControl,
 } from "./operational-shift-control-state";
@@ -787,6 +796,22 @@ export async function startShift(
               : "A temporarily authorized technician started the first shift.",
         }
       );
+
+      // Owner-approved shift-start notice: the partner of the technician who
+      // activated the shift is told their shift is live. Gated by
+      // NOTIFICATIONS_ENABLED, so the shipped default writes nothing.
+      if (notificationsEnabled()) {
+        const partnerUid =
+          primaryIds.includes(actorUid)
+            ? primaryIds.find((uid) => uid !== actorUid) ?? null
+            : null;
+
+        writeOutboxEntries(
+          transaction,
+          db,
+          shiftStartedIntents({ shiftId, partnerUid, createdAt: now })
+        );
+      }
 
       return {
         shiftId,

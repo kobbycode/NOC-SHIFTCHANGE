@@ -53,6 +53,15 @@ import {
   prepareTechnicianSchedule,
 } from "./prepare-technician-schedule";
 
+import {
+  notificationsEnabled,
+  writeOutboxEntries,
+} from "@/lib/notifications/notification-outbox";
+
+import {
+  shiftStartedIntents,
+} from "@/lib/notifications/notification-hooks";
+
 export interface JoinShiftInput {
   shiftId: string;
   actorUid: string;
@@ -458,6 +467,21 @@ export async function joinShift(
             FieldValue.serverTimestamp(),
         }
       );
+
+      // Owner-approved shift-start notice: the partner of the joining
+      // technician is told their shift is live. A temporary technician has no
+      // roster partner, so no intent is written for that branch.
+      if (notificationsEnabled()) {
+        const partnerUid = isPrimary
+          ? identity.primaryTechnicianIds.find((uid) => uid !== actorUid) ?? null
+          : null;
+
+        writeOutboxEntries(
+          transaction,
+          db,
+          shiftStartedIntents({ shiftId, partnerUid, createdAt: now })
+        );
+      }
 
       return attendance;
     }

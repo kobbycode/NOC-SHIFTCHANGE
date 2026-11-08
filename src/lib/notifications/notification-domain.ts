@@ -41,6 +41,7 @@ const TITLES: Record<NotificationEventKind, string> = {
   [NOTIFICATION_EVENT_KINDS.TASK_ASSIGNED]: "You have a new task to acknowledge",
   [NOTIFICATION_EVENT_KINDS.TASK_REASSIGNED]: "A task was assigned to you",
   [NOTIFICATION_EVENT_KINDS.TASK_TRANSFER_OUTSTANDING]: "Outstanding task transferred to your shift",
+  [NOTIFICATION_EVENT_KINDS.SHIFT_STARTED]: "Your shift has started",
 };
 
 const HANDOVER_KINDS = new Set<string>([
@@ -110,7 +111,9 @@ export function buildNotificationIntents(input: NotificationEventInput): Notific
 
   const target = isHandoverKind(input.eventKind)
     ? NOTIFICATION_TARGETS.HANDOVER_V2
-    : NOTIFICATION_TARGETS.TECHNICIAN_TASKS;
+    : input.eventKind === NOTIFICATION_EVENT_KINDS.SHIFT_STARTED
+      ? NOTIFICATION_TARGETS.TECHNICIAN_SHIFT
+      : NOTIFICATION_TARGETS.TECHNICIAN_TASKS;
 
   const deepLinkParams: Record<string, string> = {};
   if (outgoingShiftId) deepLinkParams.outgoingShiftId = outgoingShiftId;
@@ -160,6 +163,9 @@ export function resolveNotificationRoute(intent: {
   }
   if (target === NOTIFICATION_TARGETS.TECHNICIAN_TASKS) {
     return "/technician/tasks";
+  }
+  if (target === NOTIFICATION_TARGETS.TECHNICIAN_SHIFT) {
+    return "/technician";
   }
   return "/technician";
 }

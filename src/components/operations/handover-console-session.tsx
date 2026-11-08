@@ -1,4 +1,6 @@
 "use client";
+import { useEffect } from "react";
+import { rebindPushForSessionOwner } from "@/lib/notifications/browser-push";
 // Phase 3 — the last page of the A–E form is a SHARED console. The technician
 // sitting at it picks which of the two reserved incoming identities is accepting
 // now and proves that choice with THAT person's own password. The server issues
@@ -51,6 +53,13 @@ export function IncomingIdentityPicker({
 }
 
 export function HandoverSessionNotice({ session, label }: { session: HandoverSessionOutcome; label: string }) {
+  // The acceptance just replaced the console session. Move any existing push
+  // binding to the technician now signed in, so delivery never follows the
+  // previous technician. Inert when push is unavailable or not already allowed.
+  useEffect(() => {
+    if (session.issued) void rebindPushForSessionOwner();
+  }, [session.issued]);
+
   if (!session.issued) {
     // The acceptance is committed even though no cookie could be minted. The
     // outgoing sessions may already be revoked, so this console must not keep

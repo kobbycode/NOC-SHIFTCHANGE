@@ -17,6 +17,9 @@ export const NOTIFICATION_EVENT_KINDS = {
   TASK_ASSIGNED: "task_assigned",
   TASK_REASSIGNED: "task_reassigned",
   TASK_TRANSFER_OUTSTANDING: "task_transfer_outstanding",
+  // Owner-approved (2026-11-06): the partner of whichever technician started
+  // or joined the shift is told their shift is live.
+  SHIFT_STARTED: "shift_started",
 } as const;
 
 export type NotificationEventKind =
@@ -27,6 +30,7 @@ export type NotificationEventKind =
 export const NOTIFICATION_TARGETS = {
   HANDOVER_V2: "handover_v2",
   TECHNICIAN_TASKS: "technician_tasks",
+  TECHNICIAN_SHIFT: "technician_shift",
 } as const;
 
 export type NotificationTarget =

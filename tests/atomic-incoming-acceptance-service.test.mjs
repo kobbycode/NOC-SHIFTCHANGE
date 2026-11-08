@@ -707,12 +707,19 @@ test("completion audit and notification outbox commit atomically with acceptance
   await world.apply("in-a");
 
   assert.equal(world.commits(), 1);
-  assert.equal(world.entries("notification_outbox").length, 4);
-  assert.equal(world.entries("notifications").length, 4);
+  // Four HANDOVER_COMPLETED intents (all participants) plus one owner-approved
+  // SHIFT_STARTED intent for the accepting technician's partner.
+  assert.equal(world.entries("notification_outbox").length, 5);
+  assert.equal(world.entries("notifications").length, 5);
   const recipients = new Set(
     world.entries("notification_outbox").map(([, value]) => value.recipientUid),
   );
   assert.deepEqual([...recipients].sort(), ["in-a", "in-b", "out-a", "out-b"]);
+  const started = world.entries("notification_outbox")
+    .map(([, value]) => value)
+    .filter((value) => value.eventKind === "shift_started");
+  assert.equal(started.length, 1);
+  assert.equal(started[0].recipientUid, "in-b");
   assert.equal(auditDocs(world, "EQUAL_SHIFT_ACTIVATED_INCOMING_V2").length, 1);
   assert.equal(auditDocs(world, "INCOMING_ACCEPTANCE_APPLIED_V1").length, 1);
 });
