@@ -638,7 +638,7 @@ test(
         assert.equal(value.status, 403);
         assert.match(
           String(value.message),
-          /not authorized to start|not eligible/i
+          /only the scheduled technician pair/i
         );
 
         return true;
@@ -728,26 +728,16 @@ test(
 );
 
 test(
-  "a consumed temporary authorization may activate the first-ever shift",
+  "a consumed temporary authorization cannot activate the first-ever shift",
   async () => {
     const f = await seedFirstShiftFixture({ includeAuthorization: true });
 
-    const result = await startShift({
-      shiftId: f.shiftId,
-      actorUid: f.technicianC,
-    });
-
-    assert.equal(result.status, "active");
-
-    const audits = await startAudits(f.shiftId);
-
-    assert.equal(audits.length, 1);
-    assert.equal(audits[0].actorUid, f.technicianC);
-    assert.equal(audits[0].startAuthority, "temporary_authorization");
-    assert.equal(
-      audits[0].temporaryAuthorizationId,
-      f.authorizationId
+    await assert.rejects(
+      () => startShift({ shiftId: f.shiftId, actorUid: f.technicianC }),
+      { status: 403, message: /only the scheduled technician pair/i }
     );
+    assert.equal((await docOf("shifts", f.shiftId))?.status, "scheduled");
+    assert.deepEqual(await startAudits(f.shiftId), []);
   }
 );
 
@@ -793,7 +783,7 @@ test(
         assert.equal(value.status === 403 || value.status === 409, true);
         assert.match(
           String(value.message),
-          /does not permit this technician|not authorize/i
+          /only the scheduled technician pair/i
         );
 
         return true;

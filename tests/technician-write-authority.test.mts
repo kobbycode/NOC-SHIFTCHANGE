@@ -84,6 +84,7 @@ test("a technician outside the running shift is read-only even with an old accep
 
   assert.equal(result.mayWrite, false);
   assert.equal(result.denial, READ_ONLY_DENIALS.NOT_ACTIVE_SHIFT_PARTICIPANT);
+  assert.equal(result.message, "A shift is already running. Only the active technician pair can join it.");
 });
 
 test("the founding shift is writable by its own participants without any acceptance", () => {

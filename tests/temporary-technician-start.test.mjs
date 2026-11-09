@@ -423,7 +423,7 @@ test("active shifts and changed control states cannot be started a second time",
   );
 });
 
-test("G-D source keeps technician-only start and read-only temporary authority", async () => {
+test("G-D source restricts manual start to the scheduled permanent pair", async () => {
   const source = await readFile(
     new URL("../src/lib/operations/start-shift.ts", import.meta.url),
     "utf8"
@@ -445,7 +445,8 @@ test("G-D source keeps technician-only start and read-only temporary authority",
     source,
     /readFirstShiftBootstrapEvidenceInTransaction\(/
   );
-  assert.match(source, /assertTemporaryTechnicianCanStartShift\(/);
+  assert.match(source, /!pairTechnicianIds\.includes\(actorUid\)/);
+  assert.doesNotMatch(source, /assertTemporaryTechnicianCanStartShift\(/);
   assert.match(source, /assertValidShiftTransition\(/);
   assert.match(source, /assertShiftReadyToStart\(/);
   assert.match(source, /transaction\.update\(\s*shiftRef/);
@@ -477,7 +478,7 @@ test("G-D start writes remain after every transactional authorization and roster
   );
   const firstWriteIndex = source.search(/transaction\.(?:update|create|delete|set)\s*\(/);
   const authCheckIndex = source.indexOf(
-    "assertTemporaryTechnicianCanStartShift({"
+    "assertPermanentPairMembershipReservations("
   );
   const bootstrapGateIndex = source.indexOf(
     "assertFirstEverShiftBootstrap("

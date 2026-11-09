@@ -106,10 +106,13 @@ export async function POST(
   }
 
   try {
-    await requireTechnicianWriteAuthority({
+    const authority = await requireTechnicianWriteAuthority({
       uid: actor.uid,
       role: actor.role,
     });
+    if (authority.activeShiftId !== shiftId) {
+      return errorResponse("You can only join your current active shift.", 409);
+    }
 
     // Coarse presence evidence is optional and never blocks a join: a missing
     // or malformed payload records an explicit not-captured state instead.

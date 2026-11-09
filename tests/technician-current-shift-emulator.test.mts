@@ -925,7 +925,7 @@ test(
 );
 
 test(
-  "scheduled exact temporary technician sees start availability but no attendance",
+  "scheduled exact temporary technician sees their assignment without start authority or attendance",
   async () => {
     const fixture =
       await seedFixture(
@@ -955,7 +955,7 @@ test(
 
     assert.equal(
       result.canStart,
-      true,
+      false,
     );
 
     assert.equal(

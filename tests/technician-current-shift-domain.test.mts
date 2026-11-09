@@ -455,7 +455,7 @@ test(
 );
 
 test(
-  "scheduled temporary technician sees exact consumed authorization and start authority",
+  "scheduled temporary technician sees exact consumed authorization without start authority",
   () => {
     const result =
       resolve(
@@ -481,7 +481,7 @@ test(
 
     assert.equal(
       result.canStart,
-      true,
+      false,
     );
 
     assert.equal(
@@ -620,7 +620,7 @@ test(
 );
 
 test(
-  "active temporary technician may join before attendance exists",
+  "active temporary technician cannot join the active pair",
   () => {
     const result =
       resolve(
@@ -637,7 +637,7 @@ test(
 
     assert.equal(
       result.canJoin,
-      true,
+      false,
     );
 
     assert.equal(

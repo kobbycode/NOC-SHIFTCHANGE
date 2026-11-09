@@ -79,7 +79,7 @@ const DENIAL_MESSAGES: Record<ReadOnlyDenial, string> = {
   [READ_ONLY_DENIALS.SHIFT_NOT_RUNNING]:
     "This shift no longer accepts changes, so operational data is read-only.",
   [READ_ONLY_DENIALS.NOT_ACTIVE_SHIFT_PARTICIPANT]:
-    "You are not a technician of the shift currently running, so operational data is read-only.",
+    "A shift is already running. Only the active technician pair can join it.",
   [READ_ONLY_DENIALS.PARTICIPATION_WITHOUT_ACCEPTANCE]:
     "Accept the handover with your own password to make changes; this view is read-only.",
 };

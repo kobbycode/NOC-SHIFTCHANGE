@@ -67,8 +67,6 @@ import {
 
 import {
   assertPermanentPairMembershipReservations,
-  assertTemporaryTechnicianCanStartShift,
-  createNextShiftAuthorizationDocumentId,
   NextShiftAuthorizationDomainError,
   readActivePermanentPairTechnicianIds,
 } from "./next-shift-authorization-domain";
@@ -92,14 +90,6 @@ export interface StartShiftResult {
   status: "active";
   actualStart: string;
 }
-
-/**
- * Which technician contract authorized the activation. Both values are
- * technician authority: a manager never starts a shift.
- */
-type ShiftStartAuthority =
-  | "permanent_pair_bootstrap"
-  | "temporary_authorization";
 
 function mapAuthorizationDomainError(
   error: unknown
@@ -145,7 +135,6 @@ export async function startShift(
     operationalShiftControl,
     technicianPairs,
     technicianPairMemberships,
-    nextShiftAuthorizations,
   } = getOperationalCollections();
 
   const shiftRef = shifts.doc(shiftId);
@@ -395,93 +384,21 @@ export async function startShift(
           : null,
       ];
 
-      /*
-       * PHASE 2b:
-       * Establish bootstrap authority.
-       *
-       * Either technician of the scheduled permanent pair may start the
-       * first-ever shift; the pair carries no primary or secondary
-       * distinction. A technician outside the pair may only act on a consumed
-       * temporary authorization bound to this exact shift, slot token and
-       * generation, which is the existing substitute contract.
-       */
+      if (!pairTechnicianIds.includes(actorUid)) {
+        throw new AssignmentOperationError(
+          "Only the scheduled technician pair can start the first shift.",
+          403
+        );
+      }
 
-      let startAuthority: ShiftStartAuthority;
-      let temporaryAuthorizationId:
-        string | null = null;
-
-      if (pairTechnicianIds.includes(actorUid)) {
-        if (!primaryIds.includes(actorUid)) {
-          throw new AssignmentOperationError(
-            "The acting technician is not on this shift's roster.",
-            409
-          );
-        }
-
-        try {
-          assertPermanentPairMembershipReservations(
-            shift.permanentPairId,
-            pairTechnicianIds,
-            pairMemberships
-          );
-        } catch (error) {
-          mapAuthorizationDomainError(error);
-        }
-
-        startAuthority = "permanent_pair_bootstrap";
-      } else {
-        let authorizationDocumentId: string;
-
-        try {
-          authorizationDocumentId =
-            createNextShiftAuthorizationDocumentId(
-              shift.permanentPairId,
-              control.generation,
-              shift.operationalSlotToken
-            );
-        } catch (error) {
-          mapAuthorizationDomainError(error);
-        }
-
-        const authorizationRef =
-          nextShiftAuthorizations.doc(
-            authorizationDocumentId
-          );
-
-        const authorizationSnapshot =
-          await transaction.get(
-            authorizationRef
-          );
-
-        if (!authorizationSnapshot.exists) {
-          throw new AssignmentOperationError(
-            "This technician is not authorized to start the selected shift.",
-            403
-          );
-        }
-
-        try {
-          const authorization =
-            assertTemporaryTechnicianCanStartShift({
-              actorUid,
-              actorProfile: actor,
-              technicianEligibility,
-              shift,
-              control,
-              permanentPair: pair,
-              pairMemberships,
-              authorizationDocumentId,
-              authorization:
-                authorizationSnapshot.data(),
-            });
-
-          temporaryAuthorizationId =
-            authorization.id;
-        } catch (error) {
-          mapAuthorizationDomainError(error);
-        }
-
-        startAuthority = "temporary_authorization";
+      try {
+        assertPermanentPairMembershipReservations(
+          shift.permanentPairId,
+          pairTechnicianIds,
+          pairMemberships
+        );
+      } catch (error) {
+        mapAuthorizationDomainError(error);
       }
 
       /*
@@ -774,9 +691,9 @@ export async function startShift(
 
           actorRole: actor.role,
 
-          startAuthority,
+          startAuthority: "permanent_pair_bootstrap",
 
-          temporaryAuthorizationId,
+          temporaryAuthorizationId: null,
 
           shiftId,
 
@@ -789,11 +706,7 @@ export async function startShift(
           createdAt:
             FieldValue.serverTimestamp(),
 
-          details:
-            startAuthority ===
-            "permanent_pair_bootstrap"
-              ? "An assigned technician started the first shift."
-              : "A temporarily authorized technician started the first shift.",
+          details: "An assigned technician started the first shift.",
         }
       );
 

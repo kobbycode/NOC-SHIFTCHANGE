@@ -455,12 +455,13 @@ export function resolveTechnicianCurrentShift(
       input.firstShiftBootstrapAvailable === true,
 
     canStart:
+      isPrimary &&
       shift.status ===
         "scheduled" &&
       input.firstShiftBootstrapAvailable === true,
 
     canJoin:
-      shift.status === "active" &&
+      isPrimary && shift.status === "active" &&
       attendance === null,
   };
 }
