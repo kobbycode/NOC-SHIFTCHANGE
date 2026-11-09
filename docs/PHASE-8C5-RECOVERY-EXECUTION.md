@@ -264,6 +264,7 @@ itself is untouched by hand; Next dev appends its dist dirs, matching every earl
 5. **OD-5:** accept that abandonment does not update the actor's activity marker (no `users` write),
    or should the recovery path be exempted from the "no `users` writes" rule for this one field?
 6. **OD-6:** the executor has no UI and no client call site. Decide whether 8C.6 should be a UI
-   surface or an operational runbook that calls the route directly.
+   surface or an operational runbook that calls the route directly. The runbook option is drafted in
+   [PHASE-8C5-RECOVERY-RUNBOOK.md](PHASE-8C5-RECOVERY-RUNBOOK.md); the UI option is not started.
 
 No commit, push, deploy or emulator-flag change was made. The work stops here for review.
