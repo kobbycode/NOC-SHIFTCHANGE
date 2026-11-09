@@ -6,9 +6,10 @@
 sequence below — routes, bodies, responses, refusals and the PowerShell around them — was then executed
 end-to-end against the disposable `demo-admin-review-8b` stack on 2026-11-09.
 
-This is the operator-facing path for abandoning a **stalled equal handover**. It exists because the
-executor ships without a UI. It does not replace the approval procedure; it consumes an approval that
-has already been signed twice.
+This is the operator-facing path for abandoning a **stalled equal handover**. It does not replace the
+approval procedure; it consumes an approval that has already been signed twice. When the app ships
+the 8C.6 recovery panel, that panel is the same path in a browser; this runbook remains the fallback
+and the reference for the exact requests.
 
 ---
 
@@ -240,7 +241,9 @@ they are reversible, and none is configurable at run time:
 3. **No password at execution** — a live administrator session is required, not a re-entered password.
 4. **No notification** is produced by an abandonment.
 5. **No activity marker** is written to the actor's user document.
-6. **No UI** — this runbook is the operator surface.
+6. **Two operator surfaces** — the 8C.6 panel (administrator handover review page, plus the supervisor
+   signature on the v2 handover detail page) and this runbook. The panel sends the same requests and
+   offers execution only after the gated read-back succeeds.
 
 The gate is not a default you can rely on: keep `HANDOVER_RECOVERY_EXECUTION_ENABLED` unset outside
 the disposable stacks. With the flag unset the endpoints do not exist.

@@ -7,11 +7,11 @@ import { handoverV2Enabled } from "@/lib/operations/handover-v2-report-http";
 export const dynamic = "force-dynamic";
 
 export default async function AdminHandoverReviewPage() {
-  await requireUser(["admin"]);
+  const actor = await requireUser(["admin"]);
 
   if (!handoverV2Enabled()) {
     notFound();
   }
 
-  return <HandoverReviewWorkspace />;
+  return <HandoverReviewWorkspace actorUid={actor.uid} />;
 }

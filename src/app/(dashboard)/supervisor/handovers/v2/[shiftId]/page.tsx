@@ -27,5 +27,14 @@ export default async function SupervisorV2HandoverDetailPage({ params }: { param
       <div role="alert" className="rounded-xl border p-5 text-sm">{problem}</div>
     </main>;
   }
-  return <SupervisorHandoverV2Detail view={view} atomicAcceptanceEnabled={handoverV2AtomicAcceptanceEnabled()} />;
+  return (
+    <SupervisorHandoverV2Detail
+      view={view}
+      atomicAcceptanceEnabled={handoverV2AtomicAcceptanceEnabled()}
+      recovery={{
+        handoverDocumentId: view.state.live.content.handoverDocumentId,
+        actorUid: actor.uid,
+      }}
+    />
+  );
 }

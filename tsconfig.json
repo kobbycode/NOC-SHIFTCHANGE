@@ -82,7 +82,9 @@
     ".next-recovery-execution-http-on/types/**/*.ts",
     ".next-recovery-execution-http-on/dev/types/**/*.ts",
     ".next-recovery-execution-http-off/types/**/*.ts",
-    ".next-recovery-execution-http-off/dev/types/**/*.ts"
+    ".next-recovery-execution-http-off/dev/types/**/*.ts",
+    ".next-ui-verify/types/**/*.ts",
+    ".next-ui-verify/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

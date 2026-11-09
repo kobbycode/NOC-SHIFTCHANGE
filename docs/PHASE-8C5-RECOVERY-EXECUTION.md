@@ -36,13 +36,30 @@ Delivered:
 - **Verification harnesses**: `tests/run-handover-recovery-execution-emulator.ps1` (service level),
   `tests/run-handover-recovery-execution-http.ps1` + `tests/run-recovery-execution-http.mjs` (two real
   Next.js servers), and the two suites they run.
-- **The operator surface**: [PHASE-8C5-RECOVERY-RUNBOOK.md](PHASE-8C5-RECOVERY-RUNBOOK.md), whose
-  documented PowerShell sequence was executed against a real server and emulators (§5.3).
+- **The operator surfaces**: [PHASE-8C5-RECOVERY-RUNBOOK.md](PHASE-8C5-RECOVERY-RUNBOOK.md), whose
+  documented PowerShell sequence was executed against a real server and emulators (§5.3), and the
+  in-product recovery panel added in 8C.6 (§5.4). Both surfaces send the same requests; neither adds
+  authority of its own.
 
-Not delivered, deliberately:
+Delivered after the original 8C.5 boundary (8C.6 — the operator UI, below):
 
-- No UI. The route is reachable only by an administrator session that calls it directly; there is no
-  button, no navigation entry, and no client component.
+- **One shared client component**, `src/components/operations/handover-recovery-panel.tsx`, mounted on
+  the administrator handover review page and on the supervisor v2 handover detail page. It reads the
+  classifier and the signed approvals, and sends the same request bodies the runbook documents. Every
+  refusal is displayed verbatim from the server.
+- **No new authority.** The supervisor mount can only add the supervisor signature; the execute form
+  is rendered only when the administrator's gated read-back answers `200` and the intent is not yet
+  applied. On a deployment where `HANDOVER_RECOVERY_EXECUTION_ENABLED` is unset the read-back is
+  `404`, and the panel says execution is not enabled instead of offering a button.
+- **Reachability.** A stalled handover is often *not* an exception in the 8B review queue — a
+  never-activated handover is classified `not_activated` and is deliberately excluded — so the review
+  page also accepts a handover document id and opens the panel for it, exactly as the runbook takes
+  `$HANDOVER_DOCUMENT_ID`. Without that lookup the panel would only be reachable for queued cases.
+
+Still not delivered, deliberately:
+
+- No navigation entry, no listing of stalled handovers and no bulk recovery. The operator supplies the
+  handover document id (or opens a queued case); inventing a discovery surface was out of scope.
 - No notification, no attendance, no evidence and no `users` write. The executor is prohibited from
   all four, and the service suite asserts the complete write set rather than spot-checking it.
 - No change to the protected acceptance/approval suites beyond the D-2 pin.
@@ -67,6 +84,7 @@ Added:
 | `tests/recovery-execution-http-emulator.test.mjs` | 8 real-HTTP tests |
 | `tests/run-recovery-execution-http.mjs` | Two-server harness (3198 gate on, 3199 gate off) |
 | `tests/run-handover-recovery-execution-http.ps1` | HTTP boundary (`demo-admin-review-8b`, Firestore 8980/9980, Auth 10099) |
+| `src/components/operations/handover-recovery-panel.tsx` | 8C.6 — the shared recovery panel (read classifier, approvals, gated execution read-back, send requests) |
 | `tsconfig.verify.json` | Verification-only tsconfig (see §5.1) |
 
 Modified:
@@ -74,6 +92,10 @@ Modified:
 | Path | Change |
 | --- | --- |
 | `src/lib/operations/equal-technician-handover-domain.ts` | `abandonEqualHandover` export (8C.4) |
+| `src/components/admin/handover-review-workspace.tsx` | 8C.6 — panel mount per selected case plus the open-by-handover-id lookup |
+| `src/app/(dashboard)/admin/handovers/review/page.tsx` | 8C.6 — passes the acting administrator uid |
+| `src/components/operations/supervisor-handover-v2-detail.tsx` | 8C.6 — panel mount for the supervisor signature; header copy states the boundary |
+| `src/app/(dashboard)/supervisor/handovers/v2/[shiftId]/page.tsx` | 8C.6 — passes handover document id and acting uid |
 | `docs/PHASE-8C3-…` protected HTTP test | D-2 digest pin (task 5 only) |
 | `tsconfig.json` | Next.js dev appends each new `NEXT_DIST_DIR` to `include` — same convention as every earlier phase's dist dirs |
 
@@ -181,6 +203,8 @@ stale generated files from other stacks cannot mask real errors. Result: **clean
 | `tests/handover-recovery-execution-emulator.test.mjs` (service, real Firestore emulator) | **12 / 12 pass** |
 | `tests/recovery-execution-http-emulator.test.mjs` (real HTTP, two app servers) | **8 / 8 pass** |
 | Runbook §3 executed end-to-end (PowerShell, one real server + emulators) | **pass** — create, countersign, execute, read-back, replay, refusals |
+| 8C.6 production build with both gates on (`next build`, `.next-ui-verify`) | **clean** |
+| 8C.6 two-role browser flow against that production build (§5.4) | **pass** — request → countersign → execute → applied, final state identical to the runbook harness |
 
 Not re-run in this phase (unchanged by it): the 8C.4B approval suites and the 8C.3 eligibility suites.
 They remain the last committed-state evidence for their own contracts.
@@ -239,6 +263,43 @@ dropped by Windows PowerShell 5.1 (the runbook uses a `WebRequestSession`), the 
 identity is the evidence, not the idempotency key, and the intent cannot be "replaced" by sending a
 different key.
 
+### 5.4 The 8C.6 in-product panel, verified in a browser
+
+Boundary: `demo-admin-review-8b` (Firestore 8980/9980, Auth 10099), one `next start` server on 3198
+serving the production build `.next-ui-verify` with `HANDOVER_V2_DEV=true` and
+`HANDOVER_RECOVERY_EXECUTION_ENABLED=true`, seeded with the same backdated equal-handover fixture and
+users `adm1`, `sup1`, `adm2`.
+
+The flow was executed against the built pages, not by calling the API directly:
+
+1. `adm1` signs in at `/login`; `/admin/handovers/review` shows the recovery lookup and an empty
+   review queue (a never-activated handover is not an 8B exception);
+2. entering `handover_v2_outgoing` opens the panel: **Eligible for abandonment review**, evidence
+   digest shown, **Request recovery intent** offered;
+3. the request form requires ≥10 characters and the administrator's password; submitting records the
+   intent, shows the confirmation notice, and the intent renders **Awaiting second signature**, 1/2
+   signatures, "Waiting for a supervisor signature", with no countersign control for the admin;
+4. `sup1` signs in; `/supervisor/handovers/v2/outgoing` shows the same intent with **Countersign as
+   supervisor**, which requires only the supervisor's password; submitting shows **Fully approved**
+   and states that an administrator must execute — no execute control appears for the supervisor;
+5. `adm1` signs in again and reopens the panel: the gated read-back answered `200`, so **Execute
+   recovery** is offered; the form shows the irreversible-effects copy, requires a reason and the
+   acknowledgment, and asks for no password (OD-3);
+6. execution returns **Recovery applied by adm1 … audit handover_aba…c11017**; the panel offers no
+   further execute, void or reissue control, and the classifier now reports refusals (aggregate
+   cancelled).
+
+Final state read directly from the emulator with the Admin SDK, using the runbook harness's own
+assertions: outgoing shift `cancelled` by `adm1` with `actualEnd` untouched, aggregate `cancelled`,
+approval `fully_approved` with `admin:adm1` + `supervisor:sup1`, and a create-once audit row whose id
+is derived from the approval, bound to that approval and naming `adm1`.
+
+**F-4 — the review queue cannot be the only entry point (found by this browser run).**
+`listHandoverReviewQueue` includes only exceptions and completed handovers; a never-activated handover
+is classified `not_activated` and excluded. The panel was therefore unreachable for the primary
+scenario when mounted only per queued case. The review page now also takes a handover document id,
+which mirrors the runbook's operator input rather than inventing a discovery or listing surface.
+
 ---
 
 ## 6. Findings and deliberate deviations
@@ -290,7 +351,7 @@ the change is localized as noted.
 | OD-3 | Executor authentication | Live administrator session, same-origin, no second password | The approval already carries two password proofs; execution re-derives authority from the session and re-checks the actor inside the transaction. | Require a password proof on the execute body and extend the contract and both suites. |
 | OD-4 | Notification on abandonment | None | The notification seam is untouched; abandonment is an administrative recovery, and inventing a recipient or message shape would be undesigned product behaviour. | Define recipient, template and deep link first. |
 | OD-5 | Actor activity marker | No `users` write | Matches the owner's constraint that the executor must not write `users`. The cost is that an abandonment does not refresh the actor's last-activity marker. | Exempt one field from the rule and update the write-set assertions in both suites. |
-| OD-6 | Operator surface | The runbook calls the route directly; no UI | A UI would invent an undesigned product surface. The runbook is verified end-to-end against a disposable stack. | Design the surface and its authorization before building it. |
+| OD-6 | Operator surface | Two surfaces over the same routes: the runbook and the 8C.6 in-product panel (admin review page, plus the supervisor signature on the v2 detail page) | The runbook stays the fallback when the panel is unavailable, and the panel was built only after the route and its authorization existed. The panel holds no authority: it renders the classifier and the approvals, offers execution only after the gated read-back succeeds, and shows every refusal verbatim. It was verified end-to-end in a browser against the production build (§5.4). | Remove the panel mounts; no route or contract changes are needed. |
 
 **Not decided here:** enabling the executor anywhere outside a disposable stack. That is a deployment
 decision, not a phase decision: `HANDOVER_RECOVERY_EXECUTION_ENABLED` stays unset there, and with it

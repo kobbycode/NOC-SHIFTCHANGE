@@ -21,6 +21,7 @@ import {
   type HandoverReviewProjection,
   type HandoverReviewQueueItem,
 } from "@/types/handover-admin-review";
+import { HandoverRecoveryPanel } from "@/components/operations/handover-recovery-panel";
 
 // Phase 8C.2a — the mandated confirmation wording. An adjudication is an
 // investigative finding about historical evidence; it must never be presented
@@ -265,11 +266,13 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export function HandoverReviewWorkspace() {
+export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
   const [queue, setQueue] = useState<HandoverReviewQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueError, setQueueError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [recoveryDocumentId, setRecoveryDocumentId] = useState("");
+  const [recoveryTarget, setRecoveryTarget] = useState("");
 
   const [reviewCase, setReviewCase] = useState<{
     documentId: string;
@@ -631,6 +634,63 @@ export function HandoverReviewWorkspace() {
         </div>
       ) : null}
 
+      <section className="rounded-xl border bg-white p-5 shadow-sm dark:bg-slate-950">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Recovery for a stalled handover
+        </h2>
+        <p className="mt-1 max-w-3xl text-xs text-slate-500">
+          A stalled handover is not always an exception in the review queue below, so it can also be
+          opened directly by its handover document id, exactly as the recovery runbook does. The
+          classifier decides whether recovery is possible; this form only selects the record.
+        </p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const trimmed = recoveryDocumentId.trim();
+            if (trimmed) setRecoveryTarget(trimmed);
+          }}
+          className="mt-3 flex flex-wrap items-end gap-3"
+        >
+          <label className="min-w-[260px] flex-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Handover document id
+            <input
+              value={recoveryDocumentId}
+              onChange={(event) => setRecoveryDocumentId(event.target.value)}
+              placeholder="handover_v2_…"
+              className="mt-1 w-full rounded-lg border px-3 py-2 font-mono text-sm dark:bg-slate-900"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={recoveryDocumentId.trim().length === 0}
+            className="rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            Open recovery
+          </button>
+          {recoveryTarget ? (
+            <button
+              type="button"
+              onClick={() => {
+                setRecoveryTarget("");
+                setRecoveryDocumentId("");
+              }}
+              className="rounded-lg border px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300"
+            >
+              Close recovery
+            </button>
+          ) : null}
+        </form>
+        {recoveryTarget ? (
+          <div className="mt-4">
+            <HandoverRecoveryPanel
+              handoverDocumentId={recoveryTarget}
+              actorUid={actorUid}
+              actorRole="admin"
+            />
+          </div>
+        ) : null}
+      </section>
+
       <div className="grid gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <aside className="space-y-3">
           <div className="flex items-center justify-between">
@@ -804,6 +864,12 @@ export function HandoverReviewWorkspace() {
                   </Field>
                 </div>
               </section>
+
+              <HandoverRecoveryPanel
+                handoverDocumentId={review.handoverDocumentId}
+                actorUid={actorUid}
+                actorRole="admin"
+              />
 
               <Section title="Activation and frozen report">
                 <div className="grid gap-4 sm:grid-cols-2">

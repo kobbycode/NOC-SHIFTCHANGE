@@ -1,14 +1,16 @@
 // TECH-HO-RECOVERY-09K — read-only supervisor view of one v2 equal-technician
-// handover. Presentational only: it renders authoritative evidence already
-// derived by readEqualHandoverReportState and exposes no form, fetch, mutation
-// or impersonation affordance. Attendance/acceptance are read from persisted
+// handover. It renders authoritative evidence already derived by
+// readEqualHandoverReportState and exposes no attendance, acceptance or
+// impersonation affordance. Attendance/acceptance are read from persisted
 // evidence, never inferred from pair membership, schedule, notification state or
-// a confirmation.
+// a confirmation. The embedded recovery panel is a separate, server-authorized
+// approval surface: it can only sign an intent, never alter evidence.
 import Link from "next/link";
 import type { SupervisorV2HandoverDetailView } from "@/lib/operations/supervisor-handover-v2";
 import { EQUAL_HANDOVER_POSITIONS, EQUAL_HANDOVER_SIDES } from "@/types/equal-technician-handover";
 import { ATTENDANCE_EVIDENCE_KINDS } from "@/types/attendance-evidence";
 import { SupervisorGuardClosure } from "./supervisor-guard-closure";
+import { HandoverRecoveryPanel } from "./handover-recovery-panel";
 
 const POSITION_LABELS: Record<string, string> = {
   [EQUAL_HANDOVER_POSITIONS.OUTGOING_TECH_A]: "Outgoing technician A",
@@ -69,7 +71,7 @@ function acceptanceState(
   return { label: "Awaiting action", detail: "The incoming shift is active; this technician has not yet recorded their own acceptance evidence." };
 }
 
-export function SupervisorHandoverV2Detail({ view, atomicAcceptanceEnabled }: { view: SupervisorV2HandoverDetailView; atomicAcceptanceEnabled: boolean }) {
+export function SupervisorHandoverV2Detail({ view, atomicAcceptanceEnabled, recovery }: { view: SupervisorV2HandoverDetailView; atomicAcceptanceEnabled: boolean; recovery: { handoverDocumentId: string; actorUid: string } }) {
   const state = view.state;
   const { aggregate, readiness, live, frozenReport, preparation, preparationDrifted, guard, snapshotHash } = state;
   const content = live.content;
@@ -102,7 +104,7 @@ export function SupervisorHandoverV2Detail({ view, atomicAcceptanceEnabled }: { 
     <header className="space-y-1">
       <Link href="/supervisor/handovers/v2" className="text-sm text-blue-700 underline">← All v2 handovers</Link>
       <h1 className="text-2xl font-bold">Supervisor view · Equal-technician handover (v2)</h1>
-      <p className="text-sm text-neutral-600">Read-only. Supervisors do not start shifts, confirm or accept handovers, or declare attendance.</p>
+      <p className="text-sm text-neutral-600">The handover evidence is read-only here. Supervisors never accept a handover, declare attendance or clock anyone in; the recovery panel below can only add a recovery approval signature.</p>
       <p className="text-sm">{aggregate.identity.outgoingShiftId} → {aggregate.identity.incomingShiftId ?? "incoming not yet created"} · <strong>{aggregate.lifecycleStatus.replaceAll("_", " ")}</strong> · Revision {aggregate.revision} · Guard {guard ? `r${guard.guardRevision}/epoch ${guard.fencingEpoch}` : "unavailable"}</p>
       <p className="text-sm">Scheduled {stamp(aggregate.identity.scheduledStart)}–{stamp(aggregate.identity.scheduledEnd)} (Africa/Accra) · Handover initiated {stamp(content.staff.handoverStartedAt)}</p>
     </header>
@@ -112,6 +114,12 @@ export function SupervisorHandoverV2Detail({ view, atomicAcceptanceEnabled }: { 
         ? <p>Completed. The outgoing shift is closed and the incoming shift {aggregate.identity.incomingShiftId} was activated by the first reserved incoming technician&rsquo;s own password acceptance; later acceptances join the same active shift with independent attendance. This record is immutable.</p>
         : <p>Committed for incoming acceptance. The reserved incoming shift has not been created — the first incoming technician must accept with their own password; nothing is fabricated while acceptance is pending.</p>}
     </section>}
+
+    <HandoverRecoveryPanel
+      handoverDocumentId={recovery.handoverDocumentId}
+      actorUid={recovery.actorUid}
+      actorRole="supervisor"
+    />
 
     <section aria-label="Readiness" className={`rounded-xl border p-4 text-sm ${readiness.ready ? "border-green-600" : "border-neutral-500"}`}>
       <h2 className="font-semibold">Readiness: {readiness.ready ? "all confirmations and permitted exceptions satisfied" : "not ready"}</h2>
