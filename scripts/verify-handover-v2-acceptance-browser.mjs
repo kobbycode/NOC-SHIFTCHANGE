@@ -274,7 +274,7 @@ async function main() {
     // 3 — incoming A attempts to accept with the WRONG password first; the
     //     server refuses, no state changes, no notice.
     page = await openV2Page(context, seeded.accounts.incomingA, seeded.shiftId);
-    const acceptSection = page.locator("section", { hasText: "Accept handover with your password" });
+    const acceptSection = page.locator("section", { hasText: "Accept handover with a password" });
     await acceptSection.waitFor({ timeout: 60_000 });
     // The workflow's own message surface is the red `<p role="alert">` paragraph;
     // scoping to `p[role=alert]` ignores the framework's empty live-region nodes
@@ -298,7 +298,7 @@ async function main() {
     //     "Handover accepted" notice with the incoming shift id, and the first
     //     incoming technician's own shift_attendance row appears.
     page = await openV2Page(context, seeded.accounts.incomingA, seeded.shiftId);
-    const acceptSection2 = page.locator("section", { hasText: "Accept handover with your password" });
+    const acceptSection2 = page.locator("section", { hasText: "Accept handover with a password" });
     const resp4 = page.waitForResponse((r) => r.url().endsWith("/handover/v2/accept"), { timeout: 120_000 }).catch(() => null);
     await acceptSection2.locator("input[name='password']").fill(seeded.accounts.incomingA.password);
     await acceptSection2.getByRole("button", { name: "Accept and start my shift" }).click();
@@ -346,7 +346,7 @@ async function main() {
     // 5 — incoming B joins the SAME active shift with their own password;
     //     independent recordedAt, no second shift, no overwrite of A's clock.
     page = await openV2Page(context, seeded.accounts.incomingB, seeded.shiftId);
-    const acceptB = page.locator("section", { hasText: "Accept handover with your password" });
+    const acceptB = page.locator("section", { hasText: "Accept handover with a password" });
     await acceptB.waitFor({ timeout: 60_000 });
     await acceptB.locator("input[name='password']").fill(seeded.accounts.incomingB.password);
     await acceptB.getByRole("button", { name: "Accept and start my shift" }).click();
@@ -379,11 +379,11 @@ async function main() {
     await page.reload({ waitUntil: "networkidle", timeout: 180_000 });
     const terminalText = await pageText(page);
     assert.match(terminalText, /Handover activated/, "After both acceptances, the UI re-reads the completed aggregate.");
-    const reAccept = page.locator("section", { hasText: "Accept handover with your password" });
+    const reAccept = page.locator("section", { hasText: "Accept handover with a password" });
     if (await reAccept.count() > 0) {
       await reAccept.locator("input[name='password']").fill(seeded.accounts.incomingA.password);
       await reAccept.getByRole("button", { name: "Accept and start my shift" }).click();
-      await page.getByText(/Your earlier acceptance is already recorded/).waitFor({ timeout: 180_000 });
+      await page.getByText(/This acceptance is already recorded/).waitFor({ timeout: 180_000 });
       assert.equal((await db.collection("shifts").get()).docs.filter((d) => d.id === seeded.reservedIncomingShiftId).length, 1,
         "A self re-acceptance replays without creating another shift.");
       const attAAfterReplay = (await ref("shift_attendance", `${seeded.reservedIncomingShiftId}_${seeded.uids.incomingA}`).get()).data();
