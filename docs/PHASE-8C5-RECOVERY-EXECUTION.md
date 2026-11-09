@@ -1,7 +1,9 @@
 # Phase 8C.5 — Recovery execution: abandonment transition, executor and gated HTTP surface
 
 **Date:** 2026-11-09
-**Status:** implemented, verified locally, **uncommitted**. This phase stops here for review.
+**Status:** implemented, verified locally, **committed** (`1e5571d`, `fa4dc09`, `3d9ea80`). The operator
+runbook was then executed end-to-end against the disposable stack; that evidence and the adopted
+decisions are in §5.2 and §7.
 **Scope authorized by:** owner instruction "build everything" in response to the 8C decision packet
 (D-1 go-ahead for 8C.4, D-2 the protected digest-pin fix, D-3 the 8C.5 target, D-4 carried decisions).
 
@@ -34,6 +36,8 @@ Delivered:
 - **Verification harnesses**: `tests/run-handover-recovery-execution-emulator.ps1` (service level),
   `tests/run-handover-recovery-execution-http.ps1` + `tests/run-recovery-execution-http.mjs` (two real
   Next.js servers), and the two suites they run.
+- **The operator surface**: [PHASE-8C5-RECOVERY-RUNBOOK.md](PHASE-8C5-RECOVERY-RUNBOOK.md), whose
+  documented PowerShell sequence was executed against a real server and emulators (§5.3).
 
 Not delivered, deliberately:
 
@@ -42,7 +46,8 @@ Not delivered, deliberately:
 - No notification, no attendance, no evidence and no `users` write. The executor is prohibited from
   all four, and the service suite asserts the complete write set rather than spot-checking it.
 - No change to the protected acceptance/approval suites beyond the D-2 pin.
-- No commit, push, deploy, emulator-flag change, or allowlist change.
+- No deploy, no emulator-flag change on a protected stack, and no allowlist change. The execution gate
+  remains off everywhere outside the disposable stacks.
 
 ---
 
@@ -175,6 +180,7 @@ stale generated files from other stacks cannot mask real errors. Result: **clean
 | Adjacent domain suites — approval, eligibility, admin review, handover | **305 / 305 pass** |
 | `tests/handover-recovery-execution-emulator.test.mjs` (service, real Firestore emulator) | **12 / 12 pass** |
 | `tests/recovery-execution-http-emulator.test.mjs` (real HTTP, two app servers) | **8 / 8 pass** |
+| Runbook §3 executed end-to-end (PowerShell, one real server + emulators) | **pass** — create, countersign, execute, read-back, replay, refusals |
 
 Not re-run in this phase (unchanged by it): the 8C.4B approval suites and the 8C.3 eligibility suites.
 They remain the last committed-state evidence for their own contracts.
@@ -213,11 +219,31 @@ HTTP level (`demo-admin-review-8b`, servers 3198/3199):
    first outcome and writes nothing;
 8. evidence that moves after approval is refused with nothing written.
 
+Operator path (`demo-admin-review-8b`, one server on 3198, the runbook's own PowerShell):
+
+1. three sessions minted through `/api/auth/login`, one per actor;
+2. create as the supervisor → `201`, `awaiting_second_approval`, count 1, eligible false;
+3. execute before the second signature → `409 RECOVERY_APPROVAL_INVALID`;
+4. countersign as the administrator → `fully_approved`, count 2;
+5. execute with `actorUid` in the body → `400`, nothing read from the payload;
+6. execute as the administrator → `committed`, audit id equal to the derived id, `executedBy` the
+   session subject;
+7. `GET` read-back → `applied: true`, same audit id;
+8. replay from a second administrator → `already_applied`, same audit id and original executor;
+9. anonymous read-back → `401`; foreign-origin `POST` → `403`;
+10. final state: outgoing shift `cancelled` by `adm1` with `actualEnd` untouched, aggregate
+    `cancelled`, audit row bound to the approval and actor, and every seeded user profile unchanged.
+
+This run also caught three documentation defects, now fixed: a bare `Cookie` header is silently
+dropped by Windows PowerShell 5.1 (the runbook uses a `WebRequestSession`), the second-request replay
+identity is the evidence, not the idempotency key, and the intent cannot be "replaced" by sending a
+different key.
+
 ---
 
 ## 6. Findings and deliberate deviations
 
-**F-1 — W5 revision is not incremented (needs a decision).**
+**F-1 — W5 revision is not incremented (adopted as OD-1).**
 The 8C.1 contract calls for `revision + 1` on the aggregate write. The aggregate's revision is bound
 into every personal confirmation and into the snapshot hash that approval fences compare. Incrementing
 it at abandonment would make already-recorded confirmations look stale against a cancelled document
@@ -226,19 +252,19 @@ therefore writes `cancelled` with the **revision unchanged**, and the snapshot h
 because the hash excludes `lifecycleStatus` (hazard H-3). This is a contract deviation, not an
 oversight — see OD-1.
 
-**F-2 — W8 is implemented as an immutable intent plus a create-once audit row.**
+**F-2 — W8 is implemented as an immutable intent plus a create-once audit row (adopted as OD-2).**
 The contract describes consuming the approval. The executor never mutates the signed approval record;
 consumption is proved by `transaction.create` on a deterministic audit id derived from the approval
 id. A retry reads that row. This keeps the signed intent immutable (every signature, digest and
 fingerprint stays verifiable forever) and makes double-execution structurally impossible. See OD-2.
 
-**F-3 — no `users` write, unlike the sibling recovery path.**
+**F-3 — no `users` write, unlike the sibling recovery path (adopted as OD-5).**
 `recoverExpiredScheduledShift` calls `markAssignmentActivity`, which stamps the actor's user document.
 The abandonment executor deliberately does not: the owner's constraint is that recovery must not write
 `users`. The consequence is that an abandonment does not refresh the actor's "last activity" marker.
 See OD-5.
 
-**F-4 — execution requires an administrator session, not a password.**
+**F-4 — execution requires an administrator session, not a password (adopted as OD-3).**
 Approval signatures require a password proof. Execution does not: it requires a live administrator
 session, same-origin, and a signed approval whose fingerprints still match. Whether execution should
 also demand a fresh password is a product decision, not something this phase invented. See OD-3.
@@ -250,21 +276,22 @@ itself is untouched by hand; Next dev appends its dist dirs, matching every earl
 
 ---
 
-## 7. Open decisions — this phase stops here
+## 7. Decisions — adopted defaults, still reversible
 
-1. **OD-1 (W5):** should abandonment leave the aggregate revision unchanged (implemented) or
-   increment it as the 8C.1 text says? Incrementing requires deciding what happens to personal
-   confirmations bound to the previous revision.
-2. **OD-2 (W8):** accept "immutable signed approval + create-once audit row" as the consumption
-   proof, or require an explicit `consumedAt`/`consumedBy` write on the approval document?
-3. **OD-3:** should execution also require the executor's password (mirroring approval signatures),
-   or is a live administrator session sufficient (implemented)?
-4. **OD-4:** should an abandonment produce a notification? None is written today; the notification
-   seam is untouched.
-5. **OD-5:** accept that abandonment does not update the actor's activity marker (no `users` write),
-   or should the recovery path be exempted from the "no `users` writes" rule for this one field?
-6. **OD-6:** the executor has no UI and no client call site. Decide whether 8C.6 should be a UI
-   surface or an operational runbook that calls the route directly. The runbook option is drafted in
-   [PHASE-8C5-RECOVERY-RUNBOOK.md](PHASE-8C5-RECOVERY-RUNBOOK.md); the UI option is not started.
+The phase stops behind a default-off gate, so none of these decisions is live outside a disposable
+stack. Each one is recorded as the adopted default with its reason; every default is the behaviour the
+suites verify today, not an inferred requirement. An owner can overturn any of them individually, and
+the change is localized as noted.
 
-No commit, push, deploy or emulator-flag change was made. The work stops here for review.
+| # | Decision | Adopted default | Why | To overturn |
+| --- | --- | --- | --- | --- |
+| OD-1 | W5 aggregate revision | Unchanged at abandonment | The revision is bound into personal confirmations and into the approval snapshot hash; incrementing it at abandonment would make valid, previously recorded confirmations look stale against a cancelled document. The hash excludes `lifecycleStatus` (H-3), so the approval fence still matches. | Increment in the W5 write and decide what happens to confirmations bound to the previous revision. |
+| OD-2 | W8 approval consumption | Signed approval immutable; consumption proved by a create-once audit row derived from the approval id | Every signature, digest and fingerprint stays verifiable forever, and double execution is structurally impossible. | Add `consumedAt`/`consumedBy` to the approval; the create-once row remains the real fence, so those fields would be informational. |
+| OD-3 | Executor authentication | Live administrator session, same-origin, no second password | The approval already carries two password proofs; execution re-derives authority from the session and re-checks the actor inside the transaction. | Require a password proof on the execute body and extend the contract and both suites. |
+| OD-4 | Notification on abandonment | None | The notification seam is untouched; abandonment is an administrative recovery, and inventing a recipient or message shape would be undesigned product behaviour. | Define recipient, template and deep link first. |
+| OD-5 | Actor activity marker | No `users` write | Matches the owner's constraint that the executor must not write `users`. The cost is that an abandonment does not refresh the actor's last-activity marker. | Exempt one field from the rule and update the write-set assertions in both suites. |
+| OD-6 | Operator surface | The runbook calls the route directly; no UI | A UI would invent an undesigned product surface. The runbook is verified end-to-end against a disposable stack. | Design the surface and its authorization before building it. |
+
+**Not decided here:** enabling the executor anywhere outside a disposable stack. That is a deployment
+decision, not a phase decision: `HANDOVER_RECOVERY_EXECUTION_ENABLED` stays unset there, and with it
+unset neither endpoint exists.

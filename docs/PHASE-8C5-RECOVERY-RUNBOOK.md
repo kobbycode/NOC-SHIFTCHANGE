@@ -1,10 +1,10 @@
 # Phase 8C.5 — Recovery execution runbook
 
 **Applies to:** `POST|GET /api/admin/recovery-approvals-v2/{approvalId}/execute`
-**Status:** matches the code as of `fa4dc09`. The HTTP sequence below (routes, bodies, responses,
-refusal codes) is the one proved by `tests/recovery-execution-http-emulator.test.mjs` (test 07) against
-two real Next.js servers; field names and status values were checked against the source. The
-PowerShell around it is plumbing for the operator, not itself covered by a test.
+**Status:** matches the code as of `fa4dc09`. The HTTP contract is proved by
+`tests/recovery-execution-http-emulator.test.mjs` (test 07) against two real Next.js servers. The
+sequence below — routes, bodies, responses, refusals and the PowerShell around them — was then executed
+end-to-end against the disposable `demo-admin-review-8b` stack on 2026-11-09.
 
 This is the operator-facing path for abandoning a **stalled equal handover**. It exists because the
 executor ships without a UI. It does not replace the approval procedure; it consumes an approval that
@@ -38,6 +38,7 @@ next shift must be created through the normal scheduling flows.
 | Executor | An administrator whose profile is `active`, has no pending `statusOperation`, and does not need a password change. The executor is the **session subject**; the body cannot name one. |
 | Signers | One supervisor and one administrator (complementary roles), each signing with their own password. |
 | Origin | `POST` requires an `Origin` header equal to the application origin. |
+| Shell | Windows PowerShell 5.1 or later. On 5.1 a bare `Cookie` passed through `-Headers` is **silently dropped**; attach the cookie with the `WebRequestSession` helper in §3. PowerShell 7 accepts either form. |
 | Window | The incoming activation window must be genuinely closed. If it is still open you get `RECOVERY_WINDOW_OPEN`. |
 | Environment | Do this against a disposable stack first. Section 6 lists the boundary the suites use. |
 
@@ -48,9 +49,12 @@ next shift must be created through the normal scheduling flows.
 Set up the variables once (PowerShell):
 
 ```powershell
-$APP = "http://127.0.0.1:3198"          # never a production host until the deviations in §7 are ratified
-$SESSION_SUPERVISOR = "<__session cookie value for the supervisor>"
-$SESSION_ADMIN      = "<__session cookie value for the administrator>"
+$APP = "http://127.0.0.1:3198"          # never a production host while §7 stands
+$HANDOVER_DOCUMENT_ID = "handover_v2_outgoing"
+$EMAIL                = "<actor email>"    # repeat the exchange below for each signer and the executor
+$PASSWORD             = "<from your credential store>"
+$SESSION_SUPERVISOR   = "<__session cookie value for the supervisor>"
+$SESSION_ADMIN        = "<__session cookie value for the administrator>"
 ```
 
 In a browser, sign in normally and copy the `__session` cookie. On a local stack you can mint it:
@@ -67,6 +71,22 @@ $SESSION_ADMIN = (($session.Headers["Set-Cookie"] -join ";") -split ";" |
   Where-Object { $_ -match "^__session=" } | Select-Object -First 1).Trim()
 ```
 
+Whatever produced the cookie — a browser copy or the exchange above — attach it to a session object:
+
+```powershell
+# Windows PowerShell 5.1 drops a Cookie header set through -Headers, so the
+# cookie goes through a WebRequestSession. This works on 5.1 and 7 alike.
+function New-ApiSession([string]$CookieValue) {
+  $value = $CookieValue -replace "^__session=", ""
+  $web = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  $web.Cookies.Add((New-Object System.Net.Cookie("__session", $value, "/", ([uri]$APP).Host)))
+  return $web
+}
+
+$WEB_SUPERVISOR = New-ApiSession $SESSION_SUPERVISOR
+$WEB_ADMIN      = New-ApiSession $SESSION_ADMIN
+```
+
 Passwords are never recorded here. Supply them at the prompt from your own credential store. The
 `reason` must be at least 10 characters; a shorter one is a `400`.
 
@@ -76,12 +96,12 @@ Passwords are never recorded here. Supply them at the prompt from your own crede
 $request = @{
   handoverDocumentId = $HANDOVER_DOCUMENT_ID     # e.g. handover_v2_outgoing
   reason             = "Stalled outgoing handover; incoming never accepted."
-  idempotencyKey     = "recovery-request-$(Get-Date -Format yyyyMMdd-HHmmss)"
+  idempotencyKey     = "recovery-request-$(Get-Date -Format yyyyMMdd-HHmmssfff)"
   password           = $PASSWORD                 # the supervisor's own password
 } | ConvertTo-Json
 
 $created = Invoke-RestMethod -Method Post -Uri "$APP/api/admin/recovery-approvals-v2" `
-  -ContentType "application/json" -Headers @{ Origin = $APP; Cookie = $SESSION_SUPERVISOR } -Body $request
+  -ContentType "application/json" -Headers @{ Origin = $APP } -WebSession $WEB_SUPERVISOR -Body $request
 
 $APPROVAL_ID = $created.approval.approval.id
 $created.approval.effectiveStatus        # awaiting_second_approval
@@ -93,7 +113,7 @@ $created.approval.recoveryExecutionEligible   # false, always
 ```powershell
 $second = @{ expectedRevision = 1; password = $PASSWORD } | ConvertTo-Json
 $signed = Invoke-RestMethod -Method Post -Uri "$APP/api/admin/recovery-approvals-v2/$APPROVAL_ID/approvals" `
-  -ContentType "application/json" -Headers @{ Origin = $APP; Cookie = $SESSION_ADMIN } -Body $second
+  -ContentType "application/json" -Headers @{ Origin = $APP } -WebSession $WEB_ADMIN -Body $second
 
 $signed.approval.effectiveStatus              # fully_approved
 $signed.approval.approvalCount                # 2
@@ -102,16 +122,23 @@ $signed.approval.approvalCount                # 2
 The intent expires 24 hours after it is created (`RECOVERY_APPROVAL_EXPIRED` after that). Expired or
 voided intents must be recreated; they are never revived.
 
+The intent's identity is derived from the handover and **the current evidence**, not from the
+idempotency key. Repeating the same request while the evidence is unchanged returns the existing
+approval with HTTP `200` and `replayed: true`; sending a different reason against the same evidence is
+a conflict. A genuinely new intent needs the evidence to move, or a void followed by a reissue. The key
+is recorded for audit and keeps concurrent attempts distinct within one second — it does not create a
+second intent.
+
 ### Step 3 — execute (administrator)
 
 ```powershell
 $execute = @{
   reason         = "Executing the approved recovery."
-  idempotencyKey = "recovery-execute-$(Get-Date -Format yyyyMMdd-HHmmss)"
+  idempotencyKey = "recovery-execute-$(Get-Date -Format yyyyMMdd-HHmmssfff)"
 } | ConvertTo-Json
 
 $result = Invoke-RestMethod -Method Post -Uri "$APP/api/admin/recovery-approvals-v2/$APPROVAL_ID/execute" `
-  -ContentType "application/json" -Headers @{ Origin = $APP; Cookie = $SESSION_ADMIN } -Body $execute
+  -ContentType "application/json" -Headers @{ Origin = $APP } -WebSession $WEB_ADMIN -Body $execute
 
 $result.status                     # committed
 $result.execution.auditId          # audit_logs/{auditId}
@@ -127,7 +154,7 @@ anything — is a `400`. That is deliberate: the payload carries no authority.
 
 ```powershell
 $read = Invoke-RestMethod -Method Get -Uri "$APP/api/admin/recovery-approvals-v2/$APPROVAL_ID/execute" `
-  -Headers @{ Cookie = $SESSION_ADMIN }
+  -WebSession $WEB_ADMIN
 
 $read.execution.applied          # true
 $read.execution.auditId          # same id as the commit response
@@ -201,19 +228,19 @@ on first touch. Its TAP stream is mirrored to `.demo/recovery-execution-http-tes
 
 ---
 
-## 7. Before this is used outside a disposable stack
+## 7. What this runbook assumes
 
-These are unratified deviations recorded in
-[PHASE-8C5-RECOVERY-EXECUTION.md](PHASE-8C5-RECOVERY-EXECUTION.md) §7. They are correct as built and
-tested, but they are decisions:
+These are the executor's adopted defaults, recorded with their reasons in
+[PHASE-8C5-RECOVERY-EXECUTION.md](PHASE-8C5-RECOVERY-EXECUTION.md) §7. They are what the suites verify,
+they are reversible, and none is configurable at run time:
 
 1. **W5 revision** — the aggregate keeps its revision at abandonment; the 8C.1 text said `+1`.
 2. **W8 consumption** — the signed approval is never mutated; the create-once audit row proves
-   consumption.
+   consumption, so a committed retry answers `already_applied` instead of refusing.
 3. **No password at execution** — a live administrator session is required, not a re-entered password.
 4. **No notification** is produced by an abandonment.
 5. **No activity marker** is written to the actor's user document.
 6. **No UI** — this runbook is the operator surface.
 
-Until these are ratified, keep `HANDOVER_RECOVERY_EXECUTION_ENABLED` unset outside the disposable
-stacks. With the flag unset the endpoints do not exist.
+The gate is not a default you can rely on: keep `HANDOVER_RECOVERY_EXECUTION_ENABLED` unset outside
+the disposable stacks. With the flag unset the endpoints do not exist.
