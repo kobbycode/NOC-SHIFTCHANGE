@@ -99,7 +99,10 @@ import { assertNoScheduleConflict, parseShiftTimeRange } from "./shift-overlap";
 import { createHandoverWorkSnapshot, resolveHandoverWorkReadiness } from "./handover-work-snapshot";
 import { assembleShiftOperations } from "./shift-operations-domain";
 import { readOperationStations, readShiftOperationEvents } from "./shift-operations";
-import { createLegacyIncomingAcceptanceEventId } from "./incoming-acceptance-application-domain";
+import {
+  createIncomingAcceptanceActivationReceiptId,
+  createLegacyIncomingAcceptanceEventId,
+} from "./incoming-acceptance-application-domain";
 
 export { EqualHandoverReportDomainError };
 
@@ -1768,10 +1771,10 @@ export interface EqualHandoverAcceptResult {
   acceptingTechnicianUid: string;
 }
 
+// The atomic acceptance writer and this legacy writer must target the same
+// create-once anchor, so they share one derivation rather than two copies of it.
 function equalHandoverActivationReceiptId(documentId: string): string {
-  return `handover-activation-v2-${createHash("sha256")
-    .update(canonical({ namespace: "equal-handover-activation-v2", handoverDocumentId: documentId }))
-    .digest("hex")}`;
+  return createIncomingAcceptanceActivationReceiptId(documentId);
 }
 
 function activationReceiptMaterial(receipt: Omit<EqualHandoverActivationReceipt, "receiptHash">): string {
