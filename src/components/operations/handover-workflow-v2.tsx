@@ -24,10 +24,6 @@ function accra(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString("en-GB", { timeZone: "Africa/Accra" });
 }
 
-function short(value: string | null): string {
-  return value === null ? "—" : value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
-}
-
 export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEnabled }: { uid: string; initialState: EqualHandoverReportState; atomicAcceptanceEnabled: boolean }) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
@@ -51,7 +47,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
   const [acceptedSession, setAcceptedSession] = useState<{ session: HandoverSessionOutcome; label: string } | null>(null);
   const incomingIdentities: ConsoleIncomingIdentity[] = aggregate.identity.incomingTechnicianIds.map((id, index) => {
     const participant = content.participants.find((item) => item.uid === id && item.side === "incoming");
-    return { uid: id, label: `${participant?.name ?? id} (incoming technician ${index === 0 ? "A" : "B"})` };
+    return { uid: id, label: `${participant?.name ?? "Unnamed technician"} (incoming technician ${index === 0 ? "A" : "B"})` };
   });
   const declaredLateReasons: Record<string, string> = Object.fromEntries(
     aggregate.absences
@@ -210,7 +206,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     const password = String(values.get("password") ?? "");
     if (!password) { setError("Your password is required to accept this handover."); return; }
     const submittingUid = acceptingUid;
-    const label = incomingIdentities.find((identity) => identity.uid === submittingUid)?.label ?? submittingUid;
+    const label = incomingIdentities.find((identity) => identity.uid === submittingUid)?.label ?? "selected incoming technician";
     lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`${base}/accept`, {
@@ -224,9 +220,9 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       // confirmed the committed operation; the status below is the authoritative
       // outcome returned by the accept route.
       if (result.status === "ACTIVATED") {
-        setNotice(`Handover accepted. The incoming shift ${result.incomingShiftId} is now active from ${accra(result.receipt?.activatedAt ?? null)}.`);
+        setNotice(`Handover accepted. The incoming shift is now active from ${accra(result.receipt?.activatedAt ?? null)}.`);
       } else if (result.status === "JOINED") {
-        setNotice(`Joined the active incoming shift ${result.incomingShiftId}. Attendance is recorded independently at the acceptance clock.`);
+        setNotice("Joined the active incoming shift. Attendance is recorded independently at the acceptance clock.");
       } else if (result.status === "ALREADY_JOINED") {
         setNotice("This acceptance is already recorded — no duplicate shift or attendance was created.");
       } else {
@@ -295,19 +291,19 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
   return <div className="space-y-6">
     <header className="space-y-1">
       <h1 className="text-2xl font-bold">Equal-technician handover report (v2)</h1>
-      <p className="text-sm">{aggregate.identity.outgoingShiftId} → {aggregate.reservation.reservedIncomingShiftId} · {aggregate.lifecycleStatus.replaceAll("_", " ")} · Revision {aggregate.revision} · Guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}</p>
+      <p className="text-sm">Status: {aggregate.lifecycleStatus.replaceAll("_", " ")} · Revision {aggregate.revision} · Guard {guard ? "active" : "unavailable"}</p>
       <p className="text-sm">Scheduled {accra(aggregate.reservation.scheduledStart)} – {accra(aggregate.reservation.scheduledEnd)} (Africa/Accra)</p>
     </header>
 
     {isCompleted && <section aria-label="Handover activated" className="rounded-xl border border-green-600 p-4 text-sm space-y-1">
       <h2 className="font-semibold text-green-800">Handover activated</h2>
-      <p>This equal-technician handover is complete. The outgoing shift {aggregate.identity.outgoingShiftId} is closed and the incoming shift {aggregate.identity.incomingShiftId} was activated by the first reserved incoming technician&rsquo;s password acceptance. Every subsequent incoming acceptance joins the same active shift with its own independent attendance clock.</p>
-      <p>Frozen report {frozenReport ? `v${frozenReport.version} (${short(frozenReport.id)})` : "unavailable"} · guard {guard ? `r${guard.guardRevision} / epoch ${guard.fencingEpoch}` : "unavailable"}. This record is immutable; further acceptance attempts replay this result.</p>
+      <p>This equal-technician handover is complete. The outgoing shift is closed and the incoming shift was activated by the first reserved incoming technician&rsquo;s password acceptance. Every subsequent incoming acceptance joins the same active shift with its own independent attendance clock.</p>
+      <p>Frozen report {frozenReport ? `version ${frozenReport.version}` : "unavailable"} · guard {guard ? "active" : "unavailable"}. This record is immutable; further acceptance attempts replay this result.</p>
     </section>}
 
     {isAwaitingAcceptance && <section aria-label="Awaiting incoming acceptance" className="rounded-xl border border-amber-500 p-4 text-sm space-y-1">
       <h2 className="font-semibold text-amber-800">Awaiting incoming acceptance</h2>
-      <p>The outgoing pair has committed this handover. The reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} has NOT been created yet — an incoming technician must now accept with their OWN current password, and that first authorized acceptance is what activates the shift exactly once.</p>
+      <p>The outgoing pair has committed this handover. The reserved incoming shift has NOT been created yet — an incoming technician must now accept with their OWN current password, and that first authorized acceptance is what activates the shift exactly once.</p>
       <p>The outgoing shift remains handover_pending and continues to own the operational slot until acceptance; no shift, membership or attendance is fabricated while acceptance is pending.</p>
     </section>}
 
@@ -321,7 +317,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     {myPosition && !isCompleted && !isAwaitingAcceptance && <section className="rounded-xl border p-5 space-y-2 text-sm">
       <h2 className="text-lg font-semibold">Your confirmation</h2>
       <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
-      {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against report {short(myConfirmation.reportBinding.id)} (digest {short(myConfirmation.reportBinding.digest)}).</p>}
+      {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against the frozen report version bound to your confirmation.</p>}
       {myAbsence && <p>A colleague recorded you as {myAbsence.absenceType.replaceAll("_", " ")}; an absence is not a personal confirmation.</p>}
       {canConfirm && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void confirmSelf(event.currentTarget as HTMLFormElement); }}>
         <p className="text-sm text-neutral-600">Confirming is a personal act: it requires <strong>your own current password</strong>, verified server-side before any write and never stored, logged or included in a receipt (§4). A colleague or a supervisor cannot confirm for you.</p>
@@ -334,24 +330,25 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     <section aria-label="Participant confirmations" className="rounded-xl border p-5 space-y-2 text-sm overflow-x-auto">
       <h2 className="text-lg font-semibold">Participant confirmations</h2>
       <table className="w-full text-left">
-        <thead><tr><th>Participant</th><th>Side</th><th>Technician</th><th>State</th><th>Report</th></tr></thead>
+        <thead><tr><th>Participant</th><th>Side</th><th>Technician</th><th>State</th><th>Report binding</th></tr></thead>
         <tbody>{POSITION_LABELS.map((item) => {
           const confirmation = aggregate.confirmations.find((c) => c.position === item.position);
           const positionAbsence = aggregate.absences.find((a) => a.position === item.position);
           const uidFor = item.side === "outgoing" ? aggregate.identity.outgoingTechnicianIds : aggregate.identity.incomingTechnicianIds;
           const technicianUid = (item.position === "outgoing_tech_a" || item.position === "incoming_tech_a") ? uidFor[0] : uidFor[1];
+          const technician = content.participants.find((participant) => participant.uid === technicianUid)?.name ?? "Unnamed technician";
           return <tr key={item.position}>
             <td>{item.label}</td>
             <td>{item.side}</td>
-            <td>{technicianUid === uid ? `${technicianUid} (you)` : technicianUid}</td>
+            <td>{technicianUid === uid ? `${technician} (you)` : technician}</td>
             <td>{participantState(item.position).replaceAll("_", " ")}</td>
-            <td>{confirmation ? short(confirmation.reportBinding.id) : positionAbsence ? positionAbsence.absenceType.replaceAll("_", " ") : "—"}</td>
+            <td>{confirmation ? "bound" : positionAbsence ? positionAbsence.absenceType.replaceAll("_", " ") : "—"}</td>
           </tr>;
         })}</tbody>
       </table>
     </section>
 
-    {frozenReport && <div className="rounded-xl border p-4 text-sm">Frozen report <strong>{frozenReport.id}</strong> (version {frozenReport.version}{frozenReport.supersedesReportId ? `, supersedes ${frozenReport.supersedesReportId}` : ""}) frozen by {frozenReport.frozenBy} at {accra(frozenReport.frozenAt)} · digest {short(frozenReport.digest)}.</div>}
+    {frozenReport && <div className="rounded-xl border p-4 text-sm">Frozen report version {frozenReport.version}{frozenReport.supersedesReportId ? " (supersedes an earlier version)" : ""} frozen by {content.participants.find((participant) => participant.uid === frozenReport.frozenBy)?.name ?? "an unavailable profile"} at {accra(frozenReport.frozenAt)}.</div>}
     {preparationDrifted && <div className="rounded-xl border border-amber-500 p-4 text-sm">The authoritative sources changed since the last preparation. Re-prepare and review the consolidated report before freezing.</div>}
     {!preparation && !preparationDrifted && !frozenReport && <div className="rounded-xl border p-4 text-sm">No preparation exists yet. Prepare the consolidated report to begin the review.</div>}
     {notice && <p className="text-sm text-green-700">{notice}</p>}
@@ -366,13 +363,13 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void declareAbsence(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Absent colleague (declared by a colleague, never self)<select className={field} name="subject" required>
           <option value="">Select participant</option>
-          {content.participants.filter(item => item.uid !== uid).map(item => <option key={item.uid} value={item.uid}>{item.name ?? item.uid} ({item.side})</option>)}
+          {content.participants.filter(item => item.uid !== uid).map(item => <option key={item.uid} value={item.uid}>{item.name ?? "Unnamed technician"} ({item.side})</option>)}
         </select></label>
         <label className="text-sm">Reason<input className={field} name="reason" required maxLength={1000}/></label>
         <label className="text-sm">Reported departure time (outgoing absences only)<input className={field} name="departure" type="datetime-local"/></label>
         <button disabled={busy} className="w-fit rounded-lg bg-blue-700 p-2 text-white">Declare absence</button>
       </form>
-      {absence && <div className="text-sm">Declared: {absence.absenceType.replaceAll("_", " ")} · {absence.technicianUid}
+      {absence && <div className="text-sm">Declared: {absence.absenceType.replaceAll("_", " ")} · {content.participants.find((participant) => participant.uid === absence.technicianUid)?.name ?? "Unnamed technician"}
         <button disabled={busy} className="ml-3 rounded-lg border p-2" onClick={() => void clearAbsence(absence.technicianUid)}>Clear declaration</button>
       </div>}
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void freeze(event.currentTarget as HTMLFormElement); }}>
@@ -419,8 +416,8 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         <h2 className="text-lg font-semibold">Accept handover with a password</h2>
         <p className="text-sm">
           {isAwaitingAcceptance
-            ? <>This is the shared console. The selected reserved incoming technician accepts with <strong>their own current password</strong>; that acceptance activates the reserved incoming shift {aggregate.reservation.reservedIncomingShiftId} exactly once and records <em>their</em> attendance at the authoritative acceptance clock. Their partner joins the same active shift when they accept later.</>
-            : <>The incoming shift {aggregate.identity.incomingShiftId} is already active. Accepting joins that same shift with an independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
+            ? <>This is the shared console. The selected reserved incoming technician accepts with <strong>their own current password</strong>; that acceptance activates the reserved incoming shift exactly once and records <em>their</em> attendance at the authoritative acceptance clock. Their partner joins the same active shift when they accept later.</>
+            : <>The incoming shift is already active. Accepting joins that same shift with an independent attendance time; the first technician&rsquo;s clock is never overwritten and no new shift is created.</>}
         </p>
         <p className="text-sm text-neutral-600">The password is verified server-side before any write and is never stored, logged, or included in the audit receipt (§4). A supervisor or an outgoing technician cannot accept this handover for the incoming technician (§10). The accepting technician is signed in on this console by their acceptance.</p>
         <IncomingIdentityPicker
@@ -430,7 +427,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
           onChange={(identityUid) => { setAcceptingUid(identityUid); setError(""); setNotice(""); }}
         />
         {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
-          <label className="text-sm">{incomingIdentities.find((identity) => identity.uid === acceptingUid)?.label ?? acceptingUid}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+          <label className="text-sm">{incomingIdentities.find((identity) => identity.uid === acceptingUid)?.label ?? "Select an incoming technician"}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
           <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
         </form>}
         {acceptedUids.includes(acceptingUid) && <p className="text-sm text-green-700">This acceptance was recorded from this console. A further attempt for the same technician would replay it.</p>}
@@ -450,7 +447,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         <p><strong>Scheduled:</strong> {accra(content.staff.scheduledStart)} – {accra(content.staff.scheduledEnd)}</p>
         <p><strong>Actual start:</strong> {accra(content.staff.actualStart)}</p>
         <p><strong>Handover started:</strong> {accra(content.staff.handoverStartedAt)}</p>
-        <p><strong>Successor slot:</strong> {content.slotLineage.successorSlotToken} (gen {content.slotLineage.successorGeneration})</p>
+        <p><strong>Successor slot generation:</strong> {content.slotLineage.successorGeneration}</p>
       </div>
 
       <div className="rounded-xl border p-5 space-y-2 text-sm overflow-x-auto">
@@ -458,10 +455,10 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         <table className="w-full text-left text-sm">
           <thead><tr><th>Participant</th><th>Side</th><th>Reporting</th><th>Clock-in</th><th>Clock-out</th><th>Clock evidence</th><th>Departure</th><th>Worked hours</th><th>Payable</th><th>Absence</th><th>Evidence</th></tr></thead>
           <tbody>{content.attendance.map(row => { const labels = reportAttendanceLabels(row, content.outgoingShiftId); return <tr key={row.position}>
-            <td>{row.name ?? row.uid}</td><td>{row.side}</td><td>{labels.reporting}</td><td>{row.clockIn === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockIn)}</td><td>{row.clockOut === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockOut)}</td><td>{labels.clocks}</td>
+            <td>{row.name ?? "Unnamed technician"}</td><td>{row.side}</td><td>{labels.reporting}</td><td>{row.clockIn === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockIn)}</td><td>{row.clockOut === null ? labels.clocks === "Not yet due" ? "Not yet due" : "Unknown" : accra(row.clockOut)}</td><td>{labels.clocks}</td>
             <td>{row.departureProvenance ?? "—"}</td><td>{labels.hours}</td>
             <td>{row.payableHours}</td><td>{row.absenceDeclared?.replaceAll("_", " ") ?? "—"}</td>
-            <td>{row.reportingEvidence ? `${row.reportingEvidence.kind} · ${row.reportingEvidence.personallyAuthenticated ? "personal" : row.reportingEvidence.attestedByUid ? `attested by ${row.reportingEvidence.attestedByUid}` : "reporting record only"} · ${accra(row.reportingEvidence.eventTime)}` : row.legacyAttendance ? "legacy record (see reporting status)" : "No evidence recorded"}</td>
+            <td>{row.reportingEvidence ? `${row.reportingEvidence.kind} · ${row.reportingEvidence.personallyAuthenticated ? "personal" : row.reportingEvidence.attestedByUid ? `attested by ${content.participants.find((participant) => participant.uid === row.reportingEvidence?.attestedByUid)?.name ?? "an unavailable profile"}` : "reporting record only"} · ${accra(row.reportingEvidence.eventTime)}` : row.legacyAttendance ? "legacy record (see reporting status)" : "No evidence recorded"}</td>
           </tr>; })}</tbody>
         </table>
         <p>Reporting confirmation does not establish personal clock-in, clock-out or worked hours. Unknown clocks and hours remain unknown.</p>
@@ -483,8 +480,8 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         <ul>{content.pendingTasks.map(task => <li key={task.id}><strong>{task.title}</strong> · {task.status.replaceAll("_", " ")} · {task.priority} · disposition: {task.disposition.replaceAll("_", " ")}{task.carryForwardEligible ? " · carry-forward eligible" : ""}</li>)}</ul>
         <h3 className="pt-2 font-semibold">Terminal task evidence ({content.terminalTaskEvidence.length})</h3>
         {content.terminalTaskEvidence.length === 0 && <p>No tasks completed or cancelled during this shift.</p>}
-        <ul>{content.terminalTaskEvidence.map(task => <li key={task.id}>{task.title} · {task.status} · closed {accra(task.updatedAt)} · work hash {short(task.workHash)}</li>)}</ul>
-        <p>Work snapshot {short(content.workSnapshot.version)}</p>
+        <ul>{content.terminalTaskEvidence.map(task => <li key={task.id}>{task.title} · {task.status} · closed {accra(task.updatedAt)}</li>)}</ul>
+        <p>Work snapshot {content.workSnapshot.version}</p>
       </div>
 
       <div className="rounded-xl border p-5 space-y-2 text-sm">
@@ -499,23 +496,22 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       </div>
 
       {content.corrections.length > 0 && <div className="rounded-xl border p-5 space-y-1 text-sm"><h3 className="font-semibold">Report corrections</h3>
-        <ul>{content.corrections.map(item => <li key={item.id}>{accra(item.recordedAt)} · {item.recordedBy}: {item.note}</li>)}</ul></div>}
+        <ul>{content.corrections.map(item => <li key={item.id}>{accra(item.recordedAt)} · {content.participants.find((participant) => participant.uid === item.recordedBy)?.name ?? "recorded by an unavailable profile"}: {item.note}</li>)}</ul></div>}
 
       {preparation && <div className="rounded-xl border p-5 space-y-1 text-sm">
         <h3 className="font-semibold">Preparation revision {preparation.preparationRevision}</h3>
-        <p>Content digest {short(preparation.contentDigest)} · Evidence hash {short(preparation.evidenceSnapshotHash)} · Work snapshot {short(preparation.workSnapshotVersion)}</p>
-        <p>Reviewed against reservation revision {preparation.aggregateRevision} · Guard r{preparation.guardRevision} epoch {preparation.fencingEpoch}</p>
+        <p>Work snapshot {preparation.workSnapshotVersion}</p>
+        <p>Reviewed against reservation revision {preparation.aggregateRevision}</p>
         <p>First prepared {accra(preparation.createdAt)} · last updated {accra(preparation.updatedAt)}</p>
         <details><summary className="cursor-pointer">Revision history ({preparation.revisionHistory.length})</summary>
-          <ul>{preparation.revisionHistory.map(entry => <li key={entry.preparationRevision}>Revision {entry.preparationRevision} · {accra(entry.preparedAt)} · {entry.preparedBy} · {short(entry.contentDigest)}{entry.reason ? ` · ${entry.reason}` : ""}</li>)}</ul>
+          <ul>{preparation.revisionHistory.map(entry => <li key={entry.preparationRevision}>Revision {entry.preparationRevision} · {accra(entry.preparedAt)} · {content.participants.find((participant) => participant.uid === entry.preparedBy)?.name ?? "an unavailable profile"}{entry.reason ? ` · ${entry.reason}` : ""}</li>)}</ul>
         </details>
       </div>}
 
       {frozenReport && <div className="rounded-xl border p-5 space-y-1 text-sm">
         <h3 className="font-semibold">Freeze binding</h3>
-        <p>Report {frozenReport.id} · digest {short(frozenReport.digest)} · evidence {short(frozenReport.evidenceSnapshotHash)}</p>
-        <p>Reservation {short(frozenReport.reservationId)} · preparation revision {frozenReport.preparationRevision} · aggregate revision {frozenReport.aggregateRevision}</p>
-        <p>Guard revision {frozenReport.guardRevision} · fencing epoch {frozenReport.fencingEpoch} · frozen by {frozenReport.frozenBy} at {accra(frozenReport.frozenAt)}</p>
+        <p>Preparation revision {frozenReport.preparationRevision} · aggregate revision {frozenReport.aggregateRevision}</p>
+        <p>Frozen by {content.participants.find((participant) => participant.uid === frozenReport.frozenBy)?.name ?? "an unavailable profile"} at {accra(frozenReport.frozenAt)}</p>
         <p>Reason: {frozenReport.reason}{frozenReport.correctionNote ? ` · Correction: ${frozenReport.correctionNote}` : ""}</p>
       </div>}
     </section>

@@ -97,11 +97,6 @@ function formatTimestamp(value: string | null): string {
   return new Date(parsed).toLocaleString();
 }
 
-function shortHash(value: string | null): string {
-  if (!value) return "—";
-  return value.length > 20 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
-}
-
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   try {
     return (await response.json()) as Record<string, unknown>;
@@ -510,9 +505,6 @@ export function HandoverRecoveryPanel({
           >
             Cancel
           </button>
-          <span className="text-xs text-slate-500">
-            Idempotency key: <span className="font-mono">{shortHash(idempotencyKey)}</span>
-          </span>
         </div>
       </div>
     );
@@ -541,22 +533,11 @@ export function HandoverRecoveryPanel({
           </Badge>
           <span className="text-xs text-slate-500">revision {record.revision}</span>
         </div>
-        <p className="mt-2 break-all font-mono text-[11px] text-slate-500">{record.id}</p>
         <p className="mt-2">{record.reason}</p>
         <p className="mt-1 text-xs text-slate-500">
           Requested by {record.requestedBy} at {formatTimestamp(record.requestedAt)} · expires{" "}
           {formatTimestamp(record.expiresAt)}
         </p>
-        {record.replacesApprovalId ? (
-          <p className="mt-1 break-all text-[11px] text-slate-400">
-            Replaces {record.replacesApprovalId}
-          </p>
-        ) : null}
-        {record.reissuedAsApprovalId ? (
-          <p className="mt-1 break-all text-[11px] text-slate-400">
-            Reissued as {record.reissuedAsApprovalId}
-          </p>
-        ) : null}
         {record.voidedBy ? (
           <p className="mt-1 text-xs text-slate-500">
             Voided by {record.voidedBy} at {formatTimestamp(record.voidedAt)}: {record.voidReason}
@@ -571,8 +552,7 @@ export function HandoverRecoveryPanel({
             {record.approvals.map((signature) => (
               <li key={`${signature.actorUid}-${signature.approvedAt}`} className="text-xs text-slate-600 dark:text-slate-300">
                 <span className="font-medium">{ROLE_LABELS[signature.actorRole]}</span>{" "}
-                {signature.actorUid} · {formatTimestamp(signature.approvedAt)} · proof{" "}
-                {shortHash(signature.proofFingerprint)}
+                signed {formatTimestamp(signature.approvedAt)}
               </li>
             ))}
             {view.requiredSecondRole ? (
@@ -603,8 +583,7 @@ export function HandoverRecoveryPanel({
               <p className="inline-flex items-center gap-2 font-medium text-emerald-700">
                 <ShieldCheck className="h-4 w-4" />
                 Recovery applied by {execution.status.executedBy ?? "an administrator"} at{" "}
-                {formatTimestamp(execution.status.executedAt)} · audit{" "}
-                {shortHash(execution.status.auditId)}
+                {formatTimestamp(execution.status.executedAt)}
               </p>
             ) : (
               <>
@@ -732,13 +711,10 @@ export function HandoverRecoveryPanel({
               </Badge>
               <p className="mt-1 text-xs text-slate-500">{eligibility.reason}</p>
             </Field>
-            <Field label="Evidence digest">
-              <p className="font-mono text-xs" title={eligibility.evidenceDigest.value}>
-                {shortHash(eligibility.evidenceDigest.value)}
-              </p>
+            <Field label="Evaluated">
+              <p className="text-sm">{formatTimestamp(eligibility.evaluatedAt)}</p>
               <p className="text-xs text-slate-500">
-                Evaluated {formatTimestamp(eligibility.evaluatedAt)} · this is a point-in-time
-                classification, not an execution authorization.
+                This is a point-in-time classification, not an execution authorization.
               </p>
             </Field>
           </div>

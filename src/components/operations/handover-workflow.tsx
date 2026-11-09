@@ -20,6 +20,7 @@ export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: 
   const manager = role === "supervisor" || role === "admin";
   const collecting = handover?.lifecycleStatus === "collecting_confirmations";
   const me = report.participants.find(person => person.technicianUid === uid);
+  const nameFor = (technicianUid: string) => report.content.attendance.find(row => row.uid === technicianUid)?.name ?? null;
   const transferBlockers = [
     ...(!report.frozen ? ["The report must be frozen for review."] : []),
     ...(report.participants.some(person => person.state === "awaiting_confirmation") ? ["Every participant position must be resolved."] : []),
@@ -56,7 +57,7 @@ export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: 
       <p className="text-sm">Review sections A–E and pending work before confirming. Report revisions invalidate earlier confirmations. Task acceptance remains a separate action.</p>
       {message && <p role="status" className="text-green-700">{message}</p>}{error && <p role="alert" className="text-red-700">{error}</p>}
       {handover && <p className="text-sm">Revision {handover.revision} · {handover.lifecycleStatus.replaceAll("_", " ")} · {report.participants.filter(person => person.state !== "awaiting_confirmation").length}/4 participant positions resolved</p>}
-      {handover?.reportBinding && <div className="break-all rounded-lg bg-slate-100 p-3 text-xs dark:bg-slate-900"><p>Report: {handover.reportBinding.id}</p><p>Report SHA-256: {handover.reportBinding.digest}</p><p>Confirmation snapshot: {report.snapshotHash}</p></div>}
+      {handover?.reportBinding && <div className="rounded-lg bg-slate-100 p-3 text-xs dark:bg-slate-900"><p>The reviewed report is frozen and each confirmation is bound to that frozen evidence.</p></div>}
       {!handover && <p>Supervisor: reserve the incoming permanent pair from the Handovers screen after beginning handover in Shift Management.</p>}
       {collecting && <fieldset disabled={busy} className="space-y-5 disabled:opacity-60">
         {manager && <>
@@ -73,7 +74,7 @@ export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: 
           </form>)}</div>
           <details className="rounded-lg border p-4"><summary className="cursor-pointer font-semibold">Authorized absence or supervisor exception</summary><p className="my-3 text-sm">Record only a genuine operational reason. An exception is supervisor evidence, not a technician password confirmation.</p>
             <form className="space-y-3" onSubmit={event => { const values = form(event), operation = String(values.get("operation")); void act("handover/resolution", { ...binding, technicianUid: String(values.get("technicianUid")), operation, ...(operation === "clear" ? {} : { reason: String(values.get("reason")) }), ...(operation === "exception" ? { category: String(values.get("category")) } : {}) }); }}>
-              <label className="block text-sm">Participant<select className={field} name="technicianUid">{report.participants.map(person => <option key={person.position} value={person.technicianUid}>{person.position.replaceAll("_", " ")} · {person.technicianUid}</option>)}</select></label>
+              <label className="block text-sm">Participant<select className={field} name="technicianUid">{report.participants.map(person => <option key={person.position} value={person.technicianUid}>{person.position.replaceAll("_", " ")}{nameFor(person.technicianUid) ? ` · ${nameFor(person.technicianUid)}` : ""}</option>)}</select></label>
               <label className="block text-sm">Action<select className={field} name="operation"><option value="absence">Record absence</option><option value="exception">Record supervisor exception</option><option value="clear">Clear resolution</option></select></label>
               <label className="block text-sm">Exception category<select className={field} name="category"><option value="unavailable">Unavailable</option><option value="emergency">Emergency</option><option value="operational_constraint">Operational constraint</option></select></label>
               <label className="block text-sm">Reason<textarea className={field} name="reason" maxLength={2000}/></label><button className={button}>Save participant resolution</button>

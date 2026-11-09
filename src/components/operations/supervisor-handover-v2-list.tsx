@@ -12,7 +12,7 @@ function stamp(value: string | null): string {
 function teamSummary(members: SupervisorV2ParticipantView[]): string {
   if (members.length === 0) return "—";
   return members.map((member) => {
-    const who = member.name ?? member.uid;
+    const who = member.name ?? "Unnamed technician";
     if (member.absent) return `${who} (absent)`;
     if (member.confirmed) return `${who} (confirmed)`;
     return `${who} (awaiting)`;
@@ -39,7 +39,7 @@ export function SupervisorHandoverV2List({ rows }: { rows: SupervisorV2HandoverR
       : <ul className="space-y-3">{rows.map((row) => <li key={row.outgoingShiftId}>
         <Link href={`/supervisor/handovers/v2/${encodeURIComponent(row.outgoingShiftId)}`} className="block space-y-2 rounded-xl border p-5 hover:border-blue-500">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="font-semibold">{row.outgoingShiftId} → {row.incomingShiftId ?? "incoming not yet created"}</p>
+            <p className="font-semibold">Handover starting {stamp(row.scheduledStart)}</p>
             {statusBadge(row)}
           </div>
           <p className="text-sm">{row.lifecycleStatus.replaceAll("_", " ")} · Revision {row.revision} · Scheduled {stamp(row.scheduledStart)} · Initiated {stamp(row.initiationAt)}</p>

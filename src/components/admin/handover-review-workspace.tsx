@@ -100,11 +100,6 @@ function formatTimestamp(value: string | null): string {
   return new Date(parsed).toLocaleString();
 }
 
-function shortHash(value: string | null): string {
-  if (!value) return "—";
-  return value.length > 20 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
-}
-
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   try {
     return (await response.json()) as Record<string, unknown>;
@@ -573,8 +568,8 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
       });
       setAdjudicationNotice(
         result.replayed
-          ? `Adjudication ${result.adjudication.id} was already recorded by this administrator. The original record is unchanged.`
-          : `Adjudication ${result.adjudication.id} recorded. No operational evidence, review case or review decision was changed.`,
+          ? "This adjudication was already recorded by this administrator. The original record is unchanged."
+          : "Adjudication recorded. No operational evidence, review case or review decision was changed.",
       );
       setAdjudicationFormOpen(false);
       setAdjudicationFinding("");
@@ -749,9 +744,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       <p className="mt-1 text-xs text-slate-500">
                         {formatTimestamp(item.scheduledStart)} → {formatTimestamp(item.scheduledEnd)}
                       </p>
-                      <p className="mt-2 break-all font-mono text-[11px] text-slate-400">
-                        {item.handoverDocumentId}
-                      </p>
                       <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
                         {item.reviewReasons[0]?.message ??
                           "No review reason is raised; this completion is fully proven."}
@@ -800,29 +792,20 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                     <h2 className="mt-3 text-lg font-semibold">
                       {review.shiftType === "night" ? "Night" : "Morning"} handover review
                     </h2>
-                    <p className="mt-1 break-all font-mono text-xs text-slate-400">
-                      {review.handoverDocumentId}
-                    </p>
                   </div>
                   <div className="text-right text-xs text-slate-500">
                     <p>Reviewed at</p>
                     <p className="font-medium">{formatTimestamp(review.generatedAt)}</p>
-                    <p className="mt-2">Evidence fingerprint</p>
-                    <p className="font-mono" title={review.evidenceFingerprint}>
-                      {shortHash(review.evidenceFingerprint)}
-                    </p>
                   </div>
                 </div>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <Field label="Outgoing shift">
-                    <p className="break-all font-mono text-xs">{review.shifts.outgoing.shiftId}</p>
                     <p className="text-xs text-slate-500">
                       Status: {review.shifts.outgoing.status ?? "unknown"}
                     </p>
                   </Field>
                   <Field label="Incoming shift">
-                    <p className="break-all font-mono text-xs">{review.shifts.incoming.shiftId}</p>
                     <p className="text-xs text-slate-500">
                       Status: {review.shifts.incoming.status ?? "unknown"}
                     </p>
@@ -843,16 +826,12 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       {review.guardLifecycleReason ?? "no reason"}
                     </p>
                   </Field>
-                  <Field label="Guard document">
+                  <Field label="Reservation guard">
                     {review.guard ? (
                       <>
-                        <p className="break-all font-mono text-xs">{review.guard.id}</p>
                         <p className="text-xs text-slate-500">
                           {review.guard.ownerLifecycleState} · revision {review.guard.guardRevision} ·
                           fencing {review.guard.fencingEpoch}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          Terminal evidence: {review.guard.terminalEvidenceRef ?? "none"}
                         </p>
                         <p className="text-xs text-slate-500">
                           Finalization audit: {review.guard.finalizationAuditPresent ? "present" : "absent"}
@@ -874,32 +853,18 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               <Section title="Activation and frozen report">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Activation receipt">
-                    <p className="break-all font-mono text-xs">{review.activation.receiptId}</p>
                     <p className="text-xs text-slate-500">
                       Present: {review.activation.present ? "yes" : "no"} · Valid:{" "}
                       {review.activation.valid ? "yes" : "no"}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Actor: {review.activation.actorUid ?? "—"}
-                    </p>
-                    <p className="text-xs text-slate-500">
                       Activated at: {formatTimestamp(review.activation.activatedAt)}
-                    </p>
-                    <p className="text-xs text-slate-500" title={review.activation.receiptHash ?? undefined}>
-                      Hash: {shortHash(review.activation.receiptHash)}
                     </p>
                     {review.activation.message ? (
                       <p className="mt-1 text-xs text-amber-700">{review.activation.message}</p>
                     ) : null}
                   </Field>
                   <Field label="Frozen v2 report">
-                    <p className="break-all font-mono text-xs">{review.report.reportId ?? "—"}</p>
-                    <p className="text-xs text-slate-500">
-                      Digest: <span title={review.report.digest ?? undefined}>{shortHash(review.report.digest)}</span>
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Evidence snapshot: {shortHash(review.report.evidenceSnapshotHash)}
-                    </p>
                     <p className="text-xs text-slate-500">
                       Binding valid: {review.report.valid ? "yes" : "no"}
                     </p>
@@ -922,9 +887,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       </p>
                       <p className="mt-1 text-sm font-medium">
                         {participant.fullName ?? "Unnamed account"}
-                      </p>
-                      <p className="break-all font-mono text-[11px] text-slate-500">
-                        {participant.technicianUid}
                       </p>
                     </li>
                   ))}
@@ -950,9 +912,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             <p className="font-medium">
                               {application.fullName ?? "Unnamed account"}
                             </p>
-                            <p className="break-all font-mono text-[11px] text-slate-500">
-                              {application.technicianUid}
-                            </p>
                             <p className="text-xs text-slate-500">
                               {POSITION_LABELS[application.position] ?? application.position}
                             </p>
@@ -974,9 +933,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             <p>{application.receiptPresent ? "present" : "absent"}</p>
                             <p>Outcome: {application.outcome ?? "—"}</p>
                             <p>Applied: {formatTimestamp(application.operationalAppliedAt)}</p>
-                            <p title={application.receiptHash ?? undefined}>
-                              Hash: {shortHash(application.receiptHash)}
-                            </p>
                           </td>
                           <td className="py-3 pr-4 text-xs text-slate-500">
                             <p>Evidence: {application.evidencePresent ? "yes" : "no"}</p>
@@ -1009,11 +965,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       >
                         <p className="font-mono text-xs">{item.code}</p>
                         <p className="mt-1">{item.message}</p>
-                        {item.subjectUid ? (
-                          <p className="mt-1 break-all font-mono text-[11px]">
-                            {item.subjectUid}
-                          </p>
-                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -1027,7 +978,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       {review.absences.map((absence) => (
                         <li key={`${absence.technicianUid}-${absence.absenceType}`}>
                           <span className="font-medium">{absence.absenceType.replaceAll("_", " ")}</span>{" "}
-                          — {absence.reason} ({absence.technicianUid}, recorded by{" "}
+                          — {absence.reason} (recorded by{" "}
                           {absence.recordedBy} at {formatTimestamp(absence.recordedAt)})
                         </li>
                       ))}
@@ -1083,15 +1034,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   adjudication.eligibility.acknowledgedDecision.decisionType
                                 ]}
                               </p>
-                              <p className="break-all font-mono text-[11px] text-slate-500">
-                                {adjudication.eligibility.acknowledgedDecision.id}
-                              </p>
                               <p className="text-xs text-slate-500">
                                 Recorded{" "}
                                 {formatTimestamp(
                                   adjudication.eligibility.acknowledgedDecision.recordedAt,
-                                )}{" "}
-                                by {adjudication.eligibility.acknowledgedDecision.actorUid}
+                                )}
                               </p>
                               <p className="text-xs text-slate-500">
                                 Case after:{" "}
@@ -1107,12 +1054,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 Classification:{" "}
                                 {CLASSIFICATION_LABELS[
                                   adjudication.eligibility.acknowledgedDecision.classification
-                                ]}{" "}
-                                · fingerprint{" "}
-                                {shortHash(
-                                  adjudication.eligibility.acknowledgedDecision
-                                    .evidenceFingerprint,
-                                )}
+                                ]}
                               </p>
                             </>
                           ) : (
@@ -1130,25 +1072,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 ]
                               : "—"}
                           </p>
-                          <p
-                            className="text-xs text-slate-500"
-                            title={adjudication.eligibility.previousEvidenceDigest ?? undefined}
-                          >
-                            Previous digest:{" "}
-                            {shortHash(adjudication.eligibility.previousEvidenceDigest)}
-                          </p>
                           <p className="mt-2 text-xs text-slate-500">Current classification</p>
                           <p>
                             {CLASSIFICATION_LABELS[
                               adjudication.eligibility.currentClassification
                             ]}
-                          </p>
-                          <p
-                            className="text-xs text-slate-500"
-                            title={adjudication.eligibility.currentEvidenceDigest}
-                          >
-                            Current digest:{" "}
-                            {shortHash(adjudication.eligibility.currentEvidenceDigest)}
                           </p>
                         </Field>
                       </div>
@@ -1166,11 +1094,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                               >
                                 <p className="font-mono text-xs">{reference.code}</p>
                                 <p className="mt-1">{reference.message}</p>
-                                {reference.subjectUid ? (
-                                  <p className="mt-1 break-all font-mono text-[11px]">
-                                    {reference.subjectUid}
-                                  </p>
-                                ) : null}
                                 <ul className="mt-2 space-y-1">
                                   {reference.references.map((path) => (
                                     <li
@@ -1246,10 +1169,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                               >
                                 Cancel
                               </button>
-                              <span className="text-xs text-slate-500">
-                                Idempotency key:{" "}
-                                <span className="font-mono">{shortHash(adjudicationKey)}</span>
-                              </span>
                             </div>
                           </div>
                         ) : (
@@ -1302,21 +1221,18 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                     {formatTimestamp(record.adjudicatedAt)}
                                   </p>
                                 </div>
-                                <p className="mt-1 break-all font-mono text-[11px] text-slate-500">
-                                  {record.id}
-                                </p>
                                 <p className="mt-2">{record.finding}</p>
                                 <p className="mt-1 text-xs text-slate-500">
-                                  Recorded by {record.actorUid} ({record.actorRole})
+                                  Recorded by{" "}
+                                  {record.actorRole === "admin" ? "an administrator" : record.actorRole}
                                 </p>
                                 <p className="mt-1 text-[11px] text-slate-400">
-                                  Original decision {record.originalDecisionId} ·{" "}
                                   {CLASSIFICATION_LABELS[record.originalDecisionClassification]} →{" "}
                                   {CLASSIFICATION_LABELS[record.currentClassification]}
                                 </p>
                                 <p className="text-[11px] text-slate-400">
                                   Status: {record.status.replaceAll("_", " ")} · operational
-                                  effect: {record.operationalEffect} · audit {record.auditId}
+                                  effect: {record.operationalEffect}
                                 </p>
                               </li>
                             ))}
@@ -1449,9 +1365,6 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       >
                         {submitting ? "Recording…" : "Record decision"}
                       </button>
-                      <span className="text-xs text-slate-400">
-                        Idempotency key: <span className="font-mono">{shortHash(idempotencyKey)}</span>
-                      </span>
                     </div>
                   </div>
                 )}
@@ -1476,7 +1389,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           </p>
                         </div>
                         <p className="mt-1 text-xs text-slate-500">
-                          {decision.actorUid} · {decision.caseStatusBefore} →{" "}
+                          {decision.caseStatusBefore} →{" "}
                           {decision.caseStatusAfter} · revision {decision.caseRevisionAfter}
                         </p>
                         <p className="mt-2">{decision.reason}</p>
@@ -1498,8 +1411,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           </p>
                         ) : null}
                         <p className="mt-1 text-[11px] text-slate-400">
-                          Classification: {CLASSIFICATION_LABELS[decision.classification]} ·
-                          fingerprint {shortHash(decision.evidenceFingerprint)}
+                          Classification: {CLASSIFICATION_LABELS[decision.classification]}
                         </p>
                       </li>
                     ))}
@@ -1510,8 +1422,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               {review.caseRecord ? (
                 <p className="inline-flex items-center gap-2 text-xs text-slate-400">
                   <TriangleAlert className="h-3.5 w-3.5" />
-                  Case created by {review.caseRecord.createdBy} · last updated{" "}
-                  {formatTimestamp(review.caseRecord.updatedAt)}
+                  Case last updated {formatTimestamp(review.caseRecord.updatedAt)}
                 </p>
               ) : null}
             </>

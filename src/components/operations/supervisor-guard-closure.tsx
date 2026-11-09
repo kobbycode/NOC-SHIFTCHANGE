@@ -26,10 +26,6 @@ type FinalizeEnvelope = {
   audit?: { id?: string; state?: string };
 };
 
-function short(value: string | null | undefined): string {
-  return value ? value.slice(0, 12) : "—";
-}
-
 export function SupervisorGuardClosure({
   shiftId,
   subjectUid,
@@ -94,17 +90,17 @@ export function SupervisorGuardClosure({
   if (done !== null) {
     return <div className="rounded-lg border border-green-600 p-3 text-sm space-y-1">
       <p className="font-semibold text-green-800">Reservation guard closed exceptionally.</p>
-      <p>Mode {done.mode ?? "exceptional_closure"}{done.replayed ? " (replayed)" : ""} · guard revision {done.guard?.revision ?? "—"} · terminal evidence {short(done.guard?.terminalEvidenceRef)}{done.audit?.id ? ` · audit ${done.audit.id}` : ""}.</p>
-      <p>No acceptance, attendance, membership or clock time was created for {subjectName ?? subjectUid}. The documented absence remains their only record.</p>
+      <p>Mode {done.mode ?? "exceptional_closure"}{done.replayed ? " (replayed)" : ""} · guard revision {done.guard?.revision ?? "—"}.</p>
+      <p>No acceptance, attendance, membership or clock time was created for {subjectName ?? "the absent technician"}. The documented absence remains their only record.</p>
       <p className="text-neutral-600">Closure notifications are not emitted; no delivery is claimed.</p>
     </div>;
   }
 
   return <div className="rounded-lg border border-amber-500 p-3 text-sm space-y-2">
-    <p className="font-semibold text-amber-800">Exceptional closure for {subjectName ?? subjectUid}</p>
+    <p className="font-semibold text-amber-800">Exceptional closure for {subjectName ?? "the absent technician"}</p>
     <p>One reserved incoming technician accepted; the other has an authoritative <em>not yet in</em> absence declaration and no application records.</p>
     <p>Authoritative absence reason: <strong>{absenceReason}</strong></p>
-    <p className="text-neutral-700">This closes the reservation guard only. It creates no acceptance, attendance, membership, clock time or personal receipt for {subjectName ?? subjectUid}.</p>
+    <p className="text-neutral-700">This closes the reservation guard only. It creates no acceptance, attendance, membership, clock time or personal receipt for {subjectName ?? "the absent technician"}.</p>
     <form className="grid gap-2" onSubmit={event => { event.preventDefault(); void submit(event.currentTarget as HTMLFormElement); }}>
       <label className="text-sm">Supervisor closure reason<input className={field} name="reason" required maxLength={2000}/></label>
       <button disabled={busy} className="w-fit rounded-lg bg-amber-700 p-2 text-white">{busy ? "Closing…" : "Authorize exceptional guard closure"}</button>

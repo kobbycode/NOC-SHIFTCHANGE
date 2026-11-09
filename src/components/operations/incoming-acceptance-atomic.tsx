@@ -41,9 +41,6 @@ const GUARD_STATE_LABELS: Record<string, string> = {
 function stamp(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString("en-GB", { timeZone: "Africa/Accra" }) : "—";
 }
-function short(value: string | null | undefined): string {
-  return value ? value.slice(0, 12) : "—";
-}
 
 type AcceptanceStatus = {
   applied: boolean;
@@ -161,7 +158,6 @@ export function IncomingAcceptanceAtomicPanel({
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [finalizeError, setFinalizeError] = useState("");
   const [finalizeUnconfirmed, setFinalizeUnconfirmed] = useState("");
-  const [finalizeDone, setFinalizeDone] = useState<FinalizeEnvelope | null>(null);
   const submitLock = useRef(false);
   const finalizeLock = useRef(false);
 
@@ -244,6 +240,7 @@ export function IncomingAcceptanceAtomicPanel({
   const data = statusView.phase === "ready" ? statusView.data : null;
   const acceptance = data?.acceptance ?? null;
   const selectedIdentity = incomingIdentities.find((identity) => identity.uid === acceptingUid) ?? null;
+  const selectedLabel = selectedIdentity?.label ?? "the selected incoming technician";
   const acceptedHere = accepted !== null && accepted.session?.acceptingTechnicianUid === acceptingUid
     ? accepted
     : null;
@@ -255,8 +252,6 @@ export function IncomingAcceptanceAtomicPanel({
     guardState !== "guard_finalized";
   const declaredLateReason = acceptingUid === "" ? null : declaredLateReasons[acceptingUid] ?? null;
   const effectiveLateRequired = declaredLateReason === null && lateReasonRequired;
-  const receiptId = acceptance?.receiptId ?? acceptedHere?.acceptance?.receiptId ?? null;
-  const receiptHash = acceptance?.receiptHash ?? acceptedHere?.acceptance?.receiptHash ?? null;
   const appliedAt = acceptance?.operationalAppliedAt ?? acceptedHere?.acceptance?.operationalAppliedAt ?? null;
   const outcome = acceptance?.outcome ?? acceptedHere?.outcome ?? null;
 
@@ -365,7 +360,6 @@ export function IncomingAcceptanceAtomicPanel({
       try { result = (await response.json()) as FinalizeEnvelope; }
       catch { result = null; }
       if (response.ok && result?.success) {
-        setFinalizeDone(result);
         await onAuthoritativeChange();
         await readStatus(false);
         return;
@@ -400,7 +394,7 @@ export function IncomingAcceptanceAtomicPanel({
     />
 
     {statusView.phase === "select" && <p className="text-sm text-neutral-600" role="status">Select the incoming technician who is accepting at this console to read their acceptance status.</p>}
-    {statusView.phase === "loading" && <p className="text-sm" role="status">Reading the acceptance status of {selectedIdentity?.label ?? acceptingUid}…</p>}
+    {statusView.phase === "loading" && <p className="text-sm" role="status">Reading the acceptance status of {selectedLabel}…</p>}
     {statusView.phase === "error" && <div className="space-y-2 text-sm">
       <p role="alert" className="text-red-700">{statusView.message}</p>
       <button type="button" disabled={busy} onClick={() => void readStatus(true)} className="rounded-lg border p-2">Refresh acceptance status</button>
@@ -408,12 +402,12 @@ export function IncomingAcceptanceAtomicPanel({
     </div>}
 
     {data !== null && <div className="rounded-lg border p-3 text-sm space-y-1">
-      <p>Acceptance status for <strong>{selectedIdentity?.label ?? acceptingUid}</strong></p>
+      <p>Acceptance status for <strong>{selectedLabel}</strong></p>
       <p>Status: <strong>{applied ? "acceptance recorded and validated" : (data.status ?? "unknown").replaceAll("_", " ").toLowerCase()}</strong>{data.reason ? ` · ${data.reason.replaceAll("_", " ").toLowerCase()}` : ""}</p>
       {!applied && <p className="text-neutral-600">Guidance: {(data.guidance ?? "NONE").replaceAll("_", " ").toLowerCase()}.</p>}
       {data.partnerApplied !== undefined && <p>Partner acceptance: {data.partnerApplied ? "recorded" : "not yet recorded"}.</p>}
       {guardState && <p>Reservation guard: {GUARD_STATE_LABELS[guardState] ?? guardState.replaceAll("_", " ")}.</p>}
-      {outstandingGuardUids.length > 0 && <p>Outstanding acceptance: {outstandingGuardUids.join(", ")}.</p>}
+      {outstandingGuardUids.length > 0 && <p>Outstanding acceptance: {outstandingGuardUids.map((uid) => incomingIdentities.find((identity) => identity.uid === uid)?.label ?? "an incoming technician").join(", ")}.</p>}
       <button type="button" disabled={busy || finalizeBusy} onClick={() => void readStatus(true)} className="rounded-lg border p-1 text-xs">Refresh acceptance status</button>
       {statusNotice && <p className="text-green-700">{statusNotice}</p>}
     </div>}
@@ -421,7 +415,7 @@ export function IncomingAcceptanceAtomicPanel({
     {accepted !== null && <p className="text-sm text-green-700">The acceptance submitted from this console has been recorded and independently validated.</p>}
     {accepted?.session && <HandoverSessionNotice
       session={accepted.session}
-      label={incomingIdentities.find((identity) => identity.uid === accepted.session?.acceptingTechnicianUid)?.label ?? accepted.session.acceptingTechnicianUid}
+      label={incomingIdentities.find((identity) => identity.uid === accepted.session?.acceptingTechnicianUid)?.label ?? "the accepting technician"}
     />}
 
     {unconfirmed && <div role="alert" className="rounded-lg border border-amber-500 p-3 text-sm space-y-2">
@@ -431,11 +425,11 @@ export function IncomingAcceptanceAtomicPanel({
     </div>}
 
     {applied && <div className="space-y-2 rounded-lg border p-3 text-sm">
-      <p className="font-semibold">{outcome ? OUTCOME_LABELS[outcome] ?? outcome.replaceAll("_", " ").toLowerCase() : `${selectedIdentity?.label ?? acceptingUid}'s acceptance is recorded.`}</p>
-      <p>Receipt {receiptId ?? "—"} · hash {short(receiptHash)} · operational application {stamp(appliedAt)}.</p>
-      {acceptance?.retryWouldReplay === true && <p>A further attempt for {selectedIdentity?.label ?? acceptingUid} would replay this receipt; it cannot create a second application or attendance record.</p>}
+      <p className="font-semibold">{outcome ? OUTCOME_LABELS[outcome] ?? outcome.replaceAll("_", " ").toLowerCase() : `${selectedLabel}'s acceptance is recorded.`}</p>
+      <p>Operational application {stamp(appliedAt)}.</p>
+      {acceptance?.retryWouldReplay === true && <p>A further attempt for {selectedLabel} would replay this receipt; it cannot create a second application or attendance record.</p>}
       {data?.diagnostics?.attendancePresent === true
-        ? <p>An attendance record for {selectedIdentity?.label ?? acceptingUid} exists on the incoming shift. Only that persisted record is authoritative for their clock time.</p>
+        ? <p>An attendance record for {selectedLabel} exists on the incoming shift. Only that persisted record is authoritative for their clock time.</p>
         : <p className="text-neutral-600">The status read does not confirm an attendance record. No clock time is inferred or invented here.</p>}
       {data?.partnerApplied === false && <p className="text-neutral-600">The partner incoming technician has not accepted yet. The reservation guard remains active and is never closed automatically after the first acceptance.</p>}
     </div>}
@@ -447,7 +441,7 @@ export function IncomingAcceptanceAtomicPanel({
     </div>}
     {applied && guardState === "guard_finalized" && <div className="rounded-lg border p-3 text-sm">
       <p className="font-semibold text-green-800">Reservation guard finalized.</p>
-      <p>Terminal evidence {data?.lifecycle?.guardTerminalEvidenceRef ?? finalizeDone?.guard?.terminalEvidenceRef ?? "—"}{finalizeDone?.audit?.id ? ` · audit ${finalizeDone.audit.id}` : ""}.</p>
+      <p>This reservation guard is finalized and immutable.</p>
     </div>}
     {applied && guardState === "joining_window_expired" && <p className="text-sm text-neutral-600">The joining window has closed. Closing the guard now requires an authorized exceptional closure by a supervisor; a technician cannot declare it.</p>}
     {applied && guardState === "inconsistent_review_required" && <p role="alert" className="text-sm text-red-700">The records do not agree. Administrator review is required; do not resubmit.</p>}
@@ -464,12 +458,12 @@ export function IncomingAcceptanceAtomicPanel({
       {declaredLateReason !== null
         ? <div className="rounded-lg border p-3 text-sm">
           <p className="font-semibold">Declared late arrival</p>
-          <p>A colleague recorded that {selectedIdentity?.label ?? acceptingUid} had not yet arrived, with the reason: <strong>{declaredLateReason}</strong>. That declared reason is authoritative for this late acceptance and is submitted unchanged; it is never re-typed.</p>
+          <p>A colleague recorded that {selectedLabel} had not yet arrived, with the reason: <strong>{declaredLateReason}</strong>. That declared reason is authoritative for this late acceptance and is submitted unchanged; it is never re-typed.</p>
         </div>
         : effectiveLateRequired && <label className="text-sm">Late-arrival reason (required — more than 15 minutes after the scheduled start)<input className={field} name="lateReason" required maxLength={1000}/></label>}
-      <label className="text-sm">{selectedIdentity?.label ?? acceptingUid}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+      <label className="text-sm">{selectedLabel}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
       <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Submitting…" : "Accept and start my shift"}</button>
-      <p className="text-sm text-neutral-600">Accepting signs {selectedIdentity?.label ?? acceptingUid} in on this console and revokes the outgoing technicians&rsquo; sessions on the first activation. The button is disabled while a submission is pending. After an unconfirmed outcome the form stays closed until you deliberately refresh the acceptance status.</p>
+      <p className="text-sm text-neutral-600">Accepting signs {selectedLabel} in on this console and revokes the outgoing technicians&rsquo; sessions on the first activation. The button is disabled while a submission is pending. After an unconfirmed outcome the form stays closed until you deliberately refresh the acceptance status.</p>
     </form>}
 
     {!applied && guardState === "guard_finalized" && <div className="rounded-lg border p-3 text-sm space-y-1">

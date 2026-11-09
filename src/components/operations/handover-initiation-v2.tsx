@@ -56,7 +56,7 @@ export function EqualHandoverInitiationEntries({ initiations }: { initiations: r
         onChange={event => { if (event.target.value) router.push(`/technician/handovers/v2/${encodeURIComponent(event.target.value)}`); }}>
         <option value="">Select a shift</option>
         {initiations.map(item => <option key={item.outgoingShiftId} value={item.outgoingShiftId}>
-          {item.outgoingShiftId} · {item.shiftStatus?.replaceAll("_", " ")} · {item.step === "begin" ? "begin the handover" : "reserve the incoming pair"}
+          {clock(item.outgoingWindow.scheduledStart)} – {clock(item.outgoingWindow.scheduledEnd)} · {item.shiftStatus?.replaceAll("_", " ") ?? "unknown"} · {item.step === "begin" ? "begin the handover" : "reserve the incoming pair"}
         </option>)}
       </select>
     </label>
@@ -182,7 +182,7 @@ export function EqualHandoverInitiationV2({ context }: { context: EqualHandoverI
   return <div className="space-y-6">
     <header className="space-y-1">
       <h1 className="text-2xl font-bold">Begin equal-technician handover (v2)</h1>
-      <p className="text-sm">Outgoing shift {context.outgoingShiftId} · status {context.shiftStatus?.replaceAll("_", " ") ?? "unknown"} · permanent pair {context.permanentPairId ?? "—"}</p>
+      <p className="text-sm">Shift status {context.shiftStatus?.replaceAll("_", " ") ?? "unknown"}</p>
       <p className="text-sm">Scheduled {clock(context.outgoingWindow.scheduledStart)} – {clock(context.outgoingWindow.scheduledEnd)}</p>
     </header>
 
