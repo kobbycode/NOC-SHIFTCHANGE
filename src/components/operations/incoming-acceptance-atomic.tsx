@@ -226,7 +226,7 @@ export function IncomingAcceptanceAtomicPanel({
   // authoritative change (for example a partner's acceptance). The read is
   // always scoped to the SELECTED incoming identity, never to the console actor.
   useEffect(() => {
-    if (!acceptingUid) { setStatusState({ phase: "select" }); return; }
+    if (!acceptingUid) return;
     let cancelled = false;
     void (async () => {
       const outcome = await fetchStatus();
@@ -240,7 +240,8 @@ export function IncomingAcceptanceAtomicPanel({
     return () => { cancelled = true; };
   }, [acceptingUid, applyStatus, fetchStatus, lifecycleSignature]);
 
-  const data = statusState.phase === "ready" ? statusState.data : null;
+  const statusView: StatusState = acceptingUid === "" ? { phase: "select" } : statusState;
+  const data = statusView.phase === "ready" ? statusView.data : null;
   const acceptance = data?.acceptance ?? null;
   const selectedIdentity = incomingIdentities.find((identity) => identity.uid === acceptingUid) ?? null;
   const acceptedHere = accepted !== null && accepted.session?.acceptingTechnicianUid === acceptingUid
@@ -398,10 +399,10 @@ export function IncomingAcceptanceAtomicPanel({
       }}
     />
 
-    {statusState.phase === "select" && <p className="text-sm text-neutral-600" role="status">Select the incoming technician who is accepting at this console to read their acceptance status.</p>}
-    {statusState.phase === "loading" && <p className="text-sm" role="status">Reading the acceptance status of {selectedIdentity?.label ?? acceptingUid}…</p>}
-    {statusState.phase === "error" && <div className="space-y-2 text-sm">
-      <p role="alert" className="text-red-700">{statusState.message}</p>
+    {statusView.phase === "select" && <p className="text-sm text-neutral-600" role="status">Select the incoming technician who is accepting at this console to read their acceptance status.</p>}
+    {statusView.phase === "loading" && <p className="text-sm" role="status">Reading the acceptance status of {selectedIdentity?.label ?? acceptingUid}…</p>}
+    {statusView.phase === "error" && <div className="space-y-2 text-sm">
+      <p role="alert" className="text-red-700">{statusView.message}</p>
       <button type="button" disabled={busy} onClick={() => void readStatus(true)} className="rounded-lg border p-2">Refresh acceptance status</button>
       <a href="/login" className="inline-block w-fit rounded-lg border p-2">Sign in again</a>
     </div>}
