@@ -78,7 +78,11 @@
     ".next-recovery-approval-v2-http-on/types/**/*.ts",
     ".next-recovery-approval-v2-http-on/dev/types/**/*.ts",
     ".next-recovery-approval-v2-http-off/types/**/*.ts",
-    ".next-recovery-approval-v2-http-off/dev/types/**/*.ts"
+    ".next-recovery-approval-v2-http-off/dev/types/**/*.ts",
+    ".next-recovery-execution-http-on/types/**/*.ts",
+    ".next-recovery-execution-http-on/dev/types/**/*.ts",
+    ".next-recovery-execution-http-off/types/**/*.ts",
+    ".next-recovery-execution-http-off/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

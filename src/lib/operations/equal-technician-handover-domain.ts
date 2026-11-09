@@ -16,6 +16,7 @@ import {
   type EqualHandoverConfirmation,
   type EqualHandoverHistoricalConfirmation,
   type EqualHandoverIdentity,
+  type EqualHandoverLifecycleStatus,
   type EqualHandoverParticipant,
   type EqualHandoverPosition,
   type EqualHandoverReservation,
@@ -978,6 +979,55 @@ export function closeEqualHandover(
   return assertEqualHandoverAggregate({
     ...aggregate,
     lifecycleStatus: input.status,
+    updatedAt: input.recordedAt,
+  });
+}
+
+/**
+ * Recovery-only terminal transition for a handover that stopped at
+ * `awaiting_incoming_acceptance`, whose activation window has closed and whose
+ * negative proof found no acceptance.
+ *
+ * `revision` deliberately does not advance, exactly like the other lifecycle
+ * transitions here: every confirmation and absence binds to `aggregate.revision`
+ * and to a snapshot hash that includes it, so advancing the revision would
+ * require rewriting the participants' personal confirmations and attestations.
+ * The lifecycle is instead fenced explicitly through `expectedLifecycleStatus`
+ * (it is invisible to the snapshot hash) together with revision, snapshot hash
+ * and the server clock. The terminal `cancelled` lifecycle is what refuses a
+ * replay or a later acceptance.
+ */
+export function abandonEqualHandover(
+  value: EqualHandoverAggregate,
+  input: {
+    expectedRevision: number;
+    expectedSnapshotHash: string;
+    expectedLifecycleStatus: EqualHandoverLifecycleStatus;
+    recordedAt: string;
+    actorUid: string;
+  },
+): EqualHandoverAggregate {
+  const aggregate = assertEqualHandoverAggregate(value);
+  identifier(input.actorUid, "recovery actor UID", 128);
+  if (input.expectedLifecycleStatus !== "awaiting_incoming_acceptance") {
+    fail("Recovery may only abandon a handover awaiting incoming acceptance.", 409);
+  }
+  if (aggregate.lifecycleStatus !== "awaiting_incoming_acceptance") {
+    fail("The handover is not awaiting incoming acceptance.", 409);
+  }
+  if (input.expectedRevision !== aggregate.revision) {
+    fail("Stale handover revision.");
+  }
+  if (input.expectedSnapshotHash !== createEqualHandoverSnapshot(aggregate).snapshotHash) {
+    fail("Stale handover snapshot.");
+  }
+  timestamp(input.recordedAt);
+  if (Date.parse(input.recordedAt) < Date.parse(aggregate.updatedAt)) {
+    fail("Stale recovery timestamp.");
+  }
+  return assertEqualHandoverAggregate({
+    ...aggregate,
+    lifecycleStatus: "cancelled",
     updatedAt: input.recordedAt,
   });
 }

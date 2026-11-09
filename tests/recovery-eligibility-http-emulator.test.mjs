@@ -681,7 +681,7 @@ test("11 the committed zero-acceptance world is eligible for abandonment review"
   assert.equal(result.outgoingShiftId, OUT_ID);
   assert.equal(result.incomingShiftId, IN_ID);
   assert.equal(result.evidenceDigest.schema, "handover-recovery-eligibility-evidence");
-  assert.equal(result.evidenceDigest.schemaVersion, 1);
+  assert.equal(result.evidenceDigest.schemaVersion, 2);
   assert.equal(result.evidenceDigest.algorithm, "sha256");
   assert.match(result.evidenceDigest.value, /^[0-9a-f]{64}$/);
   assert.equal(result.references.guardId, "guard_outgoing");
