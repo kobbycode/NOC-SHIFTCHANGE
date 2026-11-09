@@ -24,6 +24,18 @@ test("first acceptance, repeated personal acceptance, second join and final guar
   assert.equal((await f.post("in-b")).body.replayed, true); assert.equal(f.writes.length, last);
   assert.deepEqual(f.authCalls, ["in-a", "in-a", "in-b", "in-b"], "every HTTP retry personally authenticates");
 });
+test("a locked reserved partner does not block the other partner's acceptance", async () => {
+  const f = await acceptanceFixture();
+  f.records.get("users/in-b").mustChangePassword = true;
+  f.records.get("users/out-b").status = "blocked";
+  const first = await f.post("in-a");
+  assert.equal(first.status, 200);
+  assert.equal(first.body.status, "ACTIVATED");
+  const before = clone([...f.records]);
+  const locked = await f.post("in-b");
+  assert.equal(locked.status, 403);
+  assert.deepEqual(clone([...f.records]), before, "the locked technician's own attempt writes nothing");
+});
 for (const phase of ["beforeContext", "afterPassword", "beforeBegin"]) test(`interruption ${phase} leaves no attendance operation or activation`, async () => {
   const f = await acceptanceFixture(); f.failOnce(phase);
   assert.notEqual((await f.post()).status, 200); assert.deepEqual(f.summary(), none);

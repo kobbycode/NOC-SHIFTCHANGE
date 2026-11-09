@@ -512,6 +512,20 @@ test("disabled and unreserved accounts cannot initiate", async () => {
   assert.equal(world.writes.length, 0);
 });
 
+test("a locked reserved partner does not block the other partner's activation", async () => {
+  const world = await atomicAcceptanceWorld();
+  world.profile("in-b").mustChangePassword = true;
+  world.profile("out-b").status = "blocked";
+
+  await rejectWith(world.apply("in-b"), "AssignmentOperationError", 403);
+  assert.equal(world.writes.length, 0, "the locked technician's own acceptance writes nothing");
+
+  const result = await world.apply("in-a");
+  assert.equal(result.status, "APPLIED");
+  assert.equal(result.outcome, FIRST);
+  assert.equal(world.records.has(world.attendancePath("in-b")), false);
+});
+
 test("authentication proofs must match the request nonce and stay fresh", async () => {
   const world = await atomicAcceptanceWorld();
   const binding = world.reviewedBinding();

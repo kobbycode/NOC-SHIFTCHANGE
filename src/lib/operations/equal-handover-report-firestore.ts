@@ -2003,7 +2003,8 @@ export async function acceptEqualHandoverIncomingV2(
     ]);
     const schedules = new Map<string, TechnicianScheduleEntry[]>();
     for (const uid of requiredUsers) {
-      if (uid !== input.actorUid) authorizeTechnicianProfile((await transaction.get(db.collection("users").doc(uid))).data() as Record<string, unknown> | undefined, uid);
+      // Only the accepting technician's own profile gates acceptance (OD-3.7):
+      // a locked or inactive reserved partner must not block the other partner.
       const incomingMember = identity.incomingTechnicianIds.includes(uid);
       const entries = readEqualHandoverParticipantSchedule(
         (await transaction.get(technicianSchedules.doc(uid))).data(), uid,
