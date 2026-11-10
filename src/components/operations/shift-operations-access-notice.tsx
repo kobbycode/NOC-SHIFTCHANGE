@@ -100,7 +100,7 @@ export function ShiftOperationsAccessNotice({
 
         <div className="flex flex-wrap gap-3 pt-1">
           <Link
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"
+            className="btn-accent rounded-lg px-4 py-2 text-sm font-medium"
             href="/technician"
           >
             Open My Shift

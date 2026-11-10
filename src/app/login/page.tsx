@@ -12,6 +12,8 @@ import {
 
 import { auth } from "@/lib/firebase/client";
 
+import { PasswordInput } from "@/components/ui/password-input";
+
 import {
   ROLE_HOME,
   isUserRole,
@@ -137,7 +139,7 @@ router.refresh();
               onChange={(event) =>
                 setEmail(event.target.value)
               }
-              className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-blue-500 dark:border-slate-700"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-[var(--accent)] dark:border-slate-700"
               placeholder="Enter your email"
             />
           </div>
@@ -150,16 +152,15 @@ router.refresh();
               Password
             </label>
 
-            <input
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="current-password"
               required
               value={password}
               onChange={(event) =>
                 setPassword(event.target.value)
               }
-              className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-blue-500 dark:border-slate-700"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-[var(--accent)] dark:border-slate-700"
               placeholder="Enter your password"
             />
           </div>
@@ -176,7 +177,7 @@ router.refresh();
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="btn-accent w-full rounded-lg px-4 py-3 font-semibold disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>

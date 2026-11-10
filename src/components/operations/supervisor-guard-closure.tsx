@@ -103,7 +103,7 @@ export function SupervisorGuardClosure({
     <p className="text-neutral-700">This closes the reservation guard only. It creates no acceptance, attendance, membership, clock time or personal receipt for {subjectName ?? "the absent technician"}.</p>
     <form className="grid gap-2" onSubmit={event => { event.preventDefault(); void submit(event.currentTarget as HTMLFormElement); }}>
       <label className="text-sm">Supervisor closure reason<input className={field} name="reason" required maxLength={2000}/></label>
-      <button disabled={busy} className="w-fit rounded-lg bg-amber-700 p-2 text-white">{busy ? "Closing…" : "Authorize exceptional guard closure"}</button>
+      <button disabled={busy} className="btn-accent w-fit rounded-lg p-2">{busy ? "Closing…" : "Authorize exceptional guard closure"}</button>
     </form>
     {unconfirmed && <div role="alert" className="space-y-1">
       <p>{unconfirmed}</p>

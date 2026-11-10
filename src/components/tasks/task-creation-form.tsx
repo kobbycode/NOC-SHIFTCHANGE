@@ -264,7 +264,7 @@ export function TaskCreationForm({
           <button
             type="submit"
             disabled={submitting}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-accent rounded-xl px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting
               ? "Creating Task..."

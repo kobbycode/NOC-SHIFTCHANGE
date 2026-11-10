@@ -353,7 +353,7 @@ export function TaskAssignmentForm({
             submitting ||
             !technicianUid
           }
-          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn-accent inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? (
             <>

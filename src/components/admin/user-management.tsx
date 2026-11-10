@@ -502,7 +502,7 @@ export function UserManagement() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full rounded-lg bg-[var(--signal-blue)] px-4 py-3 font-semibold text-white transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn-accent w-full rounded-lg px-4 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {submitting ? "Creating account..." : "Create user"}
               </button>
@@ -612,7 +612,7 @@ export function UserManagement() {
                               type="button"
                               disabled={actionSubmitting}
                               onClick={() => openAccountAction(user, "unblock")}
-                              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="btn-accent rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               Unblock account
                             </button>
@@ -709,10 +709,10 @@ export function UserManagement() {
                     actionReason.trim().length < 10 ||
                     actionReason.trim().length > 500
                   }
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
                     pendingAction.action === "block"
-                      ? "bg-red-600 hover:bg-red-700"
-                      : "bg-green-600 hover:bg-green-700"
+                      ? "bg-red-600 text-white hover:bg-red-700"
+                      : "btn-accent"
                   }`}
                 >
                   {actionSubmitting

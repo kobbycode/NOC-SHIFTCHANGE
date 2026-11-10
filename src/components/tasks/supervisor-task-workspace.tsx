@@ -878,15 +878,12 @@ export function SupervisorTaskWorkspace() {
             }
             aria-controls="supervisor-task-creation"
             className="
+              btn-accent
               inline-flex items-center
               justify-center
               rounded-xl
-              bg-blue-600
               px-5 py-2
               text-sm font-semibold
-              text-white
-              transition-colors
-              hover:bg-blue-700
               disabled:cursor-not-allowed
               disabled:opacity-50
             "
@@ -1391,18 +1388,15 @@ export function SupervisorTaskWorkspace() {
                               null
                           }
                           className="
+                            btn-accent
                             inline-flex w-full
                             items-center
                             justify-center
                             gap-2
                             rounded-xl
-                            bg-green-600
                             px-4 py-3
                             text-sm
                             font-semibold
-                            text-white
-                            transition-colors
-                            hover:bg-green-700
                             disabled:cursor-not-allowed
                             disabled:opacity-50
                           "
@@ -1649,18 +1643,16 @@ export function SupervisorTaskWorkspace() {
                                     1000
                                 }
                                 className="
+                                  btn-accent
                                   inline-flex
                                   flex-1
                                   items-center
                                   justify-center
                                   gap-2
                                   rounded-xl
-                                  bg-amber-600
                                   px-4 py-3
                                   text-sm
                                   font-semibold
-                                  text-white
-                                  hover:bg-amber-700
                                   disabled:cursor-not-allowed
                                   disabled:opacity-50
                                 "

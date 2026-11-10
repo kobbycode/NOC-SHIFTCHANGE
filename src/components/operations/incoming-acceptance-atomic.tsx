@@ -18,6 +18,7 @@
 // outcome are rendered before the console moves on.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captureCoarseLocationEvidence } from "@/lib/shifts/coarse-location";
+import { PasswordInput } from "@/components/ui/password-input";
 import { ATTENDANCE_LATENESS_GRACE_MS } from "@/types/equal-technician-handover";
 import {
   HandoverSessionNotice,
@@ -437,7 +438,7 @@ export function IncomingAcceptanceAtomicPanel({
     {applied && guardState === "eligible_for_normal_closure" && <div className="space-y-2 rounded-lg border border-green-600 p-3 text-sm">
       <p className="font-semibold">Both incoming acceptances are validated.</p>
       <p>The reservation guard is still active. A reserved incoming technician must finalize it explicitly — this never happens automatically.</p>
-      <button type="button" disabled={finalizeBusy} onClick={() => void finalizeGuard()} className="w-fit rounded-lg bg-green-700 p-2 text-white">{finalizeBusy ? "Finalizing…" : "Finalize reservation guard"}</button>
+      <button type="button" disabled={finalizeBusy} onClick={() => void finalizeGuard()} className="btn-accent w-fit rounded-lg p-2">{finalizeBusy ? "Finalizing…" : "Finalize reservation guard"}</button>
     </div>}
     {applied && guardState === "guard_finalized" && <div className="rounded-lg border p-3 text-sm">
       <p className="font-semibold text-green-800">Reservation guard finalized.</p>
@@ -461,8 +462,8 @@ export function IncomingAcceptanceAtomicPanel({
           <p>A colleague recorded that {selectedLabel} had not yet arrived, with the reason: <strong>{declaredLateReason}</strong>. That declared reason is authoritative for this late acceptance and is submitted unchanged; it is never re-typed.</p>
         </div>
         : effectiveLateRequired && <label className="text-sm">Late-arrival reason (required — more than 15 minutes after the scheduled start)<input className={field} name="lateReason" required maxLength={1000}/></label>}
-      <label className="text-sm">{selectedLabel}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
-      <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Submitting…" : "Accept and start my shift"}</button>
+      <label className="text-sm">{selectedLabel}&rsquo;s own current password<PasswordInput className={field} name="password" autoComplete="current-password" required maxLength={256}/></label>
+      <button disabled={busy} className="btn-accent w-fit rounded-lg p-2">{busy ? "Submitting…" : "Accept and start my shift"}</button>
       <p className="text-sm text-neutral-600">Accepting signs {selectedLabel} in on this console and revokes the outgoing technicians&rsquo; sessions on the first activation. The button is disabled while a submission is pending. After an unconfirmed outcome the form stays closed until you deliberately refresh the acceptance status.</p>
     </form>}
 

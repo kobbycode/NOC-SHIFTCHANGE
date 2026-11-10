@@ -460,7 +460,7 @@ export function SupervisorShiftScheduling({
                       key={type}
                       className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
                         shiftType === type
-                          ? "border-blue-500 bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                          ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--foreground)] dark:bg-[var(--accent)]/20"
                           : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
@@ -548,7 +548,7 @@ export function SupervisorShiftScheduling({
               submitting ||
               activePairs.length === 0
             }
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-accent inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
           >
             Review Shift
           </button>
@@ -644,7 +644,7 @@ export function SupervisorShiftScheduling({
                 void handleConfirm();
               }}
               disabled={submitting}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn-accent inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? (
                 <>

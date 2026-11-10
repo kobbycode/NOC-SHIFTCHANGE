@@ -11,6 +11,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 
 import { RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
+import { PasswordInput } from "@/components/ui/password-input";
+
 import type {
   HandoverRecoveryApprovalV2EffectiveStatus,
   HandoverRecoveryApprovalV2Role,
@@ -452,8 +454,7 @@ export function HandoverRecoveryPanel({
         {needsPassword ? (
           <label className="mt-3 block text-sm">
             <span className="font-medium">Your current password</span>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
@@ -493,7 +494,9 @@ export function HandoverRecoveryPanel({
               (needsPassword && password.length === 0) ||
               (kind === "execute" && !acknowledged)
             }
-            className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+              kind === "execute" ? "bg-amber-700 text-white" : "btn-accent"
+            }`}
           >
             {busy ? "Sending…" : kind === "execute" ? "Execute recovery" : "Sign and send"}
           </button>
@@ -609,7 +612,7 @@ export function HandoverRecoveryPanel({
             <button
               type="button"
               onClick={() => openAction("countersign", record.id)}
-              className="mt-3 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white"
+              className="btn-accent mt-3 rounded-lg px-3 py-1.5 text-xs font-semibold"
             >
               Countersign as {ROLE_LABELS[actorRole].toLowerCase()}
             </button>
@@ -748,7 +751,7 @@ export function HandoverRecoveryPanel({
                   <button
                     type="button"
                     onClick={() => openAction("request")}
-                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
+                    className="btn-accent rounded-lg px-4 py-2 text-sm font-semibold"
                   >
                     Request recovery intent
                   </button>

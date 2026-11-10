@@ -82,6 +82,8 @@
   --muted: #6B7280;
   --border: #E5E7EB;
   --accent: #C8AD80;
+  --accent-hover: #D8C094;
+  --accent-foreground: #0B0D13;
   --signal-blue: #3267EF;
   --obsidian: #0B0D13;
   --midnight: #151A26;
@@ -98,6 +100,8 @@
   --muted: #9CA3AF;
   --border: #374151;
   --accent: #C8AD80;
+  --accent-hover: #D8C094;
+  --accent-foreground: #0B0D13;
   --signal-blue: #3267EF;
   --obsidian: #0B0D13;
   --midnight: #151A26;
@@ -141,6 +145,23 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 
   min-height: 100vh;
+}
+
+/* Primary action surface. The accent is light, so foregrounds are dark rather
+   than white; destructive actions keep their own red and never borrow this. */
+.btn-accent {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+  transition: background-color 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.btn-accent:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.btn-accent:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
 }
 
 /* Mobile drawer: transform + delayed visibility so closed controls are not tabbable */

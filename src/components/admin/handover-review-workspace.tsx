@@ -726,7 +726,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       }}
                       className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${
                         selected
-                          ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900"
+                          ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
                           : "bg-white hover:border-slate-300 dark:bg-slate-950"
                       }`}
                     >
@@ -1153,7 +1153,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   !adjudicationAcknowledged ||
                                   adjudicationFinding.trim().length < 10
                                 }
-                                className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="btn-accent rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {adjudicating ? "Recording…" : "Confirm and record adjudication"}
                               </button>
@@ -1361,7 +1361,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         type="button"
                         onClick={() => void submitDecision()}
                         disabled={submitting || reason.trim().length < 10}
-                        className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn-accent rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {submitting ? "Recording…" : "Record decision"}
                       </button>

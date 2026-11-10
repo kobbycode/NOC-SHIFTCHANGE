@@ -80,7 +80,7 @@ export function HandoverSessionNotice({ session, label }: { session: HandoverSes
       : <p>The first incoming technician&rsquo;s session is unaffected; you joined the same active shift with your own attendance clock.</p>}
     <button
       type="button"
-      className="w-fit rounded-lg bg-green-700 p-2 text-white"
+      className="btn-accent w-fit rounded-lg p-2"
       onClick={() => window.location.assign("/technician")}
     >Continue to my shift</button>
   </div>;

@@ -766,7 +766,7 @@ export function SupervisorAttendanceWorkspace() {
                       transition
                       ${
                         selected
-                          ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-950/40"
+                          ? "border-[var(--accent)] bg-[var(--accent)]/15 ring-1 ring-[var(--accent)] dark:bg-[var(--accent)]/20"
                           : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
                       }
                     `}

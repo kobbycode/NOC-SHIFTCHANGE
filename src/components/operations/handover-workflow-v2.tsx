@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import type { EqualHandoverReportState } from "@/lib/operations/equal-handover-report-firestore";
 import type { EqualHandoverReportV2Content } from "@/types/handover-report-v2";
 import { reportAttendanceLabels, reportNoticeCategory } from "@/lib/operations/handover-report-attendance-view";
+import { PasswordInput } from "@/components/ui/password-input";
+
 import { IncomingAcceptanceAtomicPanel } from "./incoming-acceptance-atomic";
 import {
   HandoverSessionNotice,
@@ -321,8 +323,8 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       {myAbsence && <p>A colleague recorded you as {myAbsence.absenceType.replaceAll("_", " ")}; an absence is not a personal confirmation.</p>}
       {canConfirm && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void confirmSelf(event.currentTarget as HTMLFormElement); }}>
         <p className="text-sm text-neutral-600">Confirming is a personal act: it requires <strong>your own current password</strong>, verified server-side before any write and never stored, logged or included in a receipt (§4). A colleague or a supervisor cannot confirm for you.</p>
-        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
-        <button disabled={busy} className="w-fit rounded-lg bg-blue-700 p-2 text-white">{busy ? "Working…" : "Confirm this handover for myself"}</button>
+        <label className="text-sm">Your current password<PasswordInput className={field} name="password" autoComplete="current-password" required maxLength={256}/></label>
+        <button disabled={busy} className="btn-accent w-fit rounded-lg p-2">{busy ? "Working…" : "Confirm this handover for myself"}</button>
       </form>}
       {aggregate.reportBinding === null && <p>Confirmation is available only after the consolidated report is frozen.</p>}
     </section>}
@@ -358,7 +360,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <h2 className="text-lg font-semibold">Outgoing technician actions</h2>
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void prepare(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Optional preparation note<input className={field} name="reason" maxLength={2000} placeholder="Why this revision is being prepared"/></label>
-        <button disabled={busy || aggregate.lifecycleStatus !== "collecting_confirmations"} className="w-fit rounded-lg bg-blue-700 p-2 text-white">{busy ? "Working…" : preparationDrifted || !preparation ? "Prepare consolidated report" : "Re-prepare identical report"}</button>
+        <button disabled={busy || aggregate.lifecycleStatus !== "collecting_confirmations"} className="btn-accent w-fit rounded-lg p-2">{busy ? "Working…" : preparationDrifted || !preparation ? "Prepare consolidated report" : "Re-prepare identical report"}</button>
       </form>
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void declareAbsence(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Absent colleague (declared by a colleague, never self)<select className={field} name="subject" required>
@@ -367,7 +369,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         </select></label>
         <label className="text-sm">Reason<input className={field} name="reason" required maxLength={1000}/></label>
         <label className="text-sm">Reported departure time (outgoing absences only)<input className={field} name="departure" type="datetime-local"/></label>
-        <button disabled={busy} className="w-fit rounded-lg bg-blue-700 p-2 text-white">Declare absence</button>
+        <button disabled={busy} className="btn-accent w-fit rounded-lg p-2">Declare absence</button>
       </form>
       {absence && <div className="text-sm">Declared: {absence.absenceType.replaceAll("_", " ")} · {content.participants.find((participant) => participant.uid === absence.technicianUid)?.name ?? "Unnamed technician"}
         <button disabled={busy} className="ml-3 rounded-lg border p-2" onClick={() => void clearAbsence(absence.technicianUid)}>Clear declaration</button>
@@ -375,7 +377,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void freeze(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Freeze reason<input className={field} name="reason" required maxLength={1000}/></label>
         {frozenReport && <label className="text-sm">Correction note (required for a later version)<input className={field} name="correctionNote" required maxLength={4000}/></label>}
-        <button disabled={busy || !preparation || preparationDrifted || !guard || aggregate.lifecycleStatus !== "collecting_confirmations"} className="w-fit rounded-lg bg-blue-700 p-2 text-white">Review complete — freeze report</button>
+        <button disabled={busy || !preparation || preparationDrifted || !guard || aggregate.lifecycleStatus !== "collecting_confirmations"} className="btn-accent w-fit rounded-lg p-2">Review complete — freeze report</button>
       </form>
       <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above.</p>
     </section>}
@@ -391,10 +393,10 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       </ul>
       {!isConfirmedOutgoing && <p className="text-sm">Only an outgoing technician who has personally confirmed (not declared absent) can commit this handover for incoming acceptance.</p>}
       <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void commitOutgoing(event.currentTarget as HTMLFormElement); }}>
-        <label className="text-sm">Your current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
+        <label className="text-sm">Your current password<PasswordInput className={field} name="password" autoComplete="current-password" required maxLength={256}/></label>
         <button
           disabled={!canCommit || busy}
-          className="w-fit rounded-lg bg-green-700 p-2 text-white"
+          className="btn-accent w-fit rounded-lg p-2"
         >{busy ? "Working…" : "Commit handover — await incoming acceptance"}</button>
       </form>
       {!canCommit && !busy && <p className="text-sm text-neutral-600">Committing is available only when every prerequisite above is satisfied.</p>}
@@ -427,8 +429,8 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
           onChange={(identityUid) => { setAcceptingUid(identityUid); setError(""); setNotice(""); }}
         />
         {canAccept && <form className="grid gap-3 max-w-md" onSubmit={event => { event.preventDefault(); void acceptIncoming(event.currentTarget as HTMLFormElement); }}>
-          <label className="text-sm">{incomingIdentities.find((identity) => identity.uid === acceptingUid)?.label ?? "Select an incoming technician"}&rsquo;s own current password<input className={field} name="password" type="password" autoComplete="current-password" required maxLength={256}/></label>
-          <button disabled={busy} className="w-fit rounded-lg bg-green-700 p-2 text-white">{busy ? "Working…" : "Accept and start my shift"}</button>
+          <label className="text-sm">{incomingIdentities.find((identity) => identity.uid === acceptingUid)?.label ?? "Select an incoming technician"}&rsquo;s own current password<PasswordInput className={field} name="password" autoComplete="current-password" required maxLength={256}/></label>
+          <button disabled={busy} className="btn-accent w-fit rounded-lg p-2">{busy ? "Working…" : "Accept and start my shift"}</button>
         </form>}
         {acceptedUids.includes(acceptingUid) && <p className="text-sm text-green-700">This acceptance was recorded from this console. A further attempt for the same technician would replay it.</p>}
         {!canAccept && !acceptedUids.includes(acceptingUid) && <p className="text-sm text-neutral-600">Acceptance is available only for a reserved incoming technician of this pair on an active reservation.</p>}

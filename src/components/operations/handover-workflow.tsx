@@ -4,10 +4,12 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { HandoverReportView } from "@/types/handover-report";
 import type { UserRole } from "@/types/auth";
+import { PasswordInput } from "@/components/ui/password-input";
+
 import { HandoverReport } from "./handover-report-view";
 
 const field = "block w-full rounded-lg border bg-transparent px-3 py-2";
-const button = "rounded-lg bg-blue-700 px-4 py-2 text-white disabled:opacity-50";
+const button = "btn-accent rounded-lg px-4 py-2 disabled:opacity-50";
 export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: HandoverReportView; uid: string; role: UserRole }) {
   const [report, setReport] = useState(initialReport);
   const [busy, setBusy] = useState(false);
@@ -83,7 +85,7 @@ export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: 
         </>}
         {!manager && me?.state === "awaiting_confirmation" && report.frozen && <form className="space-y-3 rounded-lg border p-4" onSubmit={event => { const values = form(event); const password = String(values.get("password")); event.currentTarget.reset(); void act("handover/confirmation", { ...binding, password }); }}>
           <h3 className="font-semibold">Confirm your reviewed report</h3><label className="flex items-start gap-2 text-sm"><input type="checkbox" required/>I have reviewed this report, pending work, and the displayed revision.</label>
-          <label className="block text-sm">Your current password<input className={field} name="password" type="password" required autoComplete="current-password"/></label><button className={button}>Authenticate and confirm revision {handover?.revision}</button>
+          <label className="block text-sm">Your current password<PasswordInput className={field} name="password" required autoComplete="current-password"/></label><button className={button}>Authenticate and confirm revision {handover?.revision}</button>
         </form>}
         {!manager && !report.frozen && <p className="text-amber-700">Awaiting supervisor report freeze before authentication.</p>}
         {!manager && me && me.state !== "awaiting_confirmation" && <p>Your participant status: {me.state.replaceAll("_", " ")}. Refresh to see other participants.</p>}

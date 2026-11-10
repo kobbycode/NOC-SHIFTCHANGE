@@ -198,7 +198,7 @@ export function EqualHandoverInitiationV2({ context }: { context: EqualHandoverI
       <h2 id="v2-begin-heading" className="text-lg font-semibold">Step 1 · Begin the handover</h2>
       <p className="text-sm">Beginning the handover moves this shift to <strong>handover pending</strong> and locks further operational edits. Either outgoing technician may do this exactly once; if your colleague begins it first this action replays their state instead of creating a second handover.</p>
       <p className="text-sm">All mandatory operational evidence (a verified broadcast observation for every station and outside-broadcast information or an explicit none declaration) must already be recorded — the server rejects an incomplete begin.</p>
-      <button type="button" disabled={busy} onClick={begin} aria-busy={busy} className="rounded-lg bg-blue-700 p-3 text-white disabled:opacity-60">
+      <button type="button" disabled={busy} onClick={begin} aria-busy={busy} className="btn-accent rounded-lg p-3 disabled:opacity-60">
         {busy ? "Working…" : "Begin handover"}
       </button>
     </section>}
@@ -228,7 +228,7 @@ export function EqualHandoverInitiationV2({ context }: { context: EqualHandoverI
             <label className="text-sm">Incoming end (local time)
               <input className={field} name="end" type="datetime-local" required defaultValue={toLocalInputValue(suggested?.scheduledEnd ?? null)} />
             </label>
-            <button type="submit" disabled={busy} className="w-fit rounded-lg bg-blue-700 p-3 text-white disabled:opacity-60">
+            <button type="submit" disabled={busy} className="btn-accent w-fit rounded-lg p-3 disabled:opacity-60">
               {busy ? "Working…" : "Reserve incoming pair"}
             </button>
           </fieldset>

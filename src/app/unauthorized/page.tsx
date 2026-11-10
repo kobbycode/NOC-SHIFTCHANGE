@@ -15,7 +15,7 @@ export default function UnauthorizedPage() {
 
       <Link
         href="/"
-        className="rounded-lg bg-blue-600 px-5 py-3 font-medium text-white"
+        className="btn-accent rounded-lg px-5 py-3 font-medium"
       >
         Return to home
       </Link>

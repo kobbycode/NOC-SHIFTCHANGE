@@ -302,7 +302,7 @@ export function ChangePasswordForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+        className="btn-accent w-full rounded-lg px-4 py-3 font-semibold disabled:opacity-50"
       >
         {loading
           ? "Changing password..."

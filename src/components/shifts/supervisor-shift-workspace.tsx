@@ -668,7 +668,7 @@ export function SupervisorShiftWorkspace() {
                   }}
                   className={`w-full rounded-2xl border p-5 text-left shadow-sm transition ${
                     selected
-                      ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500 dark:bg-blue-950/40"
+                      ? "border-[var(--accent)] bg-[var(--accent)]/15 ring-1 ring-[var(--accent)] dark:bg-[var(--accent)]/20"
                       : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
                   }`}
                 >
@@ -901,7 +901,7 @@ export function SupervisorShiftWorkspace() {
                         null ||
                       refreshing
                     }
-                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="btn-accent mt-4 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {lifecycleAction ===
                     "handover" ? (

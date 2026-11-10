@@ -565,7 +565,7 @@ export function SupervisorTechnicianPairWorkspace() {
               <button
                 type="submit"
                 disabled={creationDisabled}
-                className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn-accent rounded-lg px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creating
                   ? "Creating pair..."
