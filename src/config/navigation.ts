@@ -60,25 +60,25 @@ export const ADMIN_NAVIGATION: NavigationItem[] = [
     label: "Stations & Sections",
     href: "/admin/stations",
     icon: Building2,
-    implemented: false,
+    implemented: true,
   },
   {
     label: "Reports",
     href: "/admin/reports",
     icon: BarChart3,
-    implemented: false,
+    implemented: true,
   },
   {
     label: "Audit Logs",
     href: "/admin/audit-logs",
     icon: ShieldCheck,
-    implemented: false,
+    implemented: true,
   },
   {
     label: "Settings",
     href: "/admin/settings",
     icon: Settings,
-    implemented: false,
+    implemented: true,
   },
 
   
@@ -125,7 +125,7 @@ export const SUPERVISOR_NAVIGATION: NavigationItem[] = [
     label: "Reports",
     href: "/supervisor/reports",
     icon: BarChart3,
-    implemented: false,
+    implemented: true,
   },
 ];
 
@@ -176,13 +176,13 @@ export const TECHNICIAN_NAVIGATION: NavigationItem[] = [
     label: "Sections Record",
     href: "/technician/sections",
     icon: ClipboardList,
-    implemented: false,
+    implemented: true,
   },
   {
     label: "Equipment",
     href: "/technician/equipment",
     icon: Wrench,
-    implemented: false,
+    implemented: true,
   },
   {
     label: "Handovers",
