@@ -4,6 +4,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
+import { PasswordInput } from "@/components/ui/password-input";
 import {
   getErrorMessage,
 } from "@/lib/errors/messages";
@@ -19,9 +20,6 @@ export function ChangePasswordForm() {
 
   const [confirmPassword, setConfirmPassword] =
     useState("");
-
-  const [showPasswords, setShowPasswords] =
-    useState(false);
 
   const [loading, setLoading] =
     useState(false);
@@ -213,9 +211,8 @@ export function ChangePasswordForm() {
           Current password
         </label>
 
-        <input
+        <PasswordInput
           id="currentPassword"
-          type={showPasswords ? "text" : "password"}
           autoComplete="current-password"
           required
           value={currentPassword}
@@ -235,9 +232,8 @@ export function ChangePasswordForm() {
           New password
         </label>
 
-        <input
+        <PasswordInput
           id="newPassword"
-          type={showPasswords ? "text" : "password"}
           autoComplete="new-password"
           required
           minLength={12}
@@ -264,9 +260,8 @@ export function ChangePasswordForm() {
           Confirm new password
         </label>
 
-        <input
+        <PasswordInput
           id="confirmPassword"
-          type={showPasswords ? "text" : "password"}
           autoComplete="new-password"
           required
           value={confirmPassword}
@@ -277,18 +272,6 @@ export function ChangePasswordForm() {
           placeholder="Confirm your new password"
         />
       </div>
-
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={showPasswords}
-          onChange={(event) =>
-            setShowPasswords(event.target.checked)
-          }
-        />
-
-        Show passwords
-      </label>
 
       {error && (
         <div
