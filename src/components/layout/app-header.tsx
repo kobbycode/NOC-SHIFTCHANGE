@@ -144,9 +144,9 @@ export function AppHeader({
           className="
             flex h-11 w-11 items-center justify-center
             rounded-full bg-[var(--accent)]
-            text-[var(--obsidian)]
+            text-[var(--accent-foreground)]
             dark:bg-[var(--accent)]
-            dark:text-[var(--obsidian)]
+            dark:text-[var(--accent-foreground)]
           "
           role="img"
           aria-label="User profile"

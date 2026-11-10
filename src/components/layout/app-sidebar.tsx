@@ -228,7 +228,7 @@ export function AppSidebar({
               className="
                 flex h-11 w-11 items-center
                 justify-center rounded-xl
-                bg-[var(--accent)] text-[var(--obsidian)]
+                bg-[var(--accent)] text-[var(--accent-foreground)]
               "
             >
               <RadioTower size={23} />
