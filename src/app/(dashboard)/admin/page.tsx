@@ -110,7 +110,7 @@ export default async function AdminDashboardPage() {
         aria-labelledby="admin-current-shift"
         className={`${panelClass} flex flex-wrap items-center gap-x-4 gap-y-3 p-4 sm:p-5`}
       >
-        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-[var(--foreground)] dark:text-[var(--accent-foreground)]">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-[var(--accent-foreground)]">
           <CalendarClock size={21} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1 basis-36">
