@@ -1,0 +1,28 @@
+.roleSelect {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+@supports (appearance: base-select) and selector(::picker(select)) {
+  .roleSelect,
+  .roleSelect::picker(select) {
+    appearance: base-select;
+  }
+
+  .roleSelect::picker(select) {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+
+  .roleSelect option {
+    padding: 0.625rem 1rem;
+  }
+
+  .roleSelect option:checked,
+  .roleSelect option:hover,
+  .roleSelect option:focus-visible {
+    background-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+}

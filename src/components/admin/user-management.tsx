@@ -11,6 +11,8 @@ import {
 
 import type { AppUser, UserRole } from "@/types/auth";
 
+import styles from "./user-management.module.css";
+
 type CreateUserForm = {
   fullName: string;
   email: string;
@@ -554,7 +556,7 @@ export function UserManagement() {
                   role: event.target.value as UserRole,
                 })
               }
-              className="min-h-12 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              className={`${styles.roleSelect} min-h-12 w-full rounded-lg border border-[var(--border)] px-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--foreground)]`}
             >
               <option value="technician">Technician</option>
 
