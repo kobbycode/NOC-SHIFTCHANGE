@@ -250,7 +250,7 @@ export function ChangePasswordForm() {
           placeholder="Enter your new password"
         />
 
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-[var(--muted)]">
           Your new password must contain between
           12 and 128 characters.
         </p>

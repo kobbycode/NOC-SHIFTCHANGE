@@ -72,15 +72,16 @@
 /* Enable class-based dark mode for next-themes */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Light theme tokens */
+/* Light theme tokens. The page is a warm ivory so near-white panels read as
+   raised, and the palette stays in the same family as the gold accent. */
 :root {
   color-scheme: light;
-  --background: #F8F9FA;
+  --background: #F4F2ED;
   --foreground: #0F172A;
-  --surface: #FFFFFF;
-  --elevated: #F5F5F5;
-  --muted: #6B7280;
-  --border: #E5E7EB;
+  --surface: #FBFAF7;
+  --elevated: #ECE7DD;
+  --muted: #6A655C;
+  --border: #E4DFD5;
   --accent: #C8AD80;
   --accent-hover: #D8C094;
   --accent-foreground: #0B0D13;

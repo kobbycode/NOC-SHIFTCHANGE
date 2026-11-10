@@ -434,7 +434,7 @@ export function AppSidebar({
             </p>
           )}
 
-          <p className="mt-4 text-xs text-slate-500">
+          <p className="mt-4 text-xs text-[var(--muted)]">
             ShiftChange 2.0
           </p>
 

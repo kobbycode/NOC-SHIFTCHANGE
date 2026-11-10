@@ -152,10 +152,10 @@ function shiftStatusClasses(
       return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300";
 
     case "completed":
-      return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+      return "border-[var(--border)] bg-[var(--elevated)] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
 
     default:
-      return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+      return "border-[var(--border)] bg-[var(--elevated)] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
   }
 }
 
@@ -178,7 +178,7 @@ function attendanceStatusClasses(
       return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300";
 
     default:
-      return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+      return "border-[var(--border)] bg-[var(--elevated)] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
   }
 }
 
@@ -568,7 +568,7 @@ export function SupervisorAttendanceWorkspace() {
           <p
             className="
               mt-1 text-sm
-              text-slate-500
+              text-[var(--muted)]
               dark:text-slate-400
             "
           >
@@ -592,11 +592,11 @@ export function SupervisorAttendanceWorkspace() {
           className="
             inline-flex items-center
             gap-2 rounded-xl border
-            border-slate-300 bg-white
+            border-slate-300 bg-[var(--surface)]
             px-4 py-2 text-sm
             font-medium text-slate-700
             shadow-sm transition
-            hover:bg-slate-50
+            hover:bg-[var(--elevated)]
             disabled:cursor-not-allowed
             disabled:opacity-60
             dark:border-slate-700
@@ -651,8 +651,8 @@ export function SupervisorAttendanceWorkspace() {
             items-center
             justify-center
             rounded-2xl border
-            border-slate-200
-            bg-white p-8
+            border-[var(--border)]
+            bg-[var(--surface)] p-8
             shadow-sm
             dark:border-slate-800
             dark:bg-slate-950
@@ -663,14 +663,14 @@ export function SupervisorAttendanceWorkspace() {
               className="
                 mx-auto h-7 w-7
                 animate-spin
-                text-slate-500
+                text-[var(--muted)]
               "
             />
 
             <p
               className="
                 mt-3 text-sm
-                text-slate-500
+                text-[var(--muted)]
                 dark:text-slate-400
               "
             >
@@ -683,8 +683,8 @@ export function SupervisorAttendanceWorkspace() {
         <div
           className="
             rounded-2xl border
-            border-slate-200
-            bg-white p-8
+            border-[var(--border)]
+            bg-[var(--surface)] p-8
             text-center shadow-sm
             dark:border-slate-800
             dark:bg-slate-950
@@ -710,7 +710,7 @@ export function SupervisorAttendanceWorkspace() {
           <p
             className="
               mt-2 text-sm
-              text-slate-500
+              text-[var(--muted)]
               dark:text-slate-400
             "
           >
@@ -767,7 +767,7 @@ export function SupervisorAttendanceWorkspace() {
                       ${
                         selected
                           ? "border-[var(--accent)] bg-[var(--accent)]/15 ring-1 ring-[var(--accent)] dark:bg-[var(--accent)]/20"
-                          : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
+                          : "border-[var(--border)] bg-[var(--surface)] hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
                       }
                     `}
                   >
@@ -796,7 +796,7 @@ export function SupervisorAttendanceWorkspace() {
                         <p
                           className="
                             mt-1 text-xs
-                            text-slate-500
+                            text-[var(--muted)]
                             dark:text-slate-400
                           "
                         >
@@ -832,8 +832,8 @@ export function SupervisorAttendanceWorkspace() {
             <div
               className="
                 rounded-2xl border
-                border-slate-200
-                bg-white p-6
+                border-[var(--border)]
+                bg-[var(--surface)] p-6
                 shadow-sm
                 dark:border-slate-800
                 dark:bg-slate-950
@@ -851,7 +851,7 @@ export function SupervisorAttendanceWorkspace() {
                   <p
                     className="
                       text-sm font-medium
-                      text-slate-500
+                      text-[var(--muted)]
                       dark:text-slate-400
                     "
                   >
@@ -875,7 +875,7 @@ export function SupervisorAttendanceWorkspace() {
                   <p
                     className="
                       mt-1 text-sm
-                      text-slate-500
+                      text-[var(--muted)]
                       dark:text-slate-400
                     "
                   >
@@ -907,7 +907,7 @@ export function SupervisorAttendanceWorkspace() {
                   items-center
                   justify-between
                   border-b
-                  border-slate-200
+                  border-[var(--border)]
                   pb-4
                   dark:border-slate-800
                 "
@@ -921,7 +921,7 @@ export function SupervisorAttendanceWorkspace() {
                   <ClipboardCheck
                     className="
                       h-5 w-5
-                      text-slate-500
+                      text-[var(--muted)]
                     "
                   />
 
@@ -941,7 +941,7 @@ export function SupervisorAttendanceWorkspace() {
                     <span
                       className="
                         rounded-full
-                        bg-slate-100
+                        bg-[var(--elevated)]
                         px-2.5 py-1
                         text-xs
                         font-medium
@@ -968,14 +968,14 @@ export function SupervisorAttendanceWorkspace() {
                       className="
                         mx-auto h-6 w-6
                         animate-spin
-                        text-slate-500
+                        text-[var(--muted)]
                       "
                     />
 
                     <p
                       className="
                         mt-3 text-sm
-                        text-slate-500
+                        text-[var(--muted)]
                         dark:text-slate-400
                       "
                     >
@@ -1037,7 +1037,7 @@ export function SupervisorAttendanceWorkspace() {
                     className="
                       mx-auto mt-2
                       max-w-md text-sm
-                      text-slate-500
+                      text-[var(--muted)]
                       dark:text-slate-400
                     "
                   >
@@ -1061,7 +1061,7 @@ export function SupervisorAttendanceWorkspace() {
                         key={record.id}
                         className="
                           rounded-xl border
-                          border-slate-200
+                          border-[var(--border)]
                           p-4
                           dark:border-slate-800
                         "
@@ -1090,7 +1090,7 @@ export function SupervisorAttendanceWorkspace() {
                             <p
                               className="
                                 mt-1 text-xs
-                                text-slate-500
+                                text-[var(--muted)]
                                 dark:text-slate-400
                               "
                             >

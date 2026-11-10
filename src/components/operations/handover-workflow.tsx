@@ -54,12 +54,12 @@ export function HandoverWorkflow({ initialReport, uid, role }: { initialReport: 
   }
   function form(event: FormEvent<HTMLFormElement>) { event.preventDefault(); return new FormData(event.currentTarget); }
   return <div className="space-y-5">
-    <section className="print:hidden space-y-4 rounded-xl border bg-white p-5 dark:bg-slate-950" aria-busy={busy}>
+    <section className="print:hidden space-y-4 rounded-xl border bg-[var(--surface)] p-5 dark:bg-slate-950" aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">Handover review and actions</h2><button className={button} disabled={busy} onClick={() => void act(null)}>Refresh report</button></div>
       <p className="text-sm">Review sections A–E and pending work before confirming. Report revisions invalidate earlier confirmations. Task acceptance remains a separate action.</p>
       {message && <p role="status" className="text-green-700">{message}</p>}{error && <p role="alert" className="text-red-700">{error}</p>}
       {handover && <p className="text-sm">Revision {handover.revision} · {handover.lifecycleStatus.replaceAll("_", " ")} · {report.participants.filter(person => person.state !== "awaiting_confirmation").length}/4 participant positions resolved</p>}
-      {handover?.reportBinding && <div className="rounded-lg bg-slate-100 p-3 text-xs dark:bg-slate-900"><p>The reviewed report is frozen and each confirmation is bound to that frozen evidence.</p></div>}
+      {handover?.reportBinding && <div className="rounded-lg bg-[var(--elevated)] p-3 text-xs dark:bg-slate-900"><p>The reviewed report is frozen and each confirmation is bound to that frozen evidence.</p></div>}
       {!handover && <p>Supervisor: reserve the incoming permanent pair from the Handovers screen after beginning handover in Shift Management.</p>}
       {collecting && <fieldset disabled={busy} className="space-y-5 disabled:opacity-60">
         {manager && <>

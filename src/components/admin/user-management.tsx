@@ -475,7 +475,7 @@ export function UserManagement() {
                   </button>
                 </div>
 
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-[var(--muted)]">
                   Minimum 12 characters. The employee must change this password at
                   first login.
                 </p>
@@ -677,7 +677,7 @@ export function UserManagement() {
                   className="min-h-28 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 />
 
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-[var(--muted)]">
                   Between 10 and 500 characters. This reason will be recorded in
                   the audit log.
                 </p>
@@ -697,7 +697,7 @@ export function UserManagement() {
                   type="button"
                   disabled={actionSubmitting}
                   onClick={closeAccountAction}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-[var(--elevated)] disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>

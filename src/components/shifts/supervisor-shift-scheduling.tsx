@@ -235,7 +235,7 @@ export function SupervisorShiftScheduling({
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 text-xl font-bold text-slate-900 dark:text-white">
@@ -243,7 +243,7 @@ export function SupervisorShiftScheduling({
             Schedule a Shift
           </h2>
 
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-[var(--muted)] dark:text-slate-400">
             Create a scheduled shift for one
             active permanent technician pair.
             The server independently validates
@@ -257,7 +257,7 @@ export function SupervisorShiftScheduling({
           type="button"
           onClick={onReloadPairs}
           disabled={pairsLoading || submitting}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-[var(--elevated)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <RefreshCw
             className={
@@ -353,7 +353,7 @@ export function SupervisorShiftScheduling({
                   pairsLoading ||
                   activePairs.length === 0
                 }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               >
                 <option value="">
                   {pairsLoading
@@ -376,8 +376,8 @@ export function SupervisorShiftScheduling({
               </select>
 
               {selectedPair ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--elevated)] p-4 dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)] dark:text-slate-400">
                     <Users className="h-4 w-4" />
                     Assigned Technicians
                   </div>
@@ -396,7 +396,7 @@ export function SupervisorShiftScheduling({
                     )}
                   </ul>
 
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-2 text-xs text-[var(--muted)] dark:text-slate-400">
                     Both technicians hold equal
                     authority on this shift.
                     Individual attendance is
@@ -404,7 +404,7 @@ export function SupervisorShiftScheduling({
                   </p>
                 </div>
               ) : (
-                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-3 text-xs text-[var(--muted)] dark:text-slate-400">
                   Manage permanent pairs in{" "}
                   <Link
                     href="/supervisor/technician-pairs"
@@ -440,7 +440,7 @@ export function SupervisorShiftScheduling({
                     setCreatedShift(null);
                   }}
                   disabled={submitting}
-                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 />
               </div>
 
@@ -461,7 +461,7 @@ export function SupervisorShiftScheduling({
                       className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
                         shiftType === type
                           ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--foreground)] dark:bg-[var(--accent)]/20"
-                          : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                          : "border-slate-300 bg-[var(--surface)] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
                       <input
@@ -484,7 +484,7 @@ export function SupervisorShiftScheduling({
                   ))}
                 </div>
 
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-2 text-xs text-[var(--muted)] dark:text-slate-400">
                   Morning: 08:00–17:00.
                   Night: 17:00–08:00 the
                   following day.
@@ -493,8 +493,8 @@ export function SupervisorShiftScheduling({
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--elevated)] p-4 dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)] dark:text-slate-400">
               Computed Window
             </p>
 
@@ -511,7 +511,7 @@ export function SupervisorShiftScheduling({
                   ({SCHEDULING_TIMEZONE})
                 </p>
 
-                <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                <p className="mt-1 break-all text-xs text-[var(--muted)] dark:text-slate-400">
                   UTC:{" "}
                   {
                     scheduledWindow.scheduledStart
@@ -523,7 +523,7 @@ export function SupervisorShiftScheduling({
                 </p>
               </>
             ) : (
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-2 text-sm text-[var(--muted)] dark:text-slate-400">
                 Select a valid shift date to
                 compute the window.
               </p>
@@ -660,7 +660,7 @@ export function SupervisorShiftScheduling({
               type="button"
               onClick={handleEdit}
               disabled={submitting}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-[var(--elevated)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Edit Details
             </button>

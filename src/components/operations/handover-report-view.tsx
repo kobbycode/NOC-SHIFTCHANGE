@@ -58,7 +58,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
   ] as const;
 
   return (
-    <article className="handover-print space-y-6 rounded-xl border bg-white p-5 text-slate-900 sm:p-8 dark:bg-slate-950 dark:text-slate-100">
+    <article className="handover-print space-y-6 rounded-xl border bg-[var(--surface)] p-5 text-slate-900 sm:p-8 dark:bg-slate-950 dark:text-slate-100">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-blue-600">
@@ -71,7 +71,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
               ? "Frozen report evidence"
               : "Live preview — not authenticated report evidence"}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-[var(--muted)]">
             Outgoing shift: {staff.shiftId}
           </p>
         </div>
@@ -88,15 +88,15 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
         <h2 className="mb-3 text-lg font-semibold">A. Staff information</h2>
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div>
-            <dt className="text-slate-500">Scheduled shift</dt>
+            <dt className="text-[var(--muted)]">Scheduled shift</dt>
             <dd>{show(staff.scheduledStart)} – {show(staff.scheduledEnd)}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Actual start</dt>
+            <dt className="text-[var(--muted)]">Actual start</dt>
             <dd>{show(staff.actualStart)}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Outgoing technicians</dt>
+            <dt className="text-[var(--muted)]">Outgoing technicians</dt>
             <dd>
               {staff.outgoing
                 .map(person => person.name ?? `${person.uid} (name missing)`)
@@ -104,7 +104,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
             </dd>
           </div>
           <div>
-            <dt className="text-slate-500">Incoming technicians</dt>
+            <dt className="text-[var(--muted)]">Incoming technicians</dt>
             <dd>
               {staff.incoming.length
                 ? staff.incoming
@@ -114,11 +114,11 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
             </dd>
           </div>
           <div>
-            <dt className="text-slate-500">Engineering / location</dt>
+            <dt className="text-[var(--muted)]">Engineering / location</dt>
             <dd>{staff.engineeringLocation ?? "Not recorded"}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Handover state</dt>
+            <dt className="text-[var(--muted)]">Handover state</dt>
             <dd>
               {handover ? label(handover.lifecycleStatus) : "Not initiated"} ·
               {" "}Started: {show(staff.handoverStartedAt)}
@@ -176,7 +176,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-[var(--muted)]">
           Reporting confirmation is attendance evidence, not a fabricated
           clock-in. Late reasons appear only when recorded by the attendance
           system.
@@ -353,7 +353,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
             </ul>
           </div>
         ))}
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[var(--muted)]">
           Reviewing carry-forward tasks does not accept or create incoming task
           assignments.
         </p>
@@ -432,7 +432,7 @@ export function HandoverReport({ report }: { report: HandoverReportView }) {
               {content.corrections.map(note => (
                 <li key={note.id} className="break-all">
                   <p>{note.note}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[var(--muted)]">
                     Correction ID: {note.id} · {note.recordedBy} ·
                     {" "}{show(note.recordedAt)} · Original evidence retained
                   </p>

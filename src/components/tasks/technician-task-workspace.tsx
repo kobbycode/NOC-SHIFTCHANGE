@@ -682,7 +682,7 @@ export default function TechnicianTaskWorkspace() {
             className="
               mt-1
               text-sm
-              text-slate-500
+              text-[var(--muted)]
               dark:text-slate-400
             "
           >
@@ -760,8 +760,8 @@ export default function TechnicianTaskWorkspace() {
               className="
                 rounded-2xl
                 border
-                border-slate-200
-                bg-white
+                border-[var(--border)]
+                bg-[var(--surface)]
                 p-5
                 dark:border-slate-800
                 dark:bg-slate-950
@@ -770,7 +770,7 @@ export default function TechnicianTaskWorkspace() {
               <p
                 className="
                   text-sm
-                  text-slate-500
+                  text-[var(--muted)]
                 "
               >
                 {summary.label}
@@ -818,7 +818,7 @@ export default function TechnicianTaskWorkspace() {
                 filter ===
                 option.value
                   ? "btn-accent rounded-xl px-4 py-2 text-sm font-medium"
-                  : "rounded-xl bg-slate-100 px-4 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  : "rounded-xl bg-[var(--elevated)] px-4 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200"
               }
             >
               {option.label}
@@ -989,10 +989,10 @@ export default function TechnicianTaskWorkspace() {
           className="
             rounded-xl
             border
-            border-slate-200
+            border-[var(--border)]
             p-8
             text-center
-            text-slate-500
+            text-[var(--muted)]
             dark:border-slate-800
           "
         >
@@ -1003,10 +1003,10 @@ export default function TechnicianTaskWorkspace() {
           className="
             rounded-xl
             border
-            border-slate-200
+            border-[var(--border)]
             p-8
             text-center
-            text-slate-500
+            text-[var(--muted)]
             dark:border-slate-800
           "
         >
@@ -1095,8 +1095,8 @@ export default function TechnicianTaskWorkspace() {
                   className="
                     rounded-2xl
                     border
-                    border-slate-200
-                    bg-white
+                    border-[var(--border)]
+                    bg-[var(--surface)]
                     p-5
                     shadow-sm
                     dark:border-slate-800
@@ -1134,7 +1134,7 @@ export default function TechnicianTaskWorkspace() {
                       className="
                         text-xs
                         font-medium
-                        text-slate-500
+                        text-[var(--muted)]
                       "
                     >
                       {formatStatus(
@@ -1179,7 +1179,7 @@ export default function TechnicianTaskWorkspace() {
                       mt-4
                       space-y-2
                       border-t
-                      border-slate-200
+                      border-[var(--border)]
                       pt-4
                       text-sm
                       dark:border-slate-800
@@ -1224,7 +1224,7 @@ export default function TechnicianTaskWorkspace() {
                       className="
                         mt-4
                         border-t
-                        border-slate-200
+                        border-[var(--border)]
                         pt-4
                         dark:border-slate-800
                       "
@@ -1300,7 +1300,7 @@ export default function TechnicianTaskWorkspace() {
                       className="
                         mt-4
                         border-t
-                        border-slate-200
+                        border-[var(--border)]
                         pt-4
                         dark:border-slate-800
                       "
@@ -1344,7 +1344,7 @@ export default function TechnicianTaskWorkspace() {
                       className="
                         mt-4
                         border-t
-                        border-slate-200
+                        border-[var(--border)]
                         pt-4
                         dark:border-slate-800
                       "
@@ -1439,8 +1439,8 @@ export default function TechnicianTaskWorkspace() {
                         mt-4
                         rounded-xl
                         border
-                        border-slate-200
-                        bg-slate-50
+                        border-[var(--border)]
+                        bg-[var(--elevated)]
                         p-3
                         text-sm
                         text-slate-600
@@ -1464,8 +1464,8 @@ export default function TechnicianTaskWorkspace() {
                         mt-4
                         rounded-xl
                         border
-                        border-slate-200
-                        bg-slate-50
+                        border-[var(--border)]
+                        bg-[var(--elevated)]
                         p-3
                         text-sm
                         text-slate-600
@@ -1486,10 +1486,10 @@ export default function TechnicianTaskWorkspace() {
                     className="
                       mt-4
                       rounded-xl
-                      bg-slate-50
+                      bg-[var(--elevated)]
                       p-3
                       text-xs
-                      text-slate-500
+                      text-[var(--muted)]
                       dark:bg-slate-900
                       dark:text-slate-400
                     "

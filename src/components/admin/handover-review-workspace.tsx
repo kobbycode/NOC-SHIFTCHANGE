@@ -42,8 +42,8 @@ const CLASSIFICATION_LABELS: Record<HandoverReviewClassification, string> = {
 };
 
 const CLASSIFICATION_STYLES: Record<HandoverReviewClassification, string> = {
-  not_reviewable: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  not_activated: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  not_reviewable: "bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  not_activated: "bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200",
   awaiting_first_acceptance: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
   awaiting_partner_acceptance: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
   eligible_for_normal_closure: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200",
@@ -254,8 +254,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border bg-white p-5 shadow-sm dark:bg-slate-950">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+    <section className="rounded-xl border bg-[var(--surface)] p-5 shadow-sm dark:bg-slate-950">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{title}</h3>
       <div className="mt-4">{children}</div>
     </section>
   );
@@ -603,7 +603,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Handover Review</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-500">
+          <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
             Investigate exceptions in completed handovers and record administrative
             findings. This workspace is read-only for operational evidence: it cannot
             create acceptance, attendance, guard closure or historical proof.
@@ -616,7 +616,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
             void loadQueue(selectedId);
             void reloadDetail();
           }}
-          className="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900"
+          className="inline-flex items-center gap-2 rounded-lg border bg-[var(--surface)] px-3 py-2 text-sm font-medium shadow-sm hover:bg-[var(--elevated)] dark:bg-slate-950 dark:hover:bg-slate-900"
         >
           <RefreshCw className="h-4 w-4" />
           Refresh
@@ -629,11 +629,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
         </div>
       ) : null}
 
-      <section className="rounded-xl border bg-white p-5 shadow-sm dark:bg-slate-950">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+      <section className="rounded-xl border bg-[var(--surface)] p-5 shadow-sm dark:bg-slate-950">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
           Recovery for a stalled handover
         </h2>
-        <p className="mt-1 max-w-3xl text-xs text-slate-500">
+        <p className="mt-1 max-w-3xl text-xs text-[var(--muted)]">
           A stalled handover is not always an exception in the review queue below, so it can also be
           opened directly by its handover document id, exactly as the recovery runbook does. The
           classifier decides whether recovery is possible; this form only selects the record.
@@ -689,18 +689,18 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <aside className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
               Review queue
             </h2>
             <span className="text-xs text-slate-400">{queue.length} case(s)</span>
           </div>
 
           {queueLoading ? (
-            <p className="rounded-xl border bg-white p-4 text-sm text-slate-500 dark:bg-slate-950">
+            <p className="rounded-xl border bg-[var(--surface)] p-4 text-sm text-[var(--muted)] dark:bg-slate-950">
               Loading review queue…
             </p>
           ) : queue.length === 0 ? (
-            <div className="rounded-xl border bg-white p-4 text-sm text-slate-500 dark:bg-slate-950">
+            <div className="rounded-xl border bg-[var(--surface)] p-4 text-sm text-[var(--muted)] dark:bg-slate-950">
               <p className="inline-flex items-center gap-2 font-medium text-emerald-700">
                 <ShieldCheck className="h-4 w-4" />
                 No handover exception is awaiting review.
@@ -727,21 +727,21 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${
                         selected
                           ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
-                          : "bg-white hover:border-slate-300 dark:bg-slate-950"
+                          : "bg-[var(--surface)] hover:border-slate-300 dark:bg-slate-950"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <Badge tone={CLASSIFICATION_STYLES[item.classification]}>
                           {CLASSIFICATION_LABELS[item.classification]}
                         </Badge>
-                        <span className="text-xs font-medium text-slate-500">
+                        <span className="text-xs font-medium text-[var(--muted)]">
                           {CASE_STATUS_LABELS[item.caseStatus]}
                         </span>
                       </div>
                       <p className="mt-3 text-sm font-semibold">
                         {item.shiftType === "night" ? "Night" : "Morning"} handover
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-[var(--muted)]">
                         {formatTimestamp(item.scheduledStart)} → {formatTimestamp(item.scheduledEnd)}
                       </p>
                       <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
@@ -758,11 +758,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
 
         <main className="space-y-5">
           {!selectedId ? (
-            <div className="rounded-xl border bg-white p-6 text-sm text-slate-500 dark:bg-slate-950">
+            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
               Select a review case to inspect its authoritative evidence.
             </div>
           ) : detailLoading && review === null ? (
-            <div className="rounded-xl border bg-white p-6 text-sm text-slate-500 dark:bg-slate-950">
+            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
               Loading case evidence…
             </div>
           ) : detailError ? (
@@ -770,22 +770,22 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               {detailError}
             </div>
           ) : review === null ? (
-            <div className="rounded-xl border bg-white p-6 text-sm text-slate-500 dark:bg-slate-950">
+            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
               The case could not be displayed.
             </div>
           ) : (
             <>
-              <section className="rounded-xl border bg-white p-6 shadow-sm dark:bg-slate-950">
+              <section className="rounded-xl border bg-[var(--surface)] p-6 shadow-sm dark:bg-slate-950">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone={CLASSIFICATION_STYLES[review.classification]}>
                         {CLASSIFICATION_LABELS[review.classification]}
                       </Badge>
-                      <Badge tone="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <Badge tone="bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                         Case: {CASE_STATUS_LABELS[review.caseStatus]}
                       </Badge>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-[var(--muted)]">
                         revision {review.caseRevision}
                       </span>
                     </div>
@@ -793,7 +793,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       {review.shiftType === "night" ? "Night" : "Morning"} handover review
                     </h2>
                   </div>
-                  <div className="text-right text-xs text-slate-500">
+                  <div className="text-right text-xs text-[var(--muted)]">
                     <p>Reviewed at</p>
                     <p className="font-medium">{formatTimestamp(review.generatedAt)}</p>
                   </div>
@@ -801,39 +801,39 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <Field label="Outgoing shift">
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Status: {review.shifts.outgoing.status ?? "unknown"}
                     </p>
                   </Field>
                   <Field label="Incoming shift">
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Status: {review.shifts.incoming.status ?? "unknown"}
                     </p>
                   </Field>
                   <Field label="Scheduled window">
                     <p>{formatTimestamp(review.scheduledStart)}</p>
-                    <p className="text-xs text-slate-500">to {formatTimestamp(review.scheduledEnd)}</p>
+                    <p className="text-xs text-[var(--muted)]">to {formatTimestamp(review.scheduledEnd)}</p>
                   </Field>
                   <Field label="Handover lifecycle">
                     <p>{review.aggregateLifecycleStatus.replaceAll("_", " ")}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Aggregate revision {review.aggregateRevision}
                     </p>
                   </Field>
                   <Field label="Guard lifecycle">
                     <p>{review.guardLifecycleState ?? "unavailable"}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       {review.guardLifecycleReason ?? "no reason"}
                     </p>
                   </Field>
                   <Field label="Reservation guard">
                     {review.guard ? (
                       <>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-[var(--muted)]">
                           {review.guard.ownerLifecycleState} · revision {review.guard.guardRevision} ·
                           fencing {review.guard.fencingEpoch}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-[var(--muted)]">
                           Finalization audit: {review.guard.finalizationAuditPresent ? "present" : "absent"}
                         </p>
                       </>
@@ -853,11 +853,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               <Section title="Activation and frozen report">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Activation receipt">
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Present: {review.activation.present ? "yes" : "no"} · Valid:{" "}
                       {review.activation.valid ? "yes" : "no"}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Activated at: {formatTimestamp(review.activation.activatedAt)}
                     </p>
                     {review.activation.message ? (
@@ -865,7 +865,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                     ) : null}
                   </Field>
                   <Field label="Frozen v2 report">
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--muted)]">
                       Binding valid: {review.report.valid ? "yes" : "no"}
                     </p>
                     {review.report.message ? (
@@ -880,7 +880,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                   {review.participants.map((participant) => (
                     <li
                       key={participant.position}
-                      className="rounded-lg border bg-slate-50 p-3 dark:bg-slate-900"
+                      className="rounded-lg border bg-[var(--elevated)] p-3 dark:bg-slate-900"
                     >
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         {POSITION_LABELS[participant.position] ?? participant.position}
@@ -912,36 +912,36 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             <p className="font-medium">
                               {application.fullName ?? "Unnamed account"}
                             </p>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-[var(--muted)]">
                               {POSITION_LABELS[application.position] ?? application.position}
                             </p>
                           </td>
                           <td className="py-3 pr-4">
                             <p className="font-medium">{application.verificationStatus.replaceAll("_", " ")}</p>
                             {application.verificationCode ? (
-                              <p className="font-mono text-[11px] text-slate-500">
+                              <p className="font-mono text-[11px] text-[var(--muted)]">
                                 {application.verificationCode}
                               </p>
                             ) : null}
                             {application.verificationMessage ? (
-                              <p className="mt-1 max-w-xs text-xs text-slate-500">
+                              <p className="mt-1 max-w-xs text-xs text-[var(--muted)]">
                                 {application.verificationMessage}
                               </p>
                             ) : null}
                           </td>
-                          <td className="py-3 pr-4 text-xs text-slate-500">
+                          <td className="py-3 pr-4 text-xs text-[var(--muted)]">
                             <p>{application.receiptPresent ? "present" : "absent"}</p>
                             <p>Outcome: {application.outcome ?? "—"}</p>
                             <p>Applied: {formatTimestamp(application.operationalAppliedAt)}</p>
                           </td>
-                          <td className="py-3 pr-4 text-xs text-slate-500">
+                          <td className="py-3 pr-4 text-xs text-[var(--muted)]">
                             <p>Evidence: {application.evidencePresent ? "yes" : "no"}</p>
                             <p>Operation finalized: {application.operationFinalized ? "yes" : "no"}</p>
                             <p>Membership: {application.membershipPresent ? "yes" : "no"}</p>
                             <p>Attendance: {application.attendancePresent ? "yes" : "no"}</p>
                             <p>Application audit: {application.applicationAuditPresent ? "yes" : "no"}</p>
                           </td>
-                          <td className="py-3 text-xs text-slate-500">
+                          <td className="py-3 text-xs text-[var(--muted)]">
                             {application.declaredNotYetIn ? "yes" : "no"}
                           </td>
                         </tr>
@@ -953,7 +953,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
 
               <Section title="Reasons for review">
                 {review.reviewReasons.length === 0 ? (
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-[var(--muted)]">
                     No review reason is raised by the current evidence.
                   </p>
                 ) : (
@@ -1018,7 +1018,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                   ) : null}
 
                   {!adjudication ? (
-                    <p className="mt-4 text-sm text-slate-500">
+                    <p className="mt-4 text-sm text-[var(--muted)]">
                       {adjudicationError
                         ? "Adjudication eligibility is unavailable for this case."
                         : "Checking historical integrity…"}
@@ -1034,13 +1034,13 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   adjudication.eligibility.acknowledgedDecision.decisionType
                                 ]}
                               </p>
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-[var(--muted)]">
                                 Recorded{" "}
                                 {formatTimestamp(
                                   adjudication.eligibility.acknowledgedDecision.recordedAt,
                                 )}
                               </p>
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-[var(--muted)]">
                                 Case after:{" "}
                                 {
                                   CASE_STATUS_LABELS[
@@ -1050,7 +1050,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 · revision{" "}
                                 {adjudication.eligibility.acknowledgedDecision.caseRevisionAfter}
                               </p>
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-[var(--muted)]">
                                 Classification:{" "}
                                 {CLASSIFICATION_LABELS[
                                   adjudication.eligibility.acknowledgedDecision.classification
@@ -1064,7 +1064,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           )}
                         </Field>
                         <Field label="Evidence comparison">
-                          <p className="text-xs text-slate-500">Previous classification</p>
+                          <p className="text-xs text-[var(--muted)]">Previous classification</p>
                           <p>
                             {adjudication.eligibility.previousClassification
                               ? CLASSIFICATION_LABELS[
@@ -1072,7 +1072,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 ]
                               : "—"}
                           </p>
-                          <p className="mt-2 text-xs text-slate-500">Current classification</p>
+                          <p className="mt-2 text-xs text-[var(--muted)]">Current classification</p>
                           <p>
                             {CLASSIFICATION_LABELS[
                               adjudication.eligibility.currentClassification
@@ -1123,10 +1123,10 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 onChange={(event) => setAdjudicationFinding(event.target.value)}
                                 rows={3}
                                 maxLength={2000}
-                                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                                className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                                 placeholder="Describe the contradiction you are recording."
                               />
-                              <span className="text-xs text-slate-500">
+                              <span className="text-xs text-[var(--muted)]">
                                 10–2000 characters. Stored with your administrator identity.
                               </span>
                             </label>
@@ -1165,7 +1165,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   setAdjudicationAcknowledged(false);
                                   setAdjudicationError("");
                                 }}
-                                className="rounded-lg border bg-white px-4 py-2 text-sm font-medium dark:bg-slate-950"
+                                className="rounded-lg border bg-[var(--surface)] px-4 py-2 text-sm font-medium dark:bg-slate-950"
                               >
                                 Cancel
                               </button>
@@ -1184,13 +1184,13 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             >
                               Record adjudication
                             </button>
-                            <span className="text-xs text-slate-500">
+                            <span className="text-xs text-[var(--muted)]">
                               Adds an immutable investigative record. Nothing else changes.
                             </span>
                           </div>
                         )
                       ) : (
-                        <p className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                        <p className="rounded-lg border bg-[var(--elevated)] p-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
                           {adjudication.eligibility.message}
                           {adjudication.eligibility.ineligibleCode ? (
                             <span className="ml-2 font-mono text-[11px] text-slate-400">
@@ -1205,7 +1205,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           Adjudication history ({adjudication.records.length})
                         </p>
                         {adjudication.records.length === 0 ? (
-                          <p className="mt-2 text-sm text-slate-500">
+                          <p className="mt-2 text-sm text-[var(--muted)]">
                             No adjudication has been recorded for this handover.
                           </p>
                         ) : (
@@ -1213,16 +1213,16 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             {adjudication.records.map((record) => (
                               <li
                                 key={record.id}
-                                className="rounded-lg border bg-slate-50 p-3 text-sm dark:bg-slate-900"
+                                className="rounded-lg border bg-[var(--elevated)] p-3 text-sm dark:bg-slate-900"
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="font-semibold">Adjudication recorded</p>
-                                  <p className="text-xs text-slate-500">
+                                  <p className="text-xs text-[var(--muted)]">
                                     {formatTimestamp(record.adjudicatedAt)}
                                   </p>
                                 </div>
                                 <p className="mt-2">{record.finding}</p>
-                                <p className="mt-1 text-xs text-slate-500">
+                                <p className="mt-1 text-xs text-[var(--muted)]">
                                   Recorded by{" "}
                                   {record.actorRole === "admin" ? "an administrator" : record.actorRole}
                                 </p>
@@ -1245,7 +1245,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               ) : null}
 
               <Section title="Administrative decision">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   Decisions in this workspace only record administrative findings and
                   case status. They never change acceptance, attendance, guard,
                   activation or report evidence, and they cannot reopen an acceptance
@@ -1271,13 +1271,13 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                 ) : null}
 
                 {review.caseStatus === HANDOVER_REVIEW_CASE_STATUSES.CLOSED ? (
-                  <p className="mt-4 inline-flex items-center gap-2 rounded-lg border bg-white p-3 text-sm text-slate-600 dark:bg-slate-950">
+                  <p className="mt-4 inline-flex items-center gap-2 rounded-lg border bg-[var(--surface)] p-3 text-sm text-slate-600 dark:bg-slate-950">
                     <ShieldCheck className="h-4 w-4 text-emerald-600" />
                     This review case is closed. No further administrative decision can
                     be recorded.
                   </p>
                 ) : allowedDecisions.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-500">
+                  <p className="mt-4 text-sm text-[var(--muted)]">
                     No administrative decision is available for this case.
                   </p>
                 ) : (
@@ -1289,7 +1289,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         onChange={(event) =>
                           setDecisionType(event.target.value as HandoverReviewDecisionType)
                         }
-                        className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                        className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                       >
                         {allowedDecisions.map((value) => (
                           <option key={value} value={value}>
@@ -1306,7 +1306,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         onChange={(event) => setReason(event.target.value)}
                         rows={3}
                         maxLength={2000}
-                        className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                        className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                         placeholder="Explain what was reviewed and why this decision is appropriate."
                       />
                       <span className="text-xs text-slate-400">
@@ -1323,7 +1323,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           onChange={(event) => setFinding(event.target.value)}
                           rows={3}
                           maxLength={2000}
-                          className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                           placeholder="State the finding for the record."
                         />
                       </label>
@@ -1337,7 +1337,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           onChange={(event) => setResolutionSummary(event.target.value)}
                           rows={3}
                           maxLength={2000}
-                          className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                           placeholder="Summarize how the review is concluded without changing operational evidence."
                         />
                       </label>
@@ -1350,7 +1350,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           value={escalationTarget}
                           onChange={(event) => setEscalationTarget(event.target.value)}
                           maxLength={120}
-                          className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
                           placeholder="Team or authority receiving the escalation."
                         />
                       </label>
@@ -1372,7 +1372,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
 
               <Section title="Administrative decision history">
                 {review.decisions.length === 0 ? (
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-[var(--muted)]">
                     No administrative decision has been recorded for this handover.
                   </p>
                 ) : (
@@ -1380,15 +1380,15 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                     {review.decisions.map((decision) => (
                       <li
                         key={decision.id}
-                        className="rounded-lg border bg-slate-50 p-3 text-sm dark:bg-slate-900"
+                        className="rounded-lg border bg-[var(--elevated)] p-3 text-sm dark:bg-slate-900"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="font-semibold">{DECISION_LABELS[decision.decisionType]}</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-[var(--muted)]">
                             {formatTimestamp(decision.recordedAt)}
                           </p>
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-[var(--muted)]">
                           {decision.caseStatusBefore} →{" "}
                           {decision.caseStatusAfter} · revision {decision.caseRevisionAfter}
                         </p>

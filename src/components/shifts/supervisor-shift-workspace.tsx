@@ -108,12 +108,12 @@ function statusClasses(
       return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300";
 
     case "completed":
-      return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+      return "border-[var(--border)] bg-[var(--elevated)] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
 
     case "cancelled":
       return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300";
     default:
-      return "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
+      return "border-[var(--border)] bg-[var(--elevated)] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300";
   }
 }
 
@@ -569,7 +569,7 @@ export function SupervisorShiftWorkspace() {
             Operational Shifts
           </h2>
 
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-[var(--muted)] dark:text-slate-400">
             Authoritative shift and
             technician membership data.
           </p>
@@ -584,7 +584,7 @@ export function SupervisorShiftWorkspace() {
             loading ||
             refreshing
           }
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-[var(--elevated)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <RefreshCw
             className={
@@ -624,24 +624,24 @@ export function SupervisorShiftWorkspace() {
       />
 
       {loading ? (
-        <div className="flex min-h-48 items-center justify-center rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex min-h-48 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="text-center">
-            <Loader2 className="mx-auto h-7 w-7 animate-spin text-slate-500" />
+            <Loader2 className="mx-auto h-7 w-7 animate-spin text-[var(--muted)]" />
 
-            <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-3 text-sm text-[var(--muted)] dark:text-slate-400">
               Loading operational shifts...
             </p>
           </div>
         </div>
       ) : shifts.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <CalendarClock className="mx-auto h-8 w-8 text-slate-400" />
 
           <h3 className="mt-4 font-semibold text-slate-900 dark:text-white">
             No shifts available
           </h3>
 
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-sm text-[var(--muted)] dark:text-slate-400">
             No operational shift records
             are currently available.
           </p>
@@ -669,7 +669,7 @@ export function SupervisorShiftWorkspace() {
                   className={`w-full rounded-2xl border p-5 text-left shadow-sm transition ${
                     selected
                       ? "border-[var(--accent)] bg-[var(--accent)]/15 ring-1 ring-[var(--accent)] dark:bg-[var(--accent)]/20"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700"
                   }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -681,7 +681,7 @@ export function SupervisorShiftWorkspace() {
                         Shift
                       </p>
 
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      <p className="mt-1 text-xs text-[var(--muted)] dark:text-slate-400">
                         {formatDateTime(
                           shift.scheduledStart,
                         )}
@@ -699,7 +699,7 @@ export function SupervisorShiftWorkspace() {
                     </span>
                   </div>
 
-                  <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-2">
+                  <div className="mt-4 grid gap-2 text-xs text-[var(--muted)] dark:text-slate-400 sm:grid-cols-2">
                     <span>
                       Start:{" "}
                       {formatDateTime(
@@ -730,10 +730,10 @@ export function SupervisorShiftWorkspace() {
           </div>
 
           {selectedShift && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                  <p className="text-sm font-medium text-[var(--muted)] dark:text-slate-400">
                     Selected Shift
                   </p>
 
@@ -837,7 +837,7 @@ export function SupervisorShiftWorkspace() {
                     Shift ID
                   </dt>
 
-                  <dd className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                  <dd className="mt-1 break-all text-xs text-[var(--muted)] dark:text-slate-400">
                     {selectedShift.id}
                   </dd>
                 </div>
@@ -954,9 +954,9 @@ export function SupervisorShiftWorkspace() {
                 </div>
               )}
 
-              <div className="mt-8 border-t border-slate-200 pt-6 dark:border-slate-800">
+              <div className="mt-8 border-t border-[var(--border)] pt-6 dark:border-slate-800">
                 <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-slate-500" />
+                  <Users className="h-5 w-5 text-[var(--muted)]" />
 
                   <h4 className="font-semibold text-slate-900 dark:text-white">
                     Technician Membership
@@ -964,7 +964,7 @@ export function SupervisorShiftWorkspace() {
                 </div>
 
                 {membersLoading ? (
-                  <div className="mt-5 flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+                  <div className="mt-5 flex items-center gap-3 text-sm text-[var(--muted)] dark:text-slate-400">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     Loading membership...
                   </div>
@@ -976,7 +976,7 @@ export function SupervisorShiftWorkspace() {
                     {membersError}
                   </div>
                 ) : members.length === 0 ? (
-                  <p className="mt-5 text-sm text-slate-500 dark:text-slate-400">
+                  <p className="mt-5 text-sm text-[var(--muted)] dark:text-slate-400">
                     No technicians are
                     currently recorded for
                     this shift.
@@ -987,7 +987,7 @@ export function SupervisorShiftWorkspace() {
                       (member) => (
                         <div
                           key={member.id}
-                          className="rounded-xl border border-slate-200 p-4 dark:border-slate-800"
+                          className="rounded-xl border border-[var(--border)] p-4 dark:border-slate-800"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
@@ -995,19 +995,19 @@ export function SupervisorShiftWorkspace() {
                                 Technician
                               </p>
 
-                              <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">
+                              <p className="mt-1 break-all text-xs text-[var(--muted)] dark:text-slate-400">
                                 {
                                   member.technicianId
                                 }
                               </p>
                             </div>
 
-                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium capitalize text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--elevated)] px-2.5 py-1 text-xs font-medium capitalize text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                               {member.role}
                             </span>
                           </div>
 
-                          <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                          <div className="mt-3 text-xs text-[var(--muted)] dark:text-slate-400">
                             Joined:{" "}
                             {formatDateTime(
                               member.joinedAt,
@@ -1015,7 +1015,7 @@ export function SupervisorShiftWorkspace() {
                           </div>
 
                           {member.leftAt && (
-                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            <div className="mt-1 text-xs text-[var(--muted)] dark:text-slate-400">
                               Left:{" "}
                               {formatDateTime(
                                 member.leftAt,

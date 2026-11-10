@@ -74,7 +74,7 @@ export function ShiftOperationsAccessNotice({
       <div>
         <h1 className="text-2xl font-bold">Shift Operations</h1>
 
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-[var(--muted)]">
           Shared shift records · Individual authorship
         </p>
       </div>

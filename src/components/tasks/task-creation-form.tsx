@@ -126,13 +126,13 @@ export function TaskCreationForm({
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">
           Create Operational Task
         </h2>
 
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-2 text-sm text-[var(--muted)] dark:text-slate-400">
           Create a task for technician assignment
           and operational tracking.
         </p>
@@ -179,7 +179,7 @@ export function TaskCreationForm({
             required
             maxLength={200}
             placeholder="Enter task title"
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className="w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           />
         </div>
 
@@ -202,7 +202,7 @@ export function TaskCreationForm({
             rows={5}
             maxLength={5000}
             placeholder="Describe the operational work required"
-            className="w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className="w-full resize-y rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           />
         </div>
 
@@ -224,7 +224,7 @@ export function TaskCreationForm({
               )
             }
             disabled={submitting}
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className="w-full rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           >
             <option value="low">
               Low
@@ -251,12 +251,12 @@ export function TaskCreationForm({
           performed after task creation.
         </div>
 
-        <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-5 dark:border-slate-800">
+        <div className="flex flex-wrap justify-end gap-3 border-t border-[var(--border)] pt-5 dark:border-slate-800">
           <button
             type="button"
             onClick={onCancel}
             disabled={submitting}
-            className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+            className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-[var(--elevated)] disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
           >
             Cancel
           </button>

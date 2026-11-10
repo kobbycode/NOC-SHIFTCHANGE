@@ -446,9 +446,9 @@ export function HandoverRecoveryPanel({
               onChange={(event) => setReason(event.target.value)}
               rows={3}
               maxLength={2000}
-              className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+              className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
             />
-            <span className="text-xs text-slate-500">10–2000 characters. Stored with your identity.</span>
+            <span className="text-xs text-[var(--muted)]">10–2000 characters. Stored with your identity.</span>
           </label>
         ) : null}
         {needsPassword ? (
@@ -458,9 +458,9 @@ export function HandoverRecoveryPanel({
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
-              className="mt-1 w-full rounded-lg border bg-white px-3 py-2 dark:bg-slate-950"
+              className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
             />
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-[var(--muted)]">
               Reauthenticates you for this act only. It is never stored.
             </span>
           </label>
@@ -504,7 +504,7 @@ export function HandoverRecoveryPanel({
             type="button"
             onClick={closeAction}
             disabled={busy}
-            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium dark:bg-slate-950"
+            className="rounded-lg border bg-[var(--surface)] px-4 py-2 text-sm font-medium dark:bg-slate-950"
           >
             Cancel
           </button>
@@ -529,20 +529,20 @@ export function HandoverRecoveryPanel({
       execution?.state !== "applied";
 
     return (
-      <li key={record.id} className="rounded-lg border bg-slate-50 p-4 text-sm dark:bg-slate-900">
+      <li key={record.id} className="rounded-lg border bg-[var(--elevated)] p-4 text-sm dark:bg-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Badge tone={statusTone(view.effectiveStatus)}>
             {EFFECTIVE_STATUS_LABELS[view.effectiveStatus]}
           </Badge>
-          <span className="text-xs text-slate-500">revision {record.revision}</span>
+          <span className="text-xs text-[var(--muted)]">revision {record.revision}</span>
         </div>
         <p className="mt-2">{record.reason}</p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-[var(--muted)]">
           Requested by {record.requestedBy} at {formatTimestamp(record.requestedAt)} · expires{" "}
           {formatTimestamp(record.expiresAt)}
         </p>
         {record.voidedBy ? (
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-[var(--muted)]">
             Voided by {record.voidedBy} at {formatTimestamp(record.voidedAt)}: {record.voidReason}
           </p>
         ) : null}
@@ -567,14 +567,14 @@ export function HandoverRecoveryPanel({
         </div>
 
         {view.effectiveStatus === "fully_approved" ? (
-          <div className="mt-3 rounded-lg border bg-white p-3 text-xs dark:bg-slate-950">
+          <div className="mt-3 rounded-lg border bg-[var(--surface)] p-3 text-xs dark:bg-slate-950">
             {actorRole === "supervisor" ? (
               <p className="text-slate-600 dark:text-slate-300">
                 Fully approved. An administrator must execute the recovery; approval alone changes
                 nothing.
               </p>
             ) : execution === undefined ? (
-              <p className="text-slate-500">Reading the execution status…</p>
+              <p className="text-[var(--muted)]">Reading the execution status…</p>
             ) : execution.state === "error" ? (
               <p className="text-red-700">{execution.message}</p>
             ) : execution.state === "disabled" ? (
@@ -621,7 +621,7 @@ export function HandoverRecoveryPanel({
         ) : null}
 
         {view.effectiveStatus === "awaiting_second_approval" && !canCountersign ? (
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-[var(--muted)]">
             {signedByActor
               ? "You signed this intent. A different person in the complementary role must sign it."
               : `A ${view.requiredSecondRole ? ROLE_LABELS[view.requiredSecondRole].toLowerCase() : "complementary role"} signature is required.`}
@@ -662,9 +662,9 @@ export function HandoverRecoveryPanel({
   }
 
   return (
-    <section className="rounded-xl border bg-white p-5 shadow-sm dark:bg-slate-950">
+    <section className="rounded-xl border bg-[var(--surface)] p-5 shadow-sm dark:bg-slate-950">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
           Stalled-handover recovery
         </h3>
         <button
@@ -674,14 +674,14 @@ export function HandoverRecoveryPanel({
             void refresh();
           }}
           disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-50 dark:bg-slate-950 dark:hover:bg-slate-900"
+          className="inline-flex items-center gap-2 rounded-lg border bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--elevated)] disabled:opacity-50 dark:bg-slate-950 dark:hover:bg-slate-900"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
           Refresh recovery state
         </button>
       </div>
 
-      <p className="mt-2 max-w-3xl text-xs text-slate-500">
+      <p className="mt-2 max-w-3xl text-xs text-[var(--muted)]">
         Abandoning a stalled equal handover needs one supervisor signature and one administrator
         signature on the same intent, each with that person&rsquo;s own password. An administrator
         then executes it. Signing records intent only; execution is the only step that changes an
@@ -704,7 +704,7 @@ export function HandoverRecoveryPanel({
       ) : null}
 
       {loading ? (
-        <p className="mt-3 text-sm text-slate-500">Classifying the current evidence…</p>
+        <p className="mt-3 text-sm text-[var(--muted)]">Classifying the current evidence…</p>
       ) : eligibility === null ? null : (
         <div className="mt-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -712,18 +712,18 @@ export function HandoverRecoveryPanel({
               <Badge tone={eligibilityTone(eligibility.classification)}>
                 {ELIGIBILITY_LABELS[eligibility.classification]}
               </Badge>
-              <p className="mt-1 text-xs text-slate-500">{eligibility.reason}</p>
+              <p className="mt-1 text-xs text-[var(--muted)]">{eligibility.reason}</p>
             </Field>
             <Field label="Evaluated">
               <p className="text-sm">{formatTimestamp(eligibility.evaluatedAt)}</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted)]">
                 This is a point-in-time classification, not an execution authorization.
               </p>
             </Field>
           </div>
 
           {eligibility.refusals.length > 0 ? (
-            <details className="rounded-lg border bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+            <details className="rounded-lg border bg-[var(--elevated)] p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
               <summary className="cursor-pointer font-medium">
                 Classification refusals ({eligibility.refusals.length})
               </summary>
@@ -739,7 +739,7 @@ export function HandoverRecoveryPanel({
           ) : null}
 
           {!eligible && ordered.length === 0 ? (
-            <p className="inline-flex items-start gap-2 rounded-lg border bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+            <p className="inline-flex items-start gap-2 rounded-lg border bg-[var(--elevated)] p-3 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
               No recovery intent can be requested while the classifier reports this
               classification. The refusal list above is the evidence that blocks it.
@@ -760,7 +760,7 @@ export function HandoverRecoveryPanel({
               ) : null}
 
               {ordered.length === 0 ? (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-[var(--muted)]">
                   No recovery intent has been recorded for this handover.
                 </p>
               ) : (

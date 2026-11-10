@@ -105,15 +105,15 @@ router.refresh();
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 dark:bg-slate-950">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4 dark:bg-slate-950">
+      <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-xl dark:border-slate-800 dark:bg-slate-900">
 
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
             ShiftChange 2.0
           </h1>
 
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-sm text-[var(--muted)] dark:text-slate-400">
             Sign in to your account
           </p>
         </div>
@@ -183,7 +183,7 @@ router.refresh();
           </button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-xs text-[var(--muted)]">
           Accounts are created by your administrator.
         </p>
 

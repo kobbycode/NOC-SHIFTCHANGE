@@ -394,7 +394,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
         <p className="text-sm text-slate-600">
           Loading technician pairs...
         </p>
@@ -404,7 +404,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div>
           <h2 className="text-lg font-semibold text-slate-950">
             Permanent Technician Pairs
@@ -433,7 +433,7 @@ export function SupervisorTechnicianPairWorkspace() {
             creating ||
             deactivatingPairId !== null
           }
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg border border-slate-300 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-[var(--elevated)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {refreshing
             ? "Refreshing..."
@@ -441,7 +441,7 @@ export function SupervisorTechnicianPairWorkspace() {
         </button>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div>
           <h3 className="font-semibold text-slate-950">
             Create Permanent Pair
@@ -485,7 +485,7 @@ export function SupervisorTechnicianPairWorkspace() {
                     refreshing ||
                     deactivatingPairId !== null
                   }
-                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-[var(--elevated)] disabled:text-[var(--muted)]"
                 >
                   <option value="">
                     Select technician A
@@ -523,7 +523,7 @@ export function SupervisorTechnicianPairWorkspace() {
                     refreshing ||
                     deactivatingPairId !== null
                   }
-                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-[var(--surface)] px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-[var(--elevated)] disabled:text-[var(--muted)]"
                 >
                   <option value="">
                     Select technician B
@@ -572,7 +572,7 @@ export function SupervisorTechnicianPairWorkspace() {
                   : "Create pair"}
               </button>
 
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted)]">
                 The server revalidates both technicians before
                 reserving the permanent pair.
               </p>
@@ -610,7 +610,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
       {!error &&
       pairs.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-[var(--surface)] p-8 text-center">
           <h3 className="font-medium text-slate-900">
             No technician pairs yet
           </h3>
@@ -628,7 +628,7 @@ export function SupervisorTechnicianPairWorkspace() {
           {pairs.map((pair) => (
             <article
               key={pair.id}
-              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -644,19 +644,19 @@ export function SupervisorTechnicianPairWorkspace() {
                     )}
                   </h3>
 
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-[var(--muted)]">
                     Pair ID: {pair.id}
                   </p>
                 </div>
 
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
+                <span className="rounded-full border border-[var(--border)] bg-[var(--elevated)] px-3 py-1 text-xs font-medium text-slate-700">
                   {statusLabel(pair)}
                 </span>
               </div>
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-lg bg-slate-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <div className="rounded-lg bg-[var(--elevated)] p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
                     Technician A
                   </p>
 
@@ -667,13 +667,13 @@ export function SupervisorTechnicianPairWorkspace() {
                     )}
                   </p>
 
-                  <p className="mt-1 break-all text-xs text-slate-500">
+                  <p className="mt-1 break-all text-xs text-[var(--muted)]">
                     {pair.technicianIds[0]}
                   </p>
                 </div>
 
-                <div className="rounded-lg bg-slate-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <div className="rounded-lg bg-[var(--elevated)] p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
                     Technician B
                   </p>
 
@@ -684,7 +684,7 @@ export function SupervisorTechnicianPairWorkspace() {
                     )}
                   </p>
 
-                  <p className="mt-1 break-all text-xs text-slate-500">
+                  <p className="mt-1 break-all text-xs text-[var(--muted)]">
                     {pair.technicianIds[1]}
                   </p>
                 </div>
@@ -692,7 +692,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
               <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <dt className="text-slate-500">
+                  <dt className="text-[var(--muted)]">
                     Created
                   </dt>
                   <dd className="mt-1 text-slate-900">
@@ -703,7 +703,7 @@ export function SupervisorTechnicianPairWorkspace() {
                 </div>
 
                 <div>
-                  <dt className="text-slate-500">
+                  <dt className="text-[var(--muted)]">
                     Updated
                   </dt>
                   <dd className="mt-1 text-slate-900">
@@ -715,7 +715,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
                 {pair.deactivatedAt ? (
                   <div>
-                    <dt className="text-slate-500">
+                    <dt className="text-[var(--muted)]">
                       Deactivated
                     </dt>
                     <dd className="mt-1 text-slate-900">
@@ -728,7 +728,7 @@ export function SupervisorTechnicianPairWorkspace() {
 
                 {pair.deactivatedBy ? (
                   <div>
-                    <dt className="text-slate-500">
+                    <dt className="text-[var(--muted)]">
                       Deactivated by
                     </dt>
                     <dd className="mt-1 break-all text-slate-900">
@@ -740,8 +740,8 @@ export function SupervisorTechnicianPairWorkspace() {
 
               {pair.status ===
               TECHNICIAN_PAIR_STATUSES.ACTIVE ? (
-                <div className="mt-5 border-t border-slate-200 pt-4">
-                  <p className="text-xs leading-5 text-slate-500">
+                <div className="mt-5 border-t border-[var(--border)] pt-4">
+                  <p className="text-xs leading-5 text-[var(--muted)]">
                     Deactivation preserves this historical pair
                     record and does not mark either technician
                     absent, present, blocked, or revoked.
@@ -759,7 +759,7 @@ export function SupervisorTechnicianPairWorkspace() {
                       creating ||
                       deactivatingPairId !== null
                     }
-                    className="mt-3 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-3 rounded-lg border border-red-300 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {deactivatingPairId ===
                     pair.id

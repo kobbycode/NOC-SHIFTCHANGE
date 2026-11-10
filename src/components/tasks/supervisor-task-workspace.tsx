@@ -785,8 +785,8 @@ export function SupervisorTaskWorkspace() {
           flex min-h-64
           items-center justify-center
           rounded-2xl
-          border border-slate-200
-          bg-white
+          border border-[var(--border)]
+          bg-[var(--surface)]
           dark:border-slate-800
           dark:bg-slate-950
         "
@@ -804,7 +804,7 @@ export function SupervisorTaskWorkspace() {
 
           <p
             className="
-              text-sm text-slate-500
+              text-sm text-[var(--muted)]
               dark:text-slate-400
             "
           >
@@ -840,7 +840,7 @@ export function SupervisorTaskWorkspace() {
           <p
             className="
               mt-1 text-sm
-              text-slate-500
+              text-[var(--muted)]
               dark:text-slate-400
             "
           >
@@ -902,12 +902,12 @@ export function SupervisorTaskWorkspace() {
             className="
               inline-flex items-center
               gap-2 rounded-xl
-              border border-slate-200
+              border border-[var(--border)]
               px-4 py-2 text-sm
               font-medium
               text-slate-700
               transition-colors
-              hover:bg-slate-100
+              hover:bg-[var(--elevated)]
               disabled:cursor-not-allowed
               disabled:opacity-50
               dark:border-slate-700
@@ -1184,8 +1184,8 @@ export function SupervisorTaskWorkspace() {
           className="
             flex items-center gap-4
             rounded-2xl
-            border border-slate-200
-            bg-white p-5
+            border border-[var(--border)]
+            bg-[var(--surface)] p-5
             dark:border-slate-800
             dark:bg-slate-950
           "
@@ -1208,7 +1208,7 @@ export function SupervisorTaskWorkspace() {
           <div>
             <p
               className="
-                text-sm text-slate-500
+                text-sm text-[var(--muted)]
                 dark:text-slate-400
               "
             >
@@ -1237,7 +1237,7 @@ export function SupervisorTaskWorkspace() {
               rounded-2xl
               border border-dashed
               border-slate-300
-              bg-white p-12
+              bg-[var(--surface)] p-12
               text-center
               dark:border-slate-700
               dark:bg-slate-950
@@ -1265,7 +1265,7 @@ export function SupervisorTaskWorkspace() {
             <p
               className="
                 mt-2 text-sm
-                text-slate-500
+                text-[var(--muted)]
                 dark:text-slate-400
               "
             >
@@ -1342,7 +1342,7 @@ export function SupervisorTaskWorkspace() {
                         className="
                           space-y-4
                           border-t
-                          border-slate-200
+                          border-[var(--border)]
                           pt-4
                           dark:border-slate-800
                         "
@@ -1363,7 +1363,7 @@ export function SupervisorTaskWorkspace() {
                             className="
                               mt-1
                               text-sm
-                              text-slate-500
+                              text-[var(--muted)]
                               dark:text-slate-400
                             "
                           >
@@ -1556,7 +1556,7 @@ export function SupervisorTaskWorkspace() {
                                   rounded-xl
                                   border
                                   border-slate-300
-                                  bg-white
+                                  bg-[var(--surface)]
                                   px-4 py-3
                                   text-sm
                                   text-slate-900
@@ -1575,7 +1575,7 @@ export function SupervisorTaskWorkspace() {
                               <p
                                 className="
                                   text-xs
-                                  text-slate-500
+                                  text-[var(--muted)]
                                   dark:text-slate-400
                                 "
                               >
@@ -1610,12 +1610,12 @@ export function SupervisorTaskWorkspace() {
                                   rounded-xl
                                   border
                                   border-slate-300
-                                  bg-white
+                                  bg-[var(--surface)]
                                   px-4 py-3
                                   text-sm
                                   font-semibold
                                   text-slate-700
-                                  hover:bg-slate-100
+                                  hover:bg-[var(--elevated)]
                                   disabled:cursor-not-allowed
                                   disabled:opacity-50
                                   dark:border-slate-700
@@ -1692,7 +1692,7 @@ export function SupervisorTaskWorkspace() {
                         className="
                           space-y-4
                           border-t
-                          border-slate-200
+                          border-[var(--border)]
                           pt-4
                           dark:border-slate-800
                         "
@@ -1815,7 +1815,7 @@ export function SupervisorTaskWorkspace() {
                                   rounded-xl
                                   border
                                   border-slate-300
-                                  bg-white
+                                  bg-[var(--surface)]
                                   px-4 py-3
                                   text-sm
                                   text-slate-900
@@ -1834,7 +1834,7 @@ export function SupervisorTaskWorkspace() {
                               <p
                                 className="
                                   text-xs
-                                  text-slate-500
+                                  text-[var(--muted)]
                                   dark:text-slate-400
                                 "
                               >
@@ -1866,12 +1866,12 @@ export function SupervisorTaskWorkspace() {
                                   rounded-xl
                                   border
                                   border-slate-300
-                                  bg-white
+                                  bg-[var(--surface)]
                                   px-4 py-3
                                   text-sm
                                   font-semibold
                                   text-slate-700
-                                  hover:bg-slate-100
+                                  hover:bg-[var(--elevated)]
                                   disabled:cursor-not-allowed
                                   disabled:opacity-50
                                   dark:border-slate-700

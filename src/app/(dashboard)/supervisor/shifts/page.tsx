@@ -28,7 +28,7 @@ export default async function SupervisorShiftsPage() {
         <p
           className="
             mt-2 text-sm
-            text-slate-500
+            text-[var(--muted)]
             dark:text-slate-400
           "
         >

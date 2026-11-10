@@ -11,7 +11,7 @@ export default function TechnicianDashboardPage() {
           Technician Overview
         </h1>
 
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mt-1 text-sm text-[var(--muted)] dark:text-slate-400">
           Your shift, attendance, and assigned responsibilities.
         </p>
       </div>

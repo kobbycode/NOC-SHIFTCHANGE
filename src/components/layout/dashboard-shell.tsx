@@ -96,7 +96,7 @@ export function DashboardShell({
   return (
     <div
       className="
-        min-h-screen overflow-x-clip bg-[var(--surface)]
+        min-h-screen overflow-x-clip bg-[var(--background)]
         text-[var(--foreground)]
         dark:bg-[var(--midnight)]
         dark:text-[var(--foreground)]

@@ -8,7 +8,7 @@ export default function UnauthorizedPage() {
         Access denied
       </h1>
 
-      <p className="max-w-md text-slate-500">
+      <p className="max-w-md text-[var(--muted)]">
         Your account does not have permission to access
         this section.
       </p>

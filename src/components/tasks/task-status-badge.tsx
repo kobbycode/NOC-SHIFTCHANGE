@@ -14,7 +14,7 @@ interface TaskStatusBadgeProps {
 const STATUS_STYLES:
   Record<TaskStatus, string> = {
     [TASK_STATUSES.OPEN]:
-      "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+      "bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200",
 
     [TASK_STATUSES.IN_PROGRESS]:
       "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
