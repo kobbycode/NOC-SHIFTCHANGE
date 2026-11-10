@@ -128,6 +128,42 @@ option:disabled {
   color: var(--muted);
 }
 
+/* Route loading indicator: an indeterminate gold sweep, since the fallback
+   cannot know how long the server render will take. */
+@keyframes page-loading-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(350%);
+  }
+}
+
+.page-loading-track {
+  position: relative;
+  overflow: hidden;
+}
+
+.page-loading-track::after {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 30%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  content: "";
+  animation: page-loading-sweep 1.4s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-loading-track::after {
+    width: 100%;
+    animation: none;
+    background: var(--accent);
+  }
+}
+
 /* Tailwind theme configuration */
 @theme inline {
   --color-background: var(--background);
