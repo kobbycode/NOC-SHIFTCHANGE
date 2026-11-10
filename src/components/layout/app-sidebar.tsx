@@ -56,7 +56,8 @@ function getMostSpecificMatch(
   currentSection: string | null,
   items: NavigationItem[],
 ): NavigationItem | null {
-  let workspaceRoot: NavigationItem | null = null;
+  let best: NavigationItem | null = null;
+  let bestLength = -1;
 
   for (const item of items) {
     if (!item.implemented) continue;
@@ -75,14 +76,15 @@ function getMostSpecificMatch(
       continue;
     }
 
-    // The workspace root stays highlighted for sections that have no
-    // dedicated sidebar entry.
-    if (!workspaceRoot) {
-      workspaceRoot = item;
+    // The dashboard root also matches every child path, so the longest
+    // matching path is the page actually being shown.
+    if (path.length > bestLength) {
+      best = item;
+      bestLength = path.length;
     }
   }
 
-  return workspaceRoot;
+  return best;
 }
 
 const DESKTOP_NAV_QUERY = "(min-width: 1024px)";
