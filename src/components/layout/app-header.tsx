@@ -123,7 +123,7 @@ export function AppHeader({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+      <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />
 
         {role === "technician" ? (
@@ -132,26 +132,24 @@ export function AppHeader({
           <div
             title="Notifications will be available in a later phase"
             className="
-              flex h-11 w-11 items-center justify-center
-              rounded-xl text-[var(--muted)]
+              grid size-8 place-items-center text-[var(--muted)]
+              pointer-coarse:size-11
             "
           >
-            <Bell size={20} />
+            <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
           </div>
         )}
 
         <div
           className="
-            flex h-11 w-11 items-center justify-center
+            grid size-8 place-items-center
             rounded-full bg-[var(--accent)]
             text-[var(--accent-foreground)]
-            dark:bg-[var(--accent)]
-            dark:text-[var(--accent-foreground)]
           "
           role="img"
           aria-label="User profile"
         >
-          <UserRound size={20} />
+          <UserRound size={16} strokeWidth={1.75} aria-hidden="true" />
         </div>
       </div>
     </header>

@@ -2,9 +2,8 @@
 
 // TECH-HO-RECOVERY-09L — technician notification bell + inbox popover.
 //
-// Renders the original inert stub whenever notifications are disabled, so the
-// live isolated UAT and every existing flow are byte-for-byte unchanged. In
-// emulator mode the bell degrades to the durable in-app inbox (push
+// Renders an inert stub whenever notifications are disabled. In emulator mode
+// the bell degrades to the durable in-app inbox (push
 // registration is hidden); a real project additionally offers push enablement.
 // Tapping an item marks it read (display metadata ONLY) and navigates to
 // the deep link; the protected action still happens inside the authenticated app.
@@ -75,9 +74,9 @@ export function NotificationBell() {
     return (
       <div
         title="Notifications will be available in a later phase"
-        className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--muted)]"
+        className="grid size-8 place-items-center text-[var(--muted)] pointer-coarse:size-11"
       >
-        <Bell size={20} />
+        <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
       </div>
     );
   }
@@ -111,11 +110,11 @@ export function NotificationBell() {
         onClick={() => void onToggle()}
         aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
         aria-expanded={open}
-        className="relative flex h-11 w-11 items-center justify-center rounded-xl text-[var(--muted)] transition-colors hover:bg-[var(--elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        className="relative grid size-8 place-items-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] pointer-coarse:size-11"
       >
-        <Bell size={20} />
+        <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
         {unread > 0 && (
-          <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-[var(--accent-foreground)]">
+          <span className="absolute right-0 top-0 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--accent)] px-0.5 text-[10px] font-semibold text-[var(--accent-foreground)] pointer-coarse:right-1.5 pointer-coarse:top-1.5">
             {unread > 9 ? "9+" : unread}
           </span>
         )}

@@ -27,7 +27,7 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <div className="h-11 w-11" aria-hidden="true" />
+      <div className="size-8 pointer-coarse:size-11" aria-hidden="true" />
     );
   }
 
@@ -40,10 +40,9 @@ export function ThemeToggle() {
         setTheme(isDark ? "light" : "dark")
       }
       className="
-        flex h-11 w-11 items-center justify-center
-        rounded-xl border border-[var(--border)]
-        bg-[var(--surface)] text-[var(--foreground)]
-        transition-[background-color,color,border-color,transform]
+        grid size-8 place-items-center rounded-lg text-[var(--muted)]
+        pointer-coarse:size-11
+        transition-[background-color,color,transform]
         duration-[160ms] ease-atelier
         hover:bg-[var(--elevated)]
         active:scale-[0.96]
@@ -63,9 +62,9 @@ export function ThemeToggle() {
       }
     >
       {isDark ? (
-        <Sun size={19} />
+        <Sun size={16} strokeWidth={1.75} aria-hidden="true" />
       ) : (
-        <Moon size={19} />
+        <Moon size={16} strokeWidth={1.75} aria-hidden="true" />
       )}
     </button>
   );
