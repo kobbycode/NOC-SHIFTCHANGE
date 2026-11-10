@@ -4,11 +4,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-import { RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { LifeBuoy, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import {
   HANDOVER_REVIEW_CASE_STATUSES,
@@ -29,6 +30,12 @@ import { HandoverRecoveryPanel } from "@/components/operations/handover-recovery
 const ADJUDICATION_CONFIRMATION_TEXT =
   "This records an investigative finding. It does not reopen the original case, alter technician evidence, or recover the handover.";
 
+const panelClass = "rounded-2xl border border-[var(--border)] bg-[var(--surface)]";
+const secondaryButtonClass =
+  "min-h-11 rounded-lg border border-[var(--border)] text-sm font-medium hover:bg-[var(--elevated)] focus-visible:outline-2 focus-visible:outline-[var(--foreground)] disabled:opacity-50";
+const inputClass =
+  "mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--elevated)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
+
 const CLASSIFICATION_LABELS: Record<HandoverReviewClassification, string> = {
   not_reviewable: "Not reviewable",
   not_activated: "Not activated",
@@ -42,8 +49,8 @@ const CLASSIFICATION_LABELS: Record<HandoverReviewClassification, string> = {
 };
 
 const CLASSIFICATION_STYLES: Record<HandoverReviewClassification, string> = {
-  not_reviewable: "bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  not_activated: "bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  not_reviewable: "bg-[var(--elevated)] text-[var(--foreground)]",
+  not_activated: "bg-[var(--elevated)] text-[var(--foreground)]",
   awaiting_first_acceptance: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
   awaiting_partner_acceptance: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
   eligible_for_normal_closure: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200",
@@ -246,22 +253,23 @@ function Badge({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <div className="mt-1 text-sm text-slate-800 dark:text-slate-100">{children}</div>
+      <p className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">{label}</p>
+      <div className="mt-1 text-sm text-[var(--foreground)]">{children}</div>
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border bg-[var(--surface)] p-5 shadow-sm dark:bg-slate-950">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{title}</h3>
+    <section className={`p-4 sm:p-5 ${panelClass}`}>
+      <h3 className="font-semibold">{title}</h3>
       <div className="mt-4">{children}</div>
     </section>
   );
 }
 
 export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
+  const recoveryDialog = useRef<HTMLDialogElement>(null);
   const [queue, setQueue] = useState<HandoverReviewQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueError, setQueueError] = useState("");
@@ -599,152 +607,193 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="space-y-5 sm:space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Handover Review</h1>
-          <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-            Investigate exceptions in completed handovers and record administrative
-            findings. This workspace is read-only for operational evidence: it cannot
-            create acceptance, attendance, guard closure or historical proof.
+          <p className="text-xs font-semibold tracking-wider text-[var(--muted)] uppercase">
+            Administration
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Handover Review</h1>
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+            Inspect completed handovers and record administrative findings. Operational evidence is read-only.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => {
-            setQueueLoading(true);
-            void loadQueue(selectedId);
-            void reloadDetail();
-          }}
-          className="inline-flex items-center gap-2 rounded-lg border bg-[var(--surface)] px-3 py-2 text-sm font-medium shadow-sm hover:bg-[var(--elevated)] dark:bg-slate-950 dark:hover:bg-slate-900"
+          aria-haspopup="dialog"
+          onClick={() => recoveryDialog.current?.showModal()}
+          className="btn-accent inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold"
         >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
+          <LifeBuoy size={17} aria-hidden="true" />
+          Find stalled handover
         </button>
       </header>
 
-      {queueError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          {queueError}
+      <dialog
+        ref={recoveryDialog}
+        aria-labelledby="handover-recovery-title"
+        className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-2xl backdrop:bg-black/60 sm:p-6"
+      >
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--accent)] text-[var(--accent-foreground)]">
+            <LifeBuoy size={19} aria-hidden="true" />
+          </span>
+          <h2 id="handover-recovery-title" className="text-lg font-semibold">Find stalled handover</h2>
         </div>
-      ) : null}
-
-      <section className="rounded-xl border bg-[var(--surface)] p-5 shadow-sm dark:bg-slate-950">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-          Recovery for a stalled handover
-        </h2>
-        <p className="mt-1 max-w-3xl text-xs text-[var(--muted)]">
-          A stalled handover is not always an exception in the review queue below, so it can also be
-          opened directly by its handover document id, exactly as the recovery runbook does. The
-          classifier decides whether recovery is possible; this form only selects the record.
+        <p className="mt-3 text-sm text-[var(--muted)]">
+          Look up a handover that may be missing from the review queue. The recovery panel checks its eligibility.
         </p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
             const trimmed = recoveryDocumentId.trim();
-            if (trimmed) setRecoveryTarget(trimmed);
+            if (!trimmed) return;
+            setRecoveryTarget(trimmed);
+            recoveryDialog.current?.close();
           }}
-          className="mt-3 flex flex-wrap items-end gap-3"
+          className="mt-4 space-y-4"
         >
-          <label className="min-w-[260px] flex-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-            Handover document id
+          <label className="block text-sm font-medium">
+            Handover document ID
             <input
+              required
               value={recoveryDocumentId}
               onChange={(event) => setRecoveryDocumentId(event.target.value)}
               placeholder="handover_v2_…"
-              className="mt-1 w-full rounded-lg border px-3 py-2 font-mono text-sm dark:bg-slate-900"
+              className={`font-mono ${inputClass}`}
             />
           </label>
-          <button
-            type="submit"
-            disabled={recoveryDocumentId.trim().length === 0}
-            className="rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50"
-          >
-            Open recovery
-          </button>
-          {recoveryTarget ? (
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => recoveryDialog.current?.close()}
+              className={`px-4 ${secondaryButtonClass}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={recoveryDocumentId.trim().length === 0}
+              className="btn-accent min-h-11 rounded-lg px-4 text-sm font-semibold disabled:opacity-50"
+            >
+              Open recovery
+            </button>
+          </div>
+        </form>
+      </dialog>
+
+      {recoveryTarget && (
+        <section aria-labelledby="direct-recovery-title" className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="direct-recovery-title" className="font-semibold">Direct recovery lookup</h2>
             <button
               type="button"
               onClick={() => {
                 setRecoveryTarget("");
                 setRecoveryDocumentId("");
               }}
-              className="rounded-lg border px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300"
+              className={`px-4 ${secondaryButtonClass}`}
             >
               Close recovery
             </button>
-          ) : null}
-        </form>
-        {recoveryTarget ? (
-          <div className="mt-4">
-            <HandoverRecoveryPanel
-              handoverDocumentId={recoveryTarget}
-              actorUid={actorUid}
-              actorRole="admin"
-            />
           </div>
-        ) : null}
-      </section>
+          <HandoverRecoveryPanel
+            handoverDocumentId={recoveryTarget}
+            actorUid={actorUid}
+            actorRole="admin"
+          />
+        </section>
+      )}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-        <aside className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-              Review queue
-            </h2>
-            <span className="text-xs text-slate-400">{queue.length} case(s)</span>
+      <div className={`grid items-start gap-4 ${selectedId ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]" : ""}`}>
+        <section aria-labelledby="review-queue-title" className={`min-w-0 overflow-hidden ${panelClass}`}>
+          <div className="flex items-center justify-between gap-3 p-4 sm:px-5">
+            <div>
+              <h2 id="review-queue-title" className="font-semibold">Review queue</h2>
+              {((!queueLoading && !queueError) || queue.length > 0) && (
+                <p className="mt-1 text-sm tabular-nums text-[var(--muted)]">
+                  {queue.length} {queue.length === 1 ? "case" : "cases"}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              aria-label="Refresh review queue"
+              disabled={queueLoading}
+              onClick={() => {
+                setQueueLoading(true);
+                void loadQueue(selectedId);
+                void reloadDetail();
+              }}
+              className={`grid size-11 shrink-0 place-items-center ${secondaryButtonClass}`}
+            >
+              <RefreshCw size={18} aria-hidden="true" className={queueLoading ? "motion-safe:animate-spin" : undefined} />
+            </button>
           </div>
 
-          {queueLoading ? (
-            <p className="rounded-xl border bg-[var(--surface)] p-4 text-sm text-[var(--muted)] dark:bg-slate-950">
+          {queueError && (
+            <p role="alert" className="border-t border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+              {queueError}
+            </p>
+          )}
+
+          {queueLoading && queue.length === 0 ? (
+            <p role="status" className="border-t border-[var(--border)] p-4 text-sm text-[var(--muted)]">
               Loading review queue…
             </p>
           ) : queue.length === 0 ? (
-            <div className="rounded-xl border bg-[var(--surface)] p-4 text-sm text-[var(--muted)] dark:bg-slate-950">
-              <p className="inline-flex items-center gap-2 font-medium text-emerald-700">
-                <ShieldCheck className="h-4 w-4" />
-                No handover exception is awaiting review.
-              </p>
-              <p className="mt-2">
-                Completed handovers are listed here for inspection after the shift
-                ends; exceptions and expired windows are ranked first.
-              </p>
-            </div>
+            !queueError && (
+              <div className="flex items-start gap-3 border-t border-[var(--border)] p-4 sm:p-5">
+                <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--elevated)] text-emerald-700 dark:text-emerald-300">
+                  <ShieldCheck size={19} aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">No handovers in the review queue</p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">
+                    Completed handovers appear here after the shift ends. Exceptions and expired joining windows appear first.
+                  </p>
+                </div>
+              </div>
+            )
           ) : (
-            <ul className="space-y-3">
+            <ul className="max-h-80 divide-y divide-[var(--border)] overflow-y-auto border-t border-[var(--border)] xl:max-h-[36rem]">
               {queue.map((item) => {
                 const selected = item.handoverDocumentId === selectedId;
                 return (
                   <li key={item.handoverDocumentId}>
                     <button
                       type="button"
+                      aria-pressed={selected}
                       onClick={() => {
-                        if (item.handoverDocumentId === selectedId) return;
+                        if (selected) return;
                         resetDecisionForm();
+                        setDetailError("");
                         setDetailLoading(true);
                         setSelectedId(item.handoverDocumentId);
                       }}
-                      className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${
+                      className={`w-full border-l-2 px-4 py-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--foreground)] sm:px-5 ${
                         selected
-                          ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
-                          : "bg-[var(--surface)] hover:border-slate-300 dark:bg-slate-950"
+                          ? "border-[var(--accent)] bg-[var(--elevated)]"
+                          : "border-transparent hover:bg-[var(--elevated)]"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <Badge tone={CLASSIFICATION_STYLES[item.classification]}>
-                          {CLASSIFICATION_LABELS[item.classification]}
-                        </Badge>
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                        <p className="text-sm font-semibold">
+                          {item.shiftType === "night" ? "Night" : "Morning"} handover
+                        </p>
                         <span className="text-xs font-medium text-[var(--muted)]">
                           {CASE_STATUS_LABELS[item.caseStatus]}
                         </span>
                       </div>
-                      <p className="mt-3 text-sm font-semibold">
-                        {item.shiftType === "night" ? "Night" : "Morning"} handover
-                      </p>
                       <p className="mt-1 text-xs text-[var(--muted)]">
                         {formatTimestamp(item.scheduledStart)} → {formatTimestamp(item.scheduledEnd)}
                       </p>
-                      <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="mt-2">
+                        <Badge tone={CLASSIFICATION_STYLES[item.classification]}>
+                          {CLASSIFICATION_LABELS[item.classification]}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-xs text-[var(--muted)]">
                         {item.reviewReasons[0]?.message ??
                           "No review reason is raised; this completion is fully proven."}
                       </p>
@@ -754,35 +803,31 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               })}
             </ul>
           )}
-        </aside>
+        </section>
 
-        <main className="space-y-5">
-          {!selectedId ? (
-            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
-              Select a review case to inspect its authoritative evidence.
-            </div>
-          ) : detailLoading && review === null ? (
-            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
+        <section aria-label="Case evidence" hidden={!selectedId} className="min-w-0 space-y-5">
+          {!selectedId ? null : detailLoading && review === null ? (
+            <p role="status" className={`p-5 text-sm text-[var(--muted)] ${panelClass}`}>
               Loading case evidence…
-            </div>
+            </p>
           ) : detailError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
               {detailError}
-            </div>
+            </p>
           ) : review === null ? (
-            <div className="rounded-xl border bg-[var(--surface)] p-6 text-sm text-[var(--muted)] dark:bg-slate-950">
+            <p className={`p-5 text-sm text-[var(--muted)] ${panelClass}`}>
               The case could not be displayed.
-            </div>
+            </p>
           ) : (
             <>
-              <section className="rounded-xl border bg-[var(--surface)] p-6 shadow-sm dark:bg-slate-950">
+              <section className={`p-4 sm:p-5 ${panelClass}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone={CLASSIFICATION_STYLES[review.classification]}>
                         {CLASSIFICATION_LABELS[review.classification]}
                       </Badge>
-                      <Badge tone="bg-[var(--elevated)] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <Badge tone="bg-[var(--elevated)] text-[var(--foreground)]">
                         Case: {CASE_STATUS_LABELS[review.caseStatus]}
                       </Badge>
                       <span className="text-xs text-[var(--muted)]">
@@ -838,7 +883,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         </p>
                       </>
                     ) : (
-                      <p className="text-amber-700">No readable reservation guard.</p>
+                      <p className="text-amber-700 dark:text-amber-300">No readable reservation guard.</p>
                     )}
                   </Field>
                 </div>
@@ -861,7 +906,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       Activated at: {formatTimestamp(review.activation.activatedAt)}
                     </p>
                     {review.activation.message ? (
-                      <p className="mt-1 text-xs text-amber-700">{review.activation.message}</p>
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{review.activation.message}</p>
                     ) : null}
                   </Field>
                   <Field label="Frozen v2 report">
@@ -869,7 +914,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       Binding valid: {review.report.valid ? "yes" : "no"}
                     </p>
                     {review.report.message ? (
-                      <p className="mt-1 text-xs text-amber-700">{review.report.message}</p>
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{review.report.message}</p>
                     ) : null}
                   </Field>
                 </div>
@@ -880,9 +925,9 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                   {review.participants.map((participant) => (
                     <li
                       key={participant.position}
-                      className="rounded-lg border bg-[var(--elevated)] p-3 dark:bg-slate-900"
+                      className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3"
                     >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                         {POSITION_LABELS[participant.position] ?? participant.position}
                       </p>
                       <p className="mt-1 text-sm font-medium">
@@ -897,7 +942,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
                     <thead>
-                      <tr className="text-xs uppercase tracking-wide text-slate-400">
+                      <tr className="text-xs uppercase tracking-wide text-[var(--muted)]">
                         <th className="pb-2 pr-4">Technician</th>
                         <th className="pb-2 pr-4">Verification</th>
                         <th className="pb-2 pr-4">Receipt</th>
@@ -905,7 +950,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         <th className="pb-2">Declared not yet in</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    <tbody className="divide-y divide-[var(--border)]">
                       {review.applications.map((application) => (
                         <tr key={application.technicianUid} className="align-top">
                           <td className="py-3 pr-4">
@@ -971,7 +1016,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                 )}
                 {review.absences.length > 0 ? (
                   <div className="mt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                       Recorded absences
                     </p>
                     <ul className="mt-2 space-y-2 text-sm">
@@ -1011,7 +1056,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                   {adjudicationError ? (
                     <p
                       role="alert"
-                      className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                      className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
                     >
                       {adjudicationError}
                     </p>
@@ -1058,7 +1103,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                               </p>
                             </>
                           ) : (
-                            <p className="text-amber-700">
+                            <p className="text-amber-700 dark:text-amber-300">
                               No acknowledged closing decision is recorded for this case.
                             </p>
                           )}
@@ -1083,7 +1128,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
 
                       {adjudication.eligibility.evidenceReferences.length > 0 ? (
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                             Verified contradiction
                           </p>
                           <ul className="mt-2 space-y-2">
@@ -1123,7 +1168,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                 onChange={(event) => setAdjudicationFinding(event.target.value)}
                                 rows={3}
                                 maxLength={2000}
-                                className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                                className={inputClass}
                                 placeholder="Describe the contradiction you are recording."
                               />
                               <span className="text-xs text-[var(--muted)]">
@@ -1165,7 +1210,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   setAdjudicationAcknowledged(false);
                                   setAdjudicationError("");
                                 }}
-                                className="rounded-lg border bg-[var(--surface)] px-4 py-2 text-sm font-medium dark:bg-slate-950"
+                                className={`px-4 ${secondaryButtonClass}`}
                               >
                                 Cancel
                               </button>
@@ -1190,10 +1235,10 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           </div>
                         )
                       ) : (
-                        <p className="rounded-lg border bg-[var(--elevated)] p-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                        <p className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-sm text-[var(--muted)]">
                           {adjudication.eligibility.message}
                           {adjudication.eligibility.ineligibleCode ? (
-                            <span className="ml-2 font-mono text-[11px] text-slate-400">
+                            <span className="ml-2 font-mono text-[11px] text-[var(--muted)]">
                               {adjudication.eligibility.ineligibleCode}
                             </span>
                           ) : null}
@@ -1201,7 +1246,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                       )}
 
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                           Adjudication history ({adjudication.records.length})
                         </p>
                         {adjudication.records.length === 0 ? (
@@ -1213,7 +1258,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             {adjudication.records.map((record) => (
                               <li
                                 key={record.id}
-                                className="rounded-lg border bg-[var(--elevated)] p-3 text-sm dark:bg-slate-900"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-sm"
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="font-semibold">Adjudication recorded</p>
@@ -1226,11 +1271,11 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                                   Recorded by{" "}
                                   {record.actorRole === "admin" ? "an administrator" : record.actorRole}
                                 </p>
-                                <p className="mt-1 text-[11px] text-slate-400">
+                                <p className="mt-1 text-[11px] text-[var(--muted)]">
                                   {CLASSIFICATION_LABELS[record.originalDecisionClassification]} →{" "}
                                   {CLASSIFICATION_LABELS[record.currentClassification]}
                                 </p>
-                                <p className="text-[11px] text-slate-400">
+                                <p className="text-[11px] text-[var(--muted)]">
                                   Status: {record.status.replaceAll("_", " ")} · operational
                                   effect: {record.operationalEffect}
                                 </p>
@@ -1245,7 +1290,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               ) : null}
 
               <Section title="Administrative decision">
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-xs text-[var(--muted)]">
                   Decisions in this workspace only record administrative findings and
                   case status. They never change acceptance, attendance, guard,
                   activation or report evidence, and they cannot reopen an acceptance
@@ -1256,7 +1301,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                   <p
                     role="status"
                     aria-live="polite"
-                    className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
+                    className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
                   >
                     {decisionNotice}
                   </p>
@@ -1264,14 +1309,14 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                 {decisionError ? (
                   <p
                     role="alert"
-                    className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+                    className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
                   >
                     {decisionError}
                   </p>
                 ) : null}
 
                 {review.caseStatus === HANDOVER_REVIEW_CASE_STATUSES.CLOSED ? (
-                  <p className="mt-4 inline-flex items-center gap-2 rounded-lg border bg-[var(--surface)] p-3 text-sm text-slate-600 dark:bg-slate-950">
+                  <p className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--muted)]">
                     <ShieldCheck className="h-4 w-4 text-emerald-600" />
                     This review case is closed. No further administrative decision can
                     be recorded.
@@ -1289,7 +1334,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         onChange={(event) =>
                           setDecisionType(event.target.value as HandoverReviewDecisionType)
                         }
-                        className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                        className={inputClass}
                       >
                         {allowedDecisions.map((value) => (
                           <option key={value} value={value}>
@@ -1306,10 +1351,10 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                         onChange={(event) => setReason(event.target.value)}
                         rows={3}
                         maxLength={2000}
-                        className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                        className={inputClass}
                         placeholder="Explain what was reviewed and why this decision is appropriate."
                       />
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-[var(--muted)]">
                         10–2000 characters. Stored with your administrator identity.
                       </span>
                     </label>
@@ -1323,7 +1368,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           onChange={(event) => setFinding(event.target.value)}
                           rows={3}
                           maxLength={2000}
-                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                          className={inputClass}
                           placeholder="State the finding for the record."
                         />
                       </label>
@@ -1337,7 +1382,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           onChange={(event) => setResolutionSummary(event.target.value)}
                           rows={3}
                           maxLength={2000}
-                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                          className={inputClass}
                           placeholder="Summarize how the review is concluded without changing operational evidence."
                         />
                       </label>
@@ -1350,7 +1395,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                           value={escalationTarget}
                           onChange={(event) => setEscalationTarget(event.target.value)}
                           maxLength={120}
-                          className="mt-1 w-full rounded-lg border bg-[var(--surface)] px-3 py-2 dark:bg-slate-950"
+                          className={inputClass}
                           placeholder="Team or authority receiving the escalation."
                         />
                       </label>
@@ -1380,7 +1425,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                     {review.decisions.map((decision) => (
                       <li
                         key={decision.id}
-                        className="rounded-lg border bg-[var(--elevated)] p-3 text-sm dark:bg-slate-900"
+                        className="rounded-lg border border-[var(--border)] bg-[var(--elevated)] p-3 text-sm"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="font-semibold">{DECISION_LABELS[decision.decisionType]}</p>
@@ -1410,7 +1455,7 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
                             {decision.escalationTarget}
                           </p>
                         ) : null}
-                        <p className="mt-1 text-[11px] text-slate-400">
+                        <p className="mt-1 text-[11px] text-[var(--muted)]">
                           Classification: {CLASSIFICATION_LABELS[decision.classification]}
                         </p>
                       </li>
@@ -1420,14 +1465,14 @@ export function HandoverReviewWorkspace({ actorUid }: { actorUid: string }) {
               </Section>
 
               {review.caseRecord ? (
-                <p className="inline-flex items-center gap-2 text-xs text-slate-400">
+                <p className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
                   <TriangleAlert className="h-3.5 w-3.5" />
                   Case last updated {formatTimestamp(review.caseRecord.updatedAt)}
                 </p>
               ) : null}
             </>
           )}
-        </main>
+        </section>
       </div>
     </div>
   );
