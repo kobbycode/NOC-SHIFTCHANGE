@@ -2,8 +2,8 @@
 
 // TECH-HO-RECOVERY-09L — technician notification bell + inbox popover.
 //
-// Hidden whenever notifications are disabled. In emulator mode the bell
-// uses the durable in-app inbox (push
+// Links to the Notifications page when the inbox popover is disabled.
+// In emulator mode the bell uses the durable in-app inbox (push
 // registration is hidden); a real project additionally offers push enablement.
 // Tapping an item marks it read (display metadata ONLY) and navigates to
 // the deep link; the protected action still happens inside the authenticated app.
@@ -70,7 +70,17 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  if (!active) return null;
+  if (!active) {
+    return (
+      <Link
+        href="/technician/notifications"
+        aria-label="Notifications"
+        className="grid size-8 place-items-center rounded-lg text-[var(--muted)] transition-colors hover:bg-[var(--elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] pointer-coarse:size-11"
+      >
+        <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
+      </Link>
+    );
+  }
 
   async function onToggle() {
     const next = !open;
