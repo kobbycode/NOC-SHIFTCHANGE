@@ -16,10 +16,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const title = "ShiftChange 2.0";
+const description = "Technical Department Shift Management and Handover System";
+
 export const metadata: Metadata = {
-  title: "ShiftChange 2.0",
-  description:
-    "Technical Department Shift Management and Handover System",
+  title,
+  description,
+  openGraph: { title, description, type: "website", siteName: "ShiftChange" },
+  twitter: { card: "summary_large_image", title, description },
   // Serve and link the PWA manifest; without this link no page is installable
   // and Web Push cannot register its service worker against a manifest scope.
   manifest: "/manifest.webmanifest",
