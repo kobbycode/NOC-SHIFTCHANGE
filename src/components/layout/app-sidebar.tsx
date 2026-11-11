@@ -2,7 +2,9 @@
 
 import { useSyncExternalStore } from "react";
 
+import Image from "next/image";
 import Link from "next/link";
+import shiftChangeLogo from "@/app/icon.svg";
 
 import {
   usePathname,
@@ -12,7 +14,6 @@ import {
 import {
   LockKeyhole,
   LogOut,
-  RadioTower,
   X,
 } from "lucide-react";
 
@@ -180,15 +181,14 @@ export function AppSidebar({
           "
         >
           <div className="flex items-center gap-3">
-            <div
-              className="
-                flex h-11 w-11 items-center
-                justify-center rounded-xl
-                bg-[var(--accent)] text-[var(--accent-foreground)]
-              "
-            >
-              <RadioTower size={23} />
-            </div>
+            <Image
+              src={shiftChangeLogo}
+              alt=""
+              width={44}
+              height={44}
+              className="size-11 shrink-0"
+              unoptimized
+            />
 
             <div>
               <h1
