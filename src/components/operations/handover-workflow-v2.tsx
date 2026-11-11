@@ -290,12 +290,69 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
   const canAccept = isConsoleParticipant && guard !== null && acceptingUid !== "" &&
     !acceptedUids.includes(acceptingUid) && (isAwaitingAcceptance || isCompleted);
 
+  const pendingParticipants = POSITION_LABELS.filter(
+    ({ position }) => participantState(position) === "awaiting_confirmation",
+  );
+  const collecting = aggregate.lifecycleStatus === "collecting_confirmations";
+  let nextStep = "Review the handover evidence below.";
+  let action: { label: string; target: string } | undefined;
+
+  if (isCompleted) {
+    nextStep = "The incoming shift has been activated.";
+    if (isIncoming && guard) {
+      nextStep += " Check your acceptance status below.";
+      action = { label: "View acceptance", target: "handover-acceptance" };
+    }
+  } else if (isAwaitingAcceptance) {
+    nextStep = "Waiting for a reserved incoming technician to accept and activate the next shift.";
+    if (isConsoleParticipant && guard) {
+      action = { label: "Go to acceptance", target: "handover-acceptance" };
+    }
+  } else if (collecting) {
+    if (!aggregate.reportBinding || preparationDrifted) {
+      nextStep = preparationDrifted
+        ? "The evidence changed. The outgoing team needs to review and freeze an updated report."
+        : "The outgoing team needs to freeze the report before participants can confirm.";
+      if (isOutgoing) {
+        action = { label: "Go to report preparation", target: "handover-preparation" };
+      }
+    } else if (canConfirm) {
+      nextStep = "Review the frozen report and record your own confirmation.";
+      action = { label: "Go to your confirmation", target: "handover-confirmation" };
+    } else if (canCommit) {
+      nextStep = "The handover is ready for you to commit for incoming acceptance.";
+      action = { label: "Go to commit", target: "handover-commit" };
+    } else if (pendingParticipants.length > 0) {
+      nextStep = "Waiting for participant confirmations or supported absences.";
+    } else if (!readiness.ready || blockers.length > 0 || !guard) {
+      nextStep = "The outgoing team needs to resolve the remaining readiness checks.";
+    } else {
+      nextStep = "Waiting for a confirmed outgoing technician to commit the handover.";
+    }
+  }
+
   return <div className="space-y-6">
     <header className="space-y-1">
       <h1 className="text-2xl font-bold">Equal-technician handover report (v2)</h1>
       <p className="text-sm">Status: {aggregate.lifecycleStatus.replaceAll("_", " ")} · Revision {aggregate.revision} · Guard {guard ? "active" : "unavailable"}</p>
       <p className="text-sm">Scheduled {accra(aggregate.reservation.scheduledStart)} – {accra(aggregate.reservation.scheduledEnd)} (Africa/Accra)</p>
     </header>
+
+    <section aria-labelledby="handover-next-step" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+      <h2 id="handover-next-step" className="font-semibold">Next step</h2>
+      <p className="mt-1 text-sm text-[var(--muted)]">{nextStep}</p>
+      {collecting && pendingParticipants.length > 0 && (
+        <p className="mt-2 text-sm">
+          <span className="font-medium">Awaiting confirmation: </span>
+          {pendingParticipants.map(({ label, position }) => position === myPosition ? `${label} (you)` : label).join(", ")}
+        </p>
+      )}
+      {action && (
+        <a href={`#${action.target}`} className="btn-accent mt-3 inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-semibold">
+          {action.label}
+        </a>
+      )}
+    </section>
 
     {isCompleted && <section aria-label="Handover activated" className="rounded-xl border border-green-600 p-4 text-sm space-y-1">
       <h2 className="font-semibold text-green-800">Handover activated</h2>
@@ -316,7 +373,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <p className="mt-2 italic">Readiness is derived from authoritative evidence and is not a completed handover or a transfer authorization.</p>
     </section>
 
-    {myPosition && !isCompleted && !isAwaitingAcceptance && <section className="rounded-xl border p-5 space-y-2 text-sm">
+    {myPosition && !isCompleted && !isAwaitingAcceptance && <section id="handover-confirmation" className="scroll-mt-24 rounded-xl border p-5 space-y-2 text-sm">
       <h2 className="text-lg font-semibold">Your confirmation</h2>
       <p>Position: {POSITION_LABELS.find((item) => item.position === myPosition)?.label} · state: {participantState(myPosition).replaceAll("_", " ")}.</p>
       {myConfirmation && <p>You personally confirmed at {accra(myConfirmation.confirmedAt)} against the frozen report version bound to your confirmation.</p>}
@@ -356,7 +413,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
     {notice && <p className="text-sm text-green-700">{notice}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section className="space-y-3 rounded-xl border p-5">
+    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section id="handover-preparation" className="scroll-mt-24 space-y-3 rounded-xl border p-5">
       <h2 className="text-lg font-semibold">Outgoing technician actions</h2>
       <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void prepare(event.currentTarget as HTMLFormElement); }}>
         <label className="text-sm">Optional preparation note<input className={field} name="reason" maxLength={2000} placeholder="Why this revision is being prepared"/></label>
@@ -382,7 +439,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       <p className="text-sm">Confirm the handover for yourself using the &ldquo;Your confirmation&rdquo; section above.</p>
     </section>}
 
-    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section aria-label="Commit for incoming acceptance" className="space-y-3 rounded-xl border p-5">
+    {isOutgoing && !isCompleted && !isAwaitingAcceptance && <section id="handover-commit" aria-label="Commit for incoming acceptance" className="scroll-mt-24 space-y-3 rounded-xl border p-5">
       <h2 className="text-lg font-semibold">Commit for incoming acceptance</h2>
       <ul className="space-y-1 text-sm">
         <li>{aggregate.reportBinding !== null ? "• Consolidated report frozen" : "• Consolidated report not frozen yet"}</li>
@@ -404,7 +461,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
       {!isConfirmedOutgoing && !myConfirmation && !myAbsence && myPosition && <p className="text-sm">You have not confirmed yet — use the confirmation section above.</p>}
     </section>}
 
-    {isConsoleParticipant && (isAwaitingAcceptance || isCompleted) && (atomicAcceptanceEnabled
+    {isConsoleParticipant && (isAwaitingAcceptance || isCompleted) && <div id="handover-acceptance" className="scroll-mt-24">{atomicAcceptanceEnabled
       ? <IncomingAcceptanceAtomicPanel
           base={base}
           consoleUid={uid}
@@ -435,7 +492,7 @@ export function EqualHandoverWorkflowV2({ uid, initialState, atomicAcceptanceEna
         {acceptedUids.includes(acceptingUid) && <p className="text-sm text-green-700">This acceptance was recorded from this console. A further attempt for the same technician would replay it.</p>}
         {!canAccept && !acceptedUids.includes(acceptingUid) && <p className="text-sm text-neutral-600">Acceptance is available only for a reserved incoming technician of this pair on an active reservation.</p>}
         {acceptedSession && <HandoverSessionNotice session={acceptedSession.session} label={acceptedSession.label} />}
-      </section>)}
+      </section>}</div>}
 
     {!isOutgoing && !isIncoming && <div className="rounded-xl border p-4 text-sm">You are not a participant in this reserved pair. This report is read-only for you.</div>}
     {isIncoming && aggregate.lifecycleStatus === "collecting_confirmations" && <div className="rounded-xl border p-4 text-sm">You are an incoming technician for this reserved pair. Your report view is read-only until the outgoing pair commits the handover. You can confirm this handover for yourself in the &ldquo;Your confirmation&rdquo; section once the report is frozen; accepting and activating the incoming shift becomes available only after the commit.</div>}
