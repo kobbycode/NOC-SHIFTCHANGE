@@ -2,8 +2,8 @@
 
 // TECH-HO-RECOVERY-09L — technician notification bell + inbox popover.
 //
-// Renders an inert stub whenever notifications are disabled. In emulator mode
-// the bell degrades to the durable in-app inbox (push
+// Hidden whenever notifications are disabled. In emulator mode the bell
+// uses the durable in-app inbox (push
 // registration is hidden); a real project additionally offers push enablement.
 // Tapping an item marks it read (display metadata ONLY) and navigates to
 // the deep link; the protected action still happens inside the authenticated app.
@@ -70,16 +70,7 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  if (!active) {
-    return (
-      <div
-        title="Notifications will be available in a later phase"
-        className="grid size-8 place-items-center text-[var(--muted)] pointer-coarse:size-11"
-      >
-        <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
-      </div>
-    );
-  }
+  if (!active) return null;
 
   async function onToggle() {
     const next = !open;
@@ -104,7 +95,13 @@ export function NotificationBell() {
   }
 
   return (
-    <div ref={containerRef} className="relative">
+    <div
+      ref={containerRef}
+      className="sm:relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
       <button
         type="button"
         onClick={() => void onToggle()}
@@ -121,7 +118,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-80 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-xl dark:bg-[var(--midnight)]">
+        <div className="absolute right-3 top-full z-40 mt-2 w-[min(20rem,calc(100%-1.5rem))] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-xl sm:right-0 sm:top-auto sm:w-80 dark:bg-[var(--midnight)]">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
             <span className="text-sm font-semibold text-[var(--foreground)]">Notifications</span>
             <Link href="/technician/notifications" onClick={() => setOpen(false)} className="text-xs text-[var(--accent)] hover:underline">

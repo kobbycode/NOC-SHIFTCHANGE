@@ -24,13 +24,17 @@ import {
   AppHeader,
 } from "./app-header";
 
+import { SignOutDialog } from "./sign-out-dialog";
+
 interface DashboardShellProps {
   role: UserRole;
+  fullName: string;
   children: ReactNode;
 }
 
 export function DashboardShell({
   role,
+  fullName,
   children,
 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] =
@@ -38,6 +42,11 @@ export function DashboardShell({
 
   const pathname = usePathname();
   const pageContentRef = useRef<HTMLDivElement>(null);
+  const signOutDialog = useRef<HTMLDialogElement>(null);
+
+  function requestSignOut() {
+    signOutDialog.current?.showModal();
+  }
 
   useEffect(() => {
     // Close the mobile drawer when the route changes.
@@ -106,13 +115,16 @@ export function DashboardShell({
         role={role}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        onRequestSignOut={requestSignOut}
       />
 
       <div className="min-h-screen overflow-x-clip lg:pl-72 print:pl-0">
         <AppHeader
           role={role}
+          fullName={fullName}
           sidebarOpen={sidebarOpen}
           onMenuClick={() => setSidebarOpen(true)}
+          onRequestSignOut={requestSignOut}
         />
 
         <main
@@ -126,6 +138,8 @@ export function DashboardShell({
           </div>
         </main>
       </div>
+
+      <SignOutDialog dialogRef={signOutDialog} onSignedOut={() => setSidebarOpen(false)} />
     </div>
   );
 }

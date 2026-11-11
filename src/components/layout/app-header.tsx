@@ -1,10 +1,11 @@
 "use client";
 
 import {
-  Bell,
+  LogOut,
   Menu,
   UserRound,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import type { UserRole } from "@/types/auth";
 
@@ -28,22 +29,42 @@ import { usePathname } from "next/navigation";
 
 interface AppHeaderProps {
   role: UserRole;
+  fullName: string;
   sidebarOpen: boolean;
   onMenuClick: () => void;
+  onRequestSignOut: () => void;
 }
 
 export function AppHeader({
   role,
+  fullName,
   sidebarOpen,
   onMenuClick,
+  onRequestSignOut,
 }: AppHeaderProps) {
   const pathname = usePathname();
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  const accountButton = useRef<HTMLButtonElement>(null);
   const navigation = ROLE_NAVIGATION[role];
   const roleTitle = {
     admin: "Administrator",
     supervisor: "Supervisor",
     technician: "Technician",
   }[role];
+
+  useEffect(() => {
+    if (!accountOpen) return;
+
+    function closeOnOutsidePress(event: PointerEvent) {
+      if (event.target instanceof Node && !accountRef.current?.contains(event.target)) {
+        setAccountOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [accountOpen]);
 
   function getSectionTitle(
     path: string,
@@ -126,30 +147,59 @@ export function AppHeader({
       <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />
 
-        {role === "technician" ? (
-          <NotificationBell />
-        ) : (
-          <div
-            title="Notifications will be available in a later phase"
-            className="
-              grid size-8 place-items-center text-[var(--muted)]
-              pointer-coarse:size-11
-            "
-          >
-            <Bell size={16} strokeWidth={1.75} aria-hidden="true" />
-          </div>
-        )}
+        {role === "technician" && <NotificationBell />}
 
         <div
-          className="
-            grid size-8 place-items-center
-            rounded-full bg-[var(--accent)]
-            text-[var(--accent-foreground)]
-          "
-          role="img"
-          aria-label="User profile"
+          ref={accountRef}
+          className="relative"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setAccountOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (accountOpen && event.key === "Escape") {
+              setAccountOpen(false);
+              accountButton.current?.focus();
+            }
+          }}
         >
-          <UserRound size={16} strokeWidth={1.75} aria-hidden="true" />
+          <button
+            ref={accountButton}
+            type="button"
+            aria-label="Account"
+            aria-expanded={accountOpen}
+            aria-controls={accountOpen ? "dashboard-account-panel" : undefined}
+            onClick={() => setAccountOpen((open) => !open)}
+            className="group grid size-8 place-items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--foreground)] pointer-coarse:size-11"
+          >
+            <span className="grid size-8 place-items-center rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] group-hover:bg-[var(--accent-hover)]">
+              <UserRound size={16} strokeWidth={1.75} aria-hidden="true" />
+            </span>
+          </button>
+
+          {accountOpen && (
+            <div
+              id="dashboard-account-panel"
+              className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] shadow-lg"
+            >
+              <div className="border-b border-[var(--border)] px-4 py-3">
+                <p className="text-sm font-semibold wrap-anywhere">{fullName}</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">{roleTitle}</p>
+              </div>
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => {
+                  accountButton.current?.focus();
+                  setAccountOpen(false);
+                  onRequestSignOut();
+                }}
+                className="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left text-sm font-medium hover:bg-[var(--elevated)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--foreground)]"
+              >
+                <LogOut size={16} aria-hidden="true" />
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

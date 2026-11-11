@@ -14,10 +14,10 @@ export default async function AdminLayout({
 }: AdminLayoutProps) {
   // Only authenticated administrators can
   // access the administrator workspace.
-  await requireUser(["admin"]);
+  const user = await requireUser(["admin"]);
 
   return (
-    <DashboardShell role="admin">
+    <DashboardShell role="admin" fullName={user.fullName}>
       {children}
     </DashboardShell>
   );

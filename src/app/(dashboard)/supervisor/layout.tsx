@@ -23,7 +23,7 @@ export default async function SupervisorLayout({
    * remains authoritative.
    */
 
-  await requireUser(["supervisor"]);
+  const user = await requireUser(["supervisor"]);
 
   /*
    * Reuse the existing dashboard shell.
@@ -33,7 +33,7 @@ export default async function SupervisorLayout({
    */
 
   return (
-    <DashboardShell role="supervisor">
+    <DashboardShell role="supervisor" fullName={user.fullName}>
       {children}
     </DashboardShell>
   );

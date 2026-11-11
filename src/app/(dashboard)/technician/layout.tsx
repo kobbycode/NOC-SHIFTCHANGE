@@ -18,10 +18,10 @@ export default async function TechnicianLayout({
 }: TechnicianLayoutProps) {
   // Only authenticated technicians
   // can access this workspace.
-  await requireUser(["technician"]);
+  const user = await requireUser(["technician"]);
 
   return (
-    <DashboardShell role="technician">
+    <DashboardShell role="technician" fullName={user.fullName}>
       {children}
     </DashboardShell>
   );
