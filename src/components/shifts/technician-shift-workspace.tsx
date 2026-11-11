@@ -7,8 +7,10 @@ import {
   useState,
 } from "react";
 
+import Link from "next/link";
 import {
   AlertCircle,
+  ArrowUpRight,
   CalendarClock,
   CheckCircle2,
   Loader2,
@@ -458,19 +460,11 @@ export function TechnicianShiftWorkspace() {
     action !== null;
 
   return (
-    <section className="space-y-4">
+    <section aria-labelledby="my-shift-title" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-            My Shift
-          </h2>
-
-          <p className="mt-1 text-sm text-[var(--muted)] dark:text-slate-400">
-            Your authoritative current
-            operational shift and attendance
-            state.
-          </p>
-        </div>
+        <h2 id="my-shift-title" className="text-xl font-semibold">
+          My Shift
+        </h2>
 
         <button
           type="button"
@@ -480,7 +474,7 @@ export function TechnicianShiftWorkspace() {
           disabled={
             actionsDisabled
           }
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-[var(--elevated)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 text-sm font-medium hover:bg-[var(--elevated)] focus-visible:outline-2 focus-visible:outline-[var(--foreground)] disabled:opacity-60"
         >
           <RefreshCw
             className={
@@ -495,19 +489,6 @@ export function TechnicianShiftWorkspace() {
             : "Refresh"}
         </button>
       </div>
-
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-        >
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-
-          <span>
-            {error}
-          </span>
-        </div>
-      )}
 
       {actionError && (
         <div
@@ -554,32 +535,34 @@ export function TechnicianShiftWorkspace() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex min-h-48 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      {loading || (refreshing && !snapshot) ? (
+        <div role="status" className="flex min-h-40 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
           <div className="text-center">
-            <Loader2 className="mx-auto h-7 w-7 animate-spin text-[var(--muted)]" />
+            <Loader2 className="mx-auto size-6 text-[var(--muted)] motion-safe:animate-spin" aria-hidden="true" />
 
             <p className="mt-3 text-sm text-[var(--muted)] dark:text-slate-400">
               Loading your current shift...
             </p>
           </div>
         </div>
-      ) : !currentShift ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <CalendarClock className="mx-auto h-8 w-8 text-slate-400" />
-
-          <h3 className="mt-4 font-semibold text-slate-900 dark:text-white">
-            No current shift
-          </h3>
-
-          <p className="mt-2 text-sm text-[var(--muted)] dark:text-slate-400">
-            There is no current operational
-            shift assigned or authorized for
-            you.
-          </p>
+      ) : error || !currentShift ? (
+        <div
+          role={error ? "alert" : undefined}
+          className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-[var(--elevated)] text-[var(--muted)]">
+            {error ? <AlertCircle size={19} aria-hidden="true" /> : <CalendarClock size={19} aria-hidden="true" />}
+          </span>
+          <div>
+            <h3 className="font-semibold">{error ? "Unable to verify shift status" : "No current shift"}</h3>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {error ? "Select Refresh to check your shift status again." : "There is no current operational shift assigned or authorized for you."}
+            </p>
+            {error && <p className="mt-2 text-xs text-[var(--muted)]">{error}</p>}
+          </div>
         </div>
       ) : (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-[var(--muted)] dark:text-slate-400">
@@ -771,6 +754,16 @@ export function TechnicianShiftWorkspace() {
                   </p>
                 </div>
               </div>
+            )}
+
+            {currentShift.status === "active" && currentShift.attendance && writeAuthority?.mayWrite && (
+              <Link
+                href="/technician/operations"
+                className="btn-accent mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold"
+              >
+                Open Shift Operations
+                <ArrowUpRight size={16} aria-hidden="true" />
+              </Link>
             )}
 
             {!currentShift.attendance &&
